@@ -1,0 +1,288 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough, Writable } from 'node:stream';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  GrokBuildConnector,
+  type GrokBuildBillingClient
+} from '../../src/connectors/grok-build/grok-build-connector.js';
+import {
+  StdioGrokBillingClient,
+  type GrokBillingProcess
+} from '../../src/connectors/grok-build/stdio-grok-billing-client.js';
+import {
+  parseGrokHeadlessResult,
+  parseGrokOtlpMetrics
+} from '../../src/connectors/grok-build/grok-telemetry.js';
+
+describe('Grok Build official billing adapter', () => {
+  it('uses the official ACP billing capability without reading or forwarding OAuth tokens', async () => {
+    const process = new FakeGrokBillingProcess(billingFixture);
+    const client = new StdioGrokBillingClient({
+      command: '/usr/local/bin/grok',
+      spawnProcess(command, arguments_) {
+        expect(command).toBe('/usr/local/bin/grok');
+        expect(arguments_).toEqual(['agent', '--no-leader', 'stdio']);
+        return process;
+      },
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).resolves.toEqual(billingFixture);
+    expect(process.methods).toEqual(['initialize', 'x.ai/billing']);
+    expect(JSON.stringify(process.requests)).not.toContain('oauth');
+    expect(process.killed).toBe(true);
+  });
+
+  it('fails closed when the official client does not expose x.ai/billing', async () => {
+    const process = new FakeGrokBillingProcess(undefined, -32601);
+    const client = new StdioGrokBillingClient({
+      spawnProcess: () => process,
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).rejects.toMatchObject({
+      code: 'grok-billing-capability-unsupported',
+      recovery: 'Open Grok Build and run /usage, then update Grok Build before retrying.'
+    });
+  });
+});
+
+describe('GrokBuildConnector', () => {
+  it('maps the provider-native shared weekly pool without inventing a five-hour window', async () => {
+    const billingClient: GrokBuildBillingClient = {
+      async readBilling() {
+        return billingFixture;
+      }
+    };
+    const snapshot = await new GrokBuildConnector({
+      billingClient,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.billingDomains).toEqual([
+      {
+        id: 'grok-build-subscription',
+        displayName: 'Grok Build / SuperGrok shared pool'
+      }
+    ]);
+    expect(snapshot.quotaBuckets).toEqual([
+      {
+        id: 'grok-build:weekly',
+        billingDomainId: 'grok-build-subscription',
+        label: 'Weekly limit',
+        usedPercent: 61.2,
+        resetsAt: '2026-09-01T00:00:00.000Z',
+        authority: 'official-client',
+        scope: 'account-wide',
+        status: 'SuperGrok Heavy'
+      }
+    ]);
+    expect(snapshot.quotaBuckets.some((bucket) => bucket.label.includes('5 hour'))).toBe(false);
+  });
+
+  it('keeps the provider available with an actionable /usage recovery when billing is unavailable', async () => {
+    const billingClient: GrokBuildBillingClient = {
+      async readBilling() {
+        throw Object.assign(new Error('Billing capability changed.'), {
+          code: 'grok-billing-schema-changed',
+          recovery: 'Open Grok Build and run /usage, then update Agent Usage.'
+        });
+      }
+    };
+    const snapshot = await new GrokBuildConnector({ billingClient }).collect();
+
+    expect(snapshot.quotaBuckets).toEqual([]);
+    expect(snapshot.warnings).toEqual([
+      expect.objectContaining({
+        code: 'grok-billing-schema-changed',
+        recovery: expect.stringContaining('/usage')
+      })
+    ]);
+  });
+});
+
+describe('Grok Build usage observations', () => {
+  it('normalizes v1 alpha OTLP token types by model and session while discarding identity fields', () => {
+    const snapshot = parseGrokOtlpMetrics(grokOtlpFixture, new Date('2026-08-28T02:00:00.000Z'));
+
+    expect(snapshot.provider).toEqual({ id: 'grok', displayName: 'Grok' });
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        id: 'grok-otel:1756346400000000000:session-123:grok-build',
+        billingDomainId: 'grok-build-subscription',
+        model: 'grok-build',
+        sessionId: 'session-123',
+        inputTokens: 100,
+        outputTokens: 25,
+        reasoningTokens: 12,
+        cacheReadTokens: 400,
+        cacheWriteTokens: 0,
+        totalTokens: 525,
+        authority: 'local-observation'
+      })
+    ]);
+    expect(snapshot.costs).toEqual([]);
+    expect(JSON.stringify(snapshot)).not.toContain('person@example.com');
+  });
+
+  it('rejects unknown alpha OTLP schema versions instead of silently miscounting', () => {
+    const changed = structuredClone(grokOtlpFixture);
+    changed.resourceMetrics[0].resource.attributes[0].value.stringValue = 'v2';
+
+    expect(() => parseGrokOtlpMetrics(changed, new Date('2026-08-28T02:00:00.000Z'))).toThrow(
+      expect.objectContaining({ code: 'grok-otel-schema-unsupported' })
+    );
+  });
+
+  it('normalizes official headless JSON while treating absent cost as unknown, not zero', () => {
+    const snapshot = parseGrokHeadlessResult(
+      {
+        sessionId: 'session-456',
+        requestId: 'request-1',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_read_input_tokens: 300,
+          cache_creation_input_tokens: 40,
+          reasoning_tokens: 5,
+          total_tokens: 460
+        },
+        modelUsage: {
+          'grok-build': {
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadInputTokens: 300,
+            cacheCreationInputTokens: 40,
+            modelCalls: 2
+          }
+        }
+      },
+      new Date('2026-08-28T02:00:00.000Z')
+    );
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        model: 'grok-build',
+        sessionId: 'session-456',
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 40,
+        totalTokens: 460
+      })
+    ]);
+    expect(snapshot.costs).toEqual([]);
+  });
+});
+
+const billingFixture = {
+  config: {
+    creditUsagePercent: 61.2,
+    currentPeriod: {
+      type: 'USAGE_PERIOD_TYPE_WEEKLY',
+      start: '2026-08-25T00:00:00.000Z',
+      end: '2026-09-01T00:00:00.000Z'
+    },
+    isUnifiedBillingUser: true
+  },
+  onDemandEnabled: true,
+  subscriptionTier: 'SuperGrok Heavy'
+};
+
+const grokOtlpFixture = {
+  resourceMetrics: [
+    {
+      resource: {
+        attributes: [
+          { key: 'grok_code.schema.version', value: { stringValue: 'v1' } },
+          { key: 'user.id', value: { stringValue: 'person@example.com' } }
+        ]
+      },
+      scopeMetrics: [
+        {
+          metrics: (['input', 'output', 'reasoning', 'cache_read'] as const).map((type, index) => ({
+            name: 'grok_code.token.usage',
+            sum: {
+              aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
+              dataPoints: [
+                {
+                  timeUnixNano: '1756346400000000000',
+                  asInt: [100, 25, 12, 400][index].toString(),
+                  attributes: [
+                    { key: 'type', value: { stringValue: type } },
+                    { key: 'model', value: { stringValue: 'grok-build' } },
+                    { key: 'session.id', value: { stringValue: 'session-123' } },
+                    { key: 'user.id', value: { stringValue: 'person@example.com' } }
+                  ]
+                }
+              ]
+            }
+          }))
+        }
+      ]
+    }
+  ]
+};
+
+class FakeGrokBillingProcess extends EventEmitter implements GrokBillingProcess {
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly requests: unknown[] = [];
+  readonly methods: string[] = [];
+  readonly stdin: Writable;
+  killed = false;
+  #buffer = '';
+
+  constructor(
+    private readonly billing: unknown,
+    private readonly billingErrorCode?: number
+  ) {
+    super();
+    this.stdin = new Writable({
+      write: (chunk, _encoding, callback) => {
+        this.#buffer += chunk.toString();
+        let newline = this.#buffer.indexOf('\n');
+        while (newline !== -1) {
+          const line = this.#buffer.slice(0, newline);
+          this.#buffer = this.#buffer.slice(newline + 1);
+          this.#reply(line);
+          newline = this.#buffer.indexOf('\n');
+        }
+        callback();
+      }
+    });
+  }
+
+  kill(): boolean {
+    this.killed = true;
+    this.emit('exit', 0, null);
+    return true;
+  }
+
+  #reply(line: string): void {
+    const request = JSON.parse(line) as { id: number; method: string };
+    this.requests.push(request);
+    this.methods.push(request.method);
+    queueMicrotask(() => {
+      if (request.method === 'x.ai/billing' && this.billingErrorCode) {
+        this.stdout.write(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id: request.id,
+            error: { code: this.billingErrorCode, message: 'Method not found' }
+          })}\n`
+        );
+        return;
+      }
+      this.stdout.write(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: request.method === 'initialize' ? { protocolVersion: 1 } : this.billing
+        })}\n`
+      );
+    });
+  }
+}
