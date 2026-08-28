@@ -85,29 +85,39 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await page.goto(freshLaunch.stdout.trim());
 
   await expect(page.getByRole('heading', { name: 'Connections' })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
-  await expect(page.getByTestId('diagnostic-codex')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Diagnostics' })).toHaveCount(0);
   for (const name of ['Codex', 'Claude Code', 'OpenCode Go', 'Grok']) {
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   }
-  expect(
-    await page.locator('.providers').evaluate((providers) => {
-      const monitoring = document.querySelector('.monitoring-section');
-      return monitoring
-        ? Boolean(providers.compareDocumentPosition(monitoring) & Node.DOCUMENT_POSITION_FOLLOWING)
-        : false;
-    })
-  ).toBe(true);
+  await expect(page.locator('.monitoring-section')).toHaveCount(0);
   for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
     await expect(page.locator(`[data-provider-logo="${providerId}"]`)).toBeVisible();
   }
   await expect(page.locator('.provider-mark')).toHaveCount(0);
   await expect(page.getByTestId('connector-claude-code').getByText('Experimental')).toBeVisible();
   await expect(page.getByTestId('connector-codex').getByText('Official client')).toBeVisible();
+  const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
+  await settingsButton.click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await expect(settings.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await expect(settings.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
+  await expect(settings.getByTestId('settings-diagnostic-codex')).toBeVisible();
   const notificationSetting = page.getByRole('checkbox', { name: 'Local notifications' });
   await expect(notificationSetting).not.toBeChecked();
   await notificationSetting.check();
   await expect(notificationSetting).toBeChecked();
+  await settings.getByRole('button', { name: 'Close settings' }).click();
+  await expect(settings).toHaveCount(0);
+  await expect(settingsButton).toBeFocused();
+  const deepLink = new URL(page.url());
+  deepLink.searchParams.set('settings', 'diagnostic:codex');
+  await page.goto(deepLink.toString());
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByTestId('settings-diagnostic-codex')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+  await expect(settingsButton).toBeFocused();
   const grokProvider = page.locator('.provider-card').filter({ hasText: 'Grok' });
   await grokProvider.getByRole('tab', { name: 'xAI API' }).click();
   const xaiApi = grokProvider.getByTestId('connector-xai-api');
@@ -158,6 +168,7 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
 
   await page.reload();
   await expect(page.getByTestId('connector-opencode-go').getByText('Skipped')).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByRole('checkbox', { name: 'Local notifications' })).toBeChecked();
   await page.getByRole('checkbox', { name: 'Local notifications' }).uncheck();
 });
@@ -227,6 +238,26 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   await expect(provider.getByText('1,250')).toBeVisible();
   await expect(provider.getByText('Codex account usage is unavailable.')).toBeVisible();
   await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toBeVisible();
+  await provider.getByRole('button', { name: 'Review in settings' }).click();
+  const diagnostic = page.getByTestId('settings-diagnostic-codex');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await expect(diagnostic).toBeFocused();
+});
+
+test('keeps successful usage visible when an auxiliary settings request fails', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/retention', async (route) => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByRole('heading', { name: 'Demo Agent' })).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toContainText(
+    'Retention data is unavailable.'
+  );
 });
 
 test('labels OpenCode Go account quota separately from this-Mac token history', async ({
@@ -591,16 +622,19 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   ).toBeVisible();
   await expect(provider.getByText('top-model')).toBeVisible();
   await expect(provider.getByText('2026-08-28')).toBeVisible();
-  await expect(page.getByText('Most constrained')).toBeVisible();
-  await expect(page.getByText('Recommended agent')).toBeVisible();
-  await expect(page.getByText('Advice only · never switches agents')).toBeVisible();
+  await expect(page.getByText('Most constrained')).toHaveCount(0);
+  await expect(page.getByText('Recommended agent')).toHaveCount(0);
+  await expect(page.getByText('Advice only · never switches agents')).toHaveCount(0);
 });
 
 test('downloads a redacted export and clears only the selected local scope', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.goto(freshLaunch.stdout.trim());
 
-  const privacy = page.getByRole('region', { name: 'Privacy & data' });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const privacy = page.getByRole('dialog', { name: 'Settings' }).getByRole('region', {
+    name: 'Privacy & data'
+  });
   await expect(privacy).toBeVisible();
   await expect(privacy).toContainText('90 day raw retention');
   const downloadPromise = page.waitForEvent('download');
@@ -631,12 +665,14 @@ test('switches the complete catalog to Simplified Chinese without translating pr
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.getByRole('heading', { name: '连接' })).toHaveCount(0);
   await expect(page.getByText('连接设置').first()).toBeVisible();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
   await expect(page.getByRole('heading', { name: '隐私与数据' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude Code' })).toBeVisible();
   const demoCard = page.locator('.provider-card').filter({ hasText: 'Demo Agent' });
   await expect(demoCard).toContainText('完整');
   await expect(demoCard).toContainText('官方账户');
   await expect(demoCard).not.toContainText('Official Account');
+  await page.getByRole('button', { name: '关闭设置' }).click();
   await page.getByRole('button', { name: 'EN' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });

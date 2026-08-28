@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   import type {
     BillingDomainOverview,
@@ -27,7 +27,13 @@
   let overview: UsageOverview | null = null;
   let loading = true;
   let refreshing = false;
-  let error = false;
+  let overviewError = false;
+  let refreshError = false;
+  let connectorsError = false;
+  let monitoringError = false;
+  let diagnosticsError = false;
+  let retentionError = false;
+  let privacyActionError = false;
   let connectors: ConnectorStatus[] = [];
   let pendingConnectorId: string | null = null;
   let secretInputs: Record<string, string> = {};
@@ -40,6 +46,10 @@
   let deleteProductSecrets = false;
   let includeAccountIdentifiers = false;
   let clearingData = false;
+  let settingsOpen = false;
+  let settingsTarget: string | null = null;
+  let settingsButton: HTMLButtonElement | null = null;
+  let settingsPanel: HTMLElement | null = null;
 
   onMount(async () => {
     locale = detectLocale(navigator.language);
@@ -53,6 +63,8 @@
       loadRetention()
     ]);
     if (!overview) await loadOverview();
+    const deepLink = new URL(window.location.href).searchParams.get('settings');
+    if (deepLink) await openSettings(deepLink, false);
   });
 
   function t(key: MessageKey): string {
@@ -66,7 +78,6 @@
 
   async function loadOverview(): Promise<void> {
     try {
-      error = false;
       const parameters = new URLSearchParams({
         window: selectedWindow,
         timeZone,
@@ -75,8 +86,9 @@
       const response = await fetch(`/api/overview?${parameters}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       overview = (await response.json()) as UsageOverview;
+      overviewError = false;
     } catch {
-      error = true;
+      overviewError = true;
     } finally {
       loading = false;
     }
@@ -88,8 +100,9 @@
       const response = await fetch('/api/refresh', { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       await Promise.all([loadOverview(), loadDiagnostics()]);
+      refreshError = false;
     } catch {
-      error = true;
+      refreshError = true;
     } finally {
       refreshing = false;
     }
@@ -100,8 +113,9 @@
       const response = await fetch('/api/connectors');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       connectors = (await response.json()) as ConnectorStatus[];
+      connectorsError = false;
     } catch {
-      error = true;
+      connectorsError = true;
     }
   }
 
@@ -111,8 +125,9 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const body = (await response.json()) as { settings: MonitoringSettings };
       monitoring = body.settings;
+      monitoringError = false;
     } catch {
-      error = true;
+      monitoringError = true;
     }
   }
 
@@ -121,8 +136,9 @@
       const response = await fetch('/api/doctor');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       diagnostics = (await response.json()) as DoctorReport;
+      diagnosticsError = false;
     } catch {
-      error = true;
+      diagnosticsError = true;
     }
   }
 
@@ -131,8 +147,9 @@
       const response = await fetch('/api/retention');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       retention = (await response.json()) as RetentionStatus;
+      retentionError = false;
     } catch {
-      error = true;
+      retentionError = true;
     }
   }
 
@@ -157,8 +174,9 @@
       anchor.download = `agent-usage-${selectedWindow}.${format}`;
       anchor.click();
       URL.revokeObjectURL(blobUrl);
+      privacyActionError = false;
     } catch {
-      error = true;
+      privacyActionError = true;
     }
   }
 
@@ -174,8 +192,9 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       deleteProductSecrets = false;
       await Promise.all([loadOverview(), loadConnectors(), loadDiagnostics(), loadRetention()]);
+      privacyActionError = false;
     } catch {
-      error = true;
+      privacyActionError = true;
     } finally {
       clearingData = false;
     }
@@ -190,8 +209,9 @@
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       monitoring = (await response.json()) as MonitoringSettings;
+      monitoringError = false;
     } catch {
-      error = true;
+      monitoringError = true;
     }
   }
 
@@ -214,10 +234,42 @@
       secretInputs = { ...secretInputs, [id]: '' };
       await Promise.all([loadConnectors(), loadOverview(), loadDiagnostics()]);
     } catch {
-      error = true;
+      connectorsError = true;
     } finally {
       pendingConnectorId = null;
     }
+  }
+
+  async function openSettings(target: string | null = null, syncUrl = true): Promise<void> {
+    settingsOpen = true;
+    settingsTarget = target;
+    if (syncUrl) {
+      const url = new URL(window.location.href);
+      if (target) url.searchParams.set('settings', target);
+      else url.searchParams.set('settings', 'root');
+      window.history.replaceState(null, '', url);
+    }
+    await tick();
+    const targetElement = target
+      ? [...document.querySelectorAll<HTMLElement>('[data-settings-target]')].find(
+          (element) => element.dataset.settingsTarget === target
+        )
+      : null;
+    (targetElement ?? settingsPanel)?.focus();
+  }
+
+  async function closeSettings(): Promise<void> {
+    settingsOpen = false;
+    settingsTarget = null;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('settings');
+    window.history.replaceState(null, '', url);
+    await tick();
+    settingsButton?.focus();
+  }
+
+  function handleWindowKeydown(event: KeyboardEvent): void {
+    if (settingsOpen && event.key === 'Escape') void closeSettings();
   }
 
   function connectorStateLabel(state: ConnectorSetupState): string {
@@ -545,6 +597,54 @@
     return { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
   }
 
+  function diagnosticTargetForProvider(
+    report: DoctorReport | null,
+    providerId: string
+  ): string | null {
+    const diagnostic = report?.connectors.find((candidate) => candidate.providerId === providerId);
+    return diagnostic ? `diagnostic:${diagnostic.id}` : null;
+  }
+
+  function actionableRisk(
+    currentOverview: UsageOverview,
+    report: DoctorReport | null,
+    currentLocale: Locale
+  ): { title: string; detail: string; target: string | null } | null {
+    const degradedConnector = report?.connectors.find(
+      (diagnostic) => diagnostic.status === 'degraded'
+    );
+    if (degradedConnector) {
+      return {
+        title: `${degradedConnector.id} · ${translate(currentLocale, 'connectionNeedsAttention')}`,
+        detail:
+          diagnosticRecovery(degradedConnector) ?? translate(currentLocale, 'reviewInSettings'),
+        target: `diagnostic:${degradedConnector.id}`
+      };
+    }
+    const staleProvider = currentOverview.providers.find(
+      (provider) => provider.freshness.status === 'stale'
+    );
+    if (staleProvider) {
+      return {
+        title: `${staleProvider.displayName} · ${translate(currentLocale, 'stale')}`,
+        detail: translate(currentLocale, 'reviewInSettings'),
+        target: diagnosticTargetForProvider(report, staleProvider.id)
+      };
+    }
+    const constrained = currentOverview.riskSummary?.mostConstrained;
+    if (
+      constrained &&
+      (constrained.remainingPercent <= 20 || constrained.forecast?.willLastUntilReset === false)
+    ) {
+      return {
+        title: `${constrained.displayName} · ${constrained.label}`,
+        detail: `${formatNumber(constrained.remainingPercent)}% ${translate(currentLocale, 'remaining')}`,
+        target: diagnosticTargetForProvider(report, constrained.providerId)
+      };
+    }
+    return null;
+  }
+
   function tokenTelemetryCommand(providerId: string, billingDomainId: string): string | null {
     if (providerId === 'claude-code' && billingDomainId === 'subscription') {
       return 'eval "$(agent-usage telemetry-env --provider claude-code)"';
@@ -573,6 +673,8 @@
   />
 </svelte:head>
 
+<svelte:window on:keydown={handleWindowKeydown} />
+
 <div class="shell">
   <header>
     <div>
@@ -581,6 +683,9 @@
       <p class="subtitle">{t('subtitle')}</p>
     </div>
     <div class="header-actions">
+      <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
+        {t('settings')}
+      </button>
       <button class="locale-toggle" on:click={toggleLocale}>
         {locale === 'en' ? '中文' : 'EN'}
       </button>
@@ -593,9 +698,13 @@
 
   {#if loading}
     <div class="state" aria-live="polite">{t('loading')}</div>
-  {:else if error}
+  {:else if overviewError && !overview}
     <div class="state error" role="alert">{t('error')}</div>
   {:else if overview}
+    {@const risk = actionableRisk(overview, diagnostics, locale)}
+    {#if refreshError}
+      <div class="inline-error" role="status">{t('refreshUnavailable')}</div>
+    {/if}
     {#if overview.providers.length === 0}
       <div class="state compact">{t('noProviders')}</div>
     {/if}
@@ -608,62 +717,13 @@
         >
       {/each}
     </div>
-    {#if overview.riskSummary}
-      <section class="risk-overview" aria-label={t('riskOverview')}>
-        {#if overview.riskSummary.mostConstrained}
-          <article>
-            <span>{t('mostConstrained')}</span>
-            <strong
-              >{overview.riskSummary.mostConstrained.displayName} · {overview.riskSummary
-                .mostConstrained.label}</strong
-            >
-            <p>
-              {formatNumber(overview.riskSummary.mostConstrained.remainingPercent)}%
-              {t('remaining')}
-            </p>
-            <small>
-              {t('source')}:
-              {authorityLabel(overview.riskSummary.mostConstrained.authority ?? 'unavailable')} ·
-              {formatReset(overview.riskSummary.mostConstrained.observedAt ?? null)}
-            </small>
-            {#if overview.riskSummary.mostConstrained.forecast}
-              <small>
-                {overview.riskSummary.mostConstrained.forecast.willLastUntilReset
-                  ? t('lastsUntilReset')
-                  : t('exhaustsBeforeReset')}
-                · {t('predictedExhaustion')}
-                {formatReset(overview.riskSummary.mostConstrained.forecast.predictedExhaustionAt)}
-                · {authorityLabel('estimate')} ·
-                {formatReset(overview.riskSummary.mostConstrained.forecast.evidence.windowEnd)}
-              </small>
-            {/if}
-          </article>
-        {/if}
-        {#if overview.riskSummary.recommendation}
-          <article class="recommendation">
-            <span>{t('recommendation')}</span>
-            <strong>{overview.riskSummary.recommendation.displayName}</strong>
-            <p>
-              {formatNumber(overview.riskSummary.recommendation.evidence.remainingPercent)}%
-              {t('remaining')}
-            </p>
-            <small>
-              {t('source')}:
-              {authorityLabel(
-                overview.riskSummary.recommendation.evidence.authority ?? 'unavailable'
-              )} ·
-              {formatReset(overview.riskSummary.recommendation.evidence.observedAt ?? null)}
-            </small>
-            {#each overview.riskSummary.recommendation.reasonKeys as reason (reason)}
-              <small
-                >{reason === 'forecast-lasts-until-reset'
-                  ? t('forecastSupports')
-                  : t('highestSafeCapacity')}</small
-              >
-            {/each}
-            <small>{t('readOnlyAdvice')}</small>
-          </article>
-        {/if}
+    {#if risk}
+      <section class="risk-banner" aria-label={t('riskOverview')}>
+        <div>
+          <strong>{risk.title}</strong>
+          <span>{risk.detail}</span>
+        </div>
+        <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
       </section>
     {/if}
     <section class="providers" aria-label="Providers">
@@ -699,6 +759,10 @@
             <div class="degraded" role="status">
               <strong>{providerHealthMessage(provider)}</strong>
               <code>{providerHealthRecovery(provider)}</code>
+              <button
+                on:click={() => openSettings(diagnosticTargetForProvider(diagnostics, provider.id))}
+                >{t('reviewInSettings')}</button
+              >
             </div>
           {/if}
 
@@ -722,77 +786,91 @@
             {@const tokenAuthority = historyTokenAuthority(history, domain.tokenAuthority)}
             {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
             {#if connector}
-              <details
-                class:connection-pending={pendingConnectorId === connector.id}
-                class="inline-connection"
-                data-testid={`connector-${connector.id}`}
-                aria-busy={pendingConnectorId === connector.id}
-                open={connector.state !== 'connected'}
-              >
-                <summary>
+              {#if connector.state === 'connected'}
+                <div class="connected-summary" data-testid={`connector-${connector.id}`}>
                   <span>
                     <strong>{connectorStateLabel(connector.state)}</strong>
-                    {#if connector.experimental}<small>{t('experimental')}</small>{/if}
+                    <small>{connector.target.billingDomain.displayName}</small>
                   </span>
-                  {connector.state === 'connected' ? t('manageConnection') : t('connectionSetup')}
-                </summary>
-                <div class="inline-connection-body">
-                  <p class="permission">{connectorPermission(connector)}</p>
-                  <div class="connection-meta">
-                    <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
-                    <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
-                  </div>
-                  <div class="coverage-list">
-                    <span>{t('coverageLabel')}</span>
-                    <strong
-                      >{connector.expectedCoverage.map(coverageDimensionLabel).join(' · ')}</strong
-                    >
-                  </div>
-                  {#if connector.credentialOwner === 'agent-usage'}
-                    <label class="secret-field">
-                      <span>{t('managementKey')}</span>
-                      <input
-                        type="password"
-                        autocomplete="off"
-                        aria-label={`${connector.displayName} ${t('managementKey')}`}
-                        value={secretInputs[connector.id] ?? ''}
-                        on:input={(event) =>
-                          (secretInputs = {
-                            ...secretInputs,
-                            [connector.id]: event.currentTarget.value
-                          })}
-                      />
-                    </label>
-                  {/if}
-                  <div class="connection-actions">
-                    {#if connector.state === 'discovered' || connector.state === 'skipped'}
-                      <button
-                        class="primary-action"
-                        disabled={!connector.installed ||
-                          pendingConnectorId === connector.id ||
-                          (connector.credentialOwner === 'agent-usage' &&
-                            !secretInputs[connector.id])}
-                        on:click={() => configureConnector(connector.id, 'connect')}
-                        >{t('connect')}</button
-                      >
-                    {/if}
-                    {#if connector.state === 'error' || connector.state === 'not-installed' || connector.state === 'connected'}
-                      <button
-                        disabled={pendingConnectorId === connector.id}
-                        on:click={() => configureConnector(connector.id, 'retry')}
-                        >{t('retry')}</button
-                      >
-                    {/if}
-                    {#if connector.state !== 'skipped'}
-                      <button
-                        disabled={pendingConnectorId === connector.id}
-                        on:click={() => configureConnector(connector.id, 'skip')}
-                        >{t('skip')}</button
-                      >
-                    {/if}
-                  </div>
+                  <button on:click={() => openSettings(`connector:${connector.id}`)}
+                    >{t('manageConnection')}</button
+                  >
                 </div>
-              </details>
+              {:else}
+                <details
+                  class:connection-pending={pendingConnectorId === connector.id}
+                  class="inline-connection"
+                  data-testid={`connector-${connector.id}`}
+                  aria-busy={pendingConnectorId === connector.id}
+                  open
+                >
+                  <summary>
+                    <span>
+                      <strong>{connectorStateLabel(connector.state)}</strong>
+                      {#if connector.experimental}<small>{t('experimental')}</small>{/if}
+                    </span>
+                    {t('connectionSetup')}
+                  </summary>
+                  <div class="inline-connection-body">
+                    <p class="permission">{connectorPermission(connector)}</p>
+                    <div class="connection-meta">
+                      <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
+                      <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
+                    </div>
+                    <div class="coverage-list">
+                      <span>{t('coverageLabel')}</span>
+                      <strong
+                        >{connector.expectedCoverage
+                          .map(coverageDimensionLabel)
+                          .join(' · ')}</strong
+                      >
+                    </div>
+                    {#if connector.credentialOwner === 'agent-usage'}
+                      <label class="secret-field">
+                        <span>{t('managementKey')}</span>
+                        <input
+                          type="password"
+                          autocomplete="off"
+                          aria-label={`${connector.displayName} ${t('managementKey')}`}
+                          value={secretInputs[connector.id] ?? ''}
+                          on:input={(event) =>
+                            (secretInputs = {
+                              ...secretInputs,
+                              [connector.id]: event.currentTarget.value
+                            })}
+                        />
+                      </label>
+                    {/if}
+                    <div class="connection-actions">
+                      {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                        <button
+                          class="primary-action"
+                          disabled={!connector.installed ||
+                            pendingConnectorId === connector.id ||
+                            (connector.credentialOwner === 'agent-usage' &&
+                              !secretInputs[connector.id])}
+                          on:click={() => configureConnector(connector.id, 'connect')}
+                          >{t('connect')}</button
+                        >
+                      {/if}
+                      {#if connector.state === 'error' || connector.state === 'not-installed'}
+                        <button
+                          disabled={pendingConnectorId === connector.id}
+                          on:click={() => configureConnector(connector.id, 'retry')}
+                          >{t('retry')}</button
+                        >
+                      {/if}
+                      {#if connector.state !== 'skipped'}
+                        <button
+                          disabled={pendingConnectorId === connector.id}
+                          on:click={() => configureConnector(connector.id, 'skip')}
+                          >{t('skip')}</button
+                        >
+                      {/if}
+                    </div>
+                  </div>
+                </details>
+              {/if}
             {/if}
             <div class="section-label">{t('quota')}</div>
             <div class="quotas">
@@ -1006,108 +1084,216 @@
       {/each}
     </section>
   {/if}
-
-  {#if monitoring}
-    <section class="monitoring-section" aria-labelledby="monitoring-heading">
-      <div>
-        <p class="eyebrow">{t('automationEyebrow')}</p>
-        <h2 id="monitoring-heading">{t('monitoring')}</h2>
-        <p>{t('monitoringSubtitle')}</p>
-      </div>
-      <div class="monitoring-controls">
-        <label>
-          <input
-            type="checkbox"
-            checked={monitoring.backgroundCollectionEnabled}
-            on:change={(event) =>
-              updateMonitoring({ backgroundCollectionEnabled: event.currentTarget.checked })}
-          />
-          {t('backgroundCollection')}
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={monitoring.notificationsEnabled}
-            on:change={(event) =>
-              updateMonitoring({ notificationsEnabled: event.currentTarget.checked })}
-          />
-          {t('notifications')}
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={monitoring.startAtLogin}
-            on:change={(event) => updateMonitoring({ startAtLogin: event.currentTarget.checked })}
-          />
-          {t('startAtLogin')}
-        </label>
-      </div>
-    </section>
-  {/if}
-
-  {#if diagnostics && diagnostics.connectors.length > 0}
-    <section class="diagnostics-section" aria-labelledby="diagnostics-heading">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">{t('healthEyebrow')}</p>
-          <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
-        </div>
-        <p>{t('diagnosticsSubtitle')}</p>
-      </div>
-      <div class="diagnostics-grid">
-        {#each diagnostics.connectors as diagnostic (diagnostic.id)}
-          <article
-            class:diagnostic-degraded={diagnostic.status === 'degraded'}
-            data-testid={`diagnostic-${diagnostic.id}`}
-          >
-            <div>
-              <strong>{diagnostic.id}</strong>
-              <span>{diagnosticCategoryLabel(diagnostic)}</span>
-            </div>
-            <small>{diagnostic.billingDomainId ?? t('unknown')}</small>
-            {#if diagnostic.affectedCoverage.length > 0}
-              <p>{diagnostic.affectedCoverage.map(coverageDimensionLabel).join(' · ')}</p>
-            {/if}
-            {#if diagnosticRecovery(diagnostic)}
-              <code>{diagnosticRecovery(diagnostic)}</code>
-            {/if}
-          </article>
-        {/each}
-      </div>
-    </section>
-  {/if}
-
-  {#if retention}
-    <section class="privacy-section" aria-labelledby="privacy-heading">
-      <div>
-        <p class="eyebrow">{t('privacyEyebrow')}</p>
-        <h2 id="privacy-heading">{t('privacy')}</h2>
-        <p>{t('privacySubtitle')}</p>
-        <small>
-          {retention.rawRetentionDays}
-          {t('retentionDays')} · {retention.rawObservations}
-          {t('rawObservations')} · {retention.dailyAggregates}
-          {t('dailyAggregates')}
-        </small>
-      </div>
-      <div class="privacy-actions">
-        <button on:click={() => downloadExport('json')}>{t('exportJson')}</button>
-        <button on:click={() => downloadExport('csv')}>{t('exportCsv')}</button>
-        <label>
-          <input type="checkbox" bind:checked={includeAccountIdentifiers} />
-          {t('includeAccountIdentifiers')}
-        </label>
-        <label>
-          <input type="checkbox" bind:checked={deleteProductSecrets} />
-          {t('deleteProductSecrets')}
-        </label>
-        <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
-          {clearingData ? t('clearing') : t('clearData')}
-        </button>
-      </div>
-    </section>
-  {/if}
 </div>
+
+{#if settingsOpen}
+  <div class="settings-backdrop" role="presentation">
+    <div
+      class="settings-drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-heading"
+      tabindex="-1"
+      bind:this={settingsPanel}
+    >
+      <div class="settings-header">
+        <div>
+          <p class="eyebrow">{t('settings')}</p>
+          <h2 id="settings-heading">{t('settings')}</h2>
+          <p>{t('settingsSubtitle')}</p>
+        </div>
+        <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
+          >×</button
+        >
+      </div>
+
+      <div class="settings-content">
+        <section aria-labelledby="settings-connections-heading">
+          <div class="settings-section-heading">
+            <h2 id="settings-connections-heading">{t('connections')}</h2>
+            <p>{t('connectionsSubtitle')}</p>
+          </div>
+          {#if connectorsError}
+            <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
+          {/if}
+          <div class="settings-connections">
+            {#each connectors as connector (connector.id)}
+              <article
+                class:settings-target-active={settingsTarget === `connector:${connector.id}`}
+                data-settings-target={`connector:${connector.id}`}
+                data-testid={`settings-connector-${connector.id}`}
+                tabindex="-1"
+              >
+                <div class="settings-connector-title">
+                  <strong>{connector.displayName}</strong>
+                  <span>{connectorStateLabel(connector.state)}</span>
+                </div>
+                <p>{connectorPermission(connector)}</p>
+                <small
+                  >{credentialOwnerLabel(connector.credentialOwner)} · {connector.target
+                    .billingDomain.displayName}</small
+                >
+                {#if connector.credentialOwner === 'agent-usage'}
+                  <label class="secret-field">
+                    <span>{t('managementKey')}</span>
+                    <input
+                      type="password"
+                      autocomplete="off"
+                      aria-label={`${connector.displayName} ${t('managementKey')}`}
+                      value={secretInputs[connector.id] ?? ''}
+                      on:input={(event) =>
+                        (secretInputs = {
+                          ...secretInputs,
+                          [connector.id]: event.currentTarget.value
+                        })}
+                    />
+                  </label>
+                {/if}
+                <div class="connection-actions">
+                  {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                    <button
+                      class="primary-action"
+                      disabled={!connector.installed ||
+                        pendingConnectorId === connector.id ||
+                        (connector.credentialOwner === 'agent-usage' &&
+                          !secretInputs[connector.id])}
+                      on:click={() => configureConnector(connector.id, 'connect')}
+                      >{t('connect')}</button
+                    >
+                  {/if}
+                  {#if connector.state === 'error' || connector.state === 'not-installed' || connector.state === 'connected'}
+                    <button
+                      disabled={pendingConnectorId === connector.id}
+                      on:click={() => configureConnector(connector.id, 'retry')}
+                      >{t('retry')}</button
+                    >
+                  {/if}
+                  {#if connector.state !== 'skipped'}
+                    <button
+                      disabled={pendingConnectorId === connector.id}
+                      on:click={() => configureConnector(connector.id, 'skip')}>{t('skip')}</button
+                    >
+                  {/if}
+                </div>
+              </article>
+            {/each}
+          </div>
+        </section>
+
+        <section class="monitoring-section" aria-labelledby="monitoring-heading">
+          <div class="settings-section-heading">
+            <h2 id="monitoring-heading">{t('monitoring')}</h2>
+            <p>{t('monitoringSubtitle')}</p>
+          </div>
+          {#if monitoringError}
+            <p class="settings-error" role="status">{t('monitoringUnavailable')}</p>
+          {/if}
+          {#if monitoring}
+            <div class="monitoring-controls">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={monitoring.backgroundCollectionEnabled}
+                  on:change={(event) =>
+                    updateMonitoring({ backgroundCollectionEnabled: event.currentTarget.checked })}
+                />
+                {t('backgroundCollection')}
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={monitoring.notificationsEnabled}
+                  on:change={(event) =>
+                    updateMonitoring({ notificationsEnabled: event.currentTarget.checked })}
+                />
+                {t('notifications')}
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={monitoring.startAtLogin}
+                  on:change={(event) =>
+                    updateMonitoring({ startAtLogin: event.currentTarget.checked })}
+                />
+                {t('startAtLogin')}
+              </label>
+            </div>
+          {/if}
+        </section>
+
+        <section class="diagnostics-section" aria-labelledby="diagnostics-heading">
+          <div class="settings-section-heading">
+            <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
+            <p>{t('diagnosticsSubtitle')}</p>
+          </div>
+          {#if diagnosticsError}
+            <p class="settings-error" role="status">{t('diagnosticsUnavailable')}</p>
+          {/if}
+          {#if diagnostics}
+            <div class="diagnostics-grid">
+              {#each diagnostics.connectors as diagnostic (diagnostic.id)}
+                <article
+                  class:diagnostic-degraded={diagnostic.status === 'degraded'}
+                  class:settings-target-active={settingsTarget === `diagnostic:${diagnostic.id}`}
+                  data-settings-target={`diagnostic:${diagnostic.id}`}
+                  data-testid={`settings-diagnostic-${diagnostic.id}`}
+                  tabindex="-1"
+                >
+                  <div>
+                    <strong>{diagnostic.id}</strong>
+                    <span>{diagnosticCategoryLabel(diagnostic)}</span>
+                  </div>
+                  <small>{diagnostic.billingDomainId ?? t('unknown')}</small>
+                  {#if diagnostic.affectedCoverage.length > 0}
+                    <p>{diagnostic.affectedCoverage.map(coverageDimensionLabel).join(' · ')}</p>
+                  {/if}
+                  {#if diagnosticRecovery(diagnostic)}
+                    <code>{diagnosticRecovery(diagnostic)}</code>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          {/if}
+        </section>
+
+        <section class="privacy-section" aria-labelledby="privacy-heading">
+          <div class="settings-section-heading">
+            <h2 id="privacy-heading">{t('privacy')}</h2>
+            <p>{t('privacySubtitle')}</p>
+          </div>
+          {#if retentionError}
+            <p class="settings-error" role="status">{t('retentionUnavailable')}</p>
+          {:else if retention}
+            <small>
+              {retention.rawRetentionDays}
+              {t('retentionDays')} · {retention.rawObservations}
+              {t('rawObservations')} · {retention.dailyAggregates}
+              {t('dailyAggregates')}
+            </small>
+          {/if}
+          {#if privacyActionError}
+            <p class="settings-error" role="status">{t('privacyActionUnavailable')}</p>
+          {/if}
+          <div class="privacy-actions">
+            <button on:click={() => downloadExport('json')}>{t('exportJson')}</button>
+            <button on:click={() => downloadExport('csv')}>{t('exportCsv')}</button>
+            <label>
+              <input type="checkbox" bind:checked={includeAccountIdentifiers} />
+              {t('includeAccountIdentifiers')}
+            </label>
+            <label>
+              <input type="checkbox" bind:checked={deleteProductSecrets} />
+              {t('deleteProductSecrets')}
+            </label>
+            <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
+              {clearingData ? t('clearing') : t('clearData')}
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   :global(*) {
@@ -1199,7 +1385,8 @@
     gap: 8px;
   }
 
-  .locale-toggle {
+  .locale-toggle,
+  .settings-toggle {
     min-height: 44px;
     padding: 0 14px;
     border: 1px solid #2c3342;
@@ -1207,6 +1394,10 @@
     background: rgba(20, 24, 32, 0.8);
     color: #aeb6c4;
     cursor: pointer;
+  }
+
+  .settings-toggle {
+    color: #e8ebf2;
   }
 
   .refresh:hover:not(:disabled) {
@@ -1258,37 +1449,49 @@
     color: #eef2ff;
   }
 
-  .risk-overview {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+  .risk-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
     margin-bottom: 18px;
-  }
-
-  .risk-overview article {
-    display: grid;
-    gap: 6px;
-    padding: 18px;
+    padding: 12px 14px;
     border: 1px solid rgba(242, 164, 89, 0.2);
-    border-radius: 17px;
+    border-radius: 13px;
     background: rgba(33, 25, 20, 0.72);
   }
 
-  .risk-overview article.recommendation {
-    border-color: rgba(73, 208, 151, 0.2);
-    background: rgba(18, 35, 29, 0.72);
+  .risk-banner > div {
+    display: grid;
+    gap: 4px;
   }
 
-  .risk-overview span,
-  .risk-overview small {
+  .risk-banner span {
     color: #929baa;
+    font-size: 0.74rem;
+  }
+
+  .risk-banner button,
+  .degraded button {
+    min-height: 32px;
+    padding: 0 11px;
+    border: 1px solid rgba(242, 164, 89, 0.35);
+    border-radius: 9px;
+    background: transparent;
+    color: #f2bd89;
+    cursor: pointer;
     font-size: 0.7rem;
   }
 
-  .risk-overview p {
-    margin: 2px 0;
-    font-size: 1.25rem;
-    font-weight: 680;
+  .inline-error,
+  .settings-error {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border: 1px solid rgba(235, 106, 106, 0.28);
+    border-radius: 10px;
+    background: rgba(120, 35, 35, 0.1);
+    color: #ffabab;
+    font-size: 0.74rem;
   }
 
   .diagnostics-section {
@@ -1436,28 +1639,6 @@
     border-radius: 10px;
     color: #b6bdca;
     font-size: 0.7rem;
-  }
-
-  .section-heading {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 32px;
-    margin-bottom: 18px;
-  }
-
-  .section-heading h2 {
-    margin: 0;
-    font-size: 1.65rem;
-  }
-
-  .section-heading > p {
-    max-width: 520px;
-    margin: 0;
-    color: #8f98a8;
-    font-size: 0.86rem;
-    line-height: 1.55;
-    text-align: right;
   }
 
   .connection-meta,
@@ -1919,6 +2100,186 @@
     color: #ff9b9b;
   }
 
+  .connected-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 18px 0 4px;
+    padding: 10px 12px;
+    border: 1px solid rgba(73, 208, 151, 0.18);
+    border-radius: 12px;
+    background: rgba(15, 27, 23, 0.58);
+  }
+
+  .connected-summary > span {
+    display: grid;
+    gap: 2px;
+    color: #72ddaf;
+    font-size: 0.72rem;
+  }
+
+  .connected-summary small {
+    color: #859188;
+  }
+
+  .connected-summary button {
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid #303747;
+    border-radius: 9px;
+    background: transparent;
+    color: #aeb6c4;
+    cursor: pointer;
+    font-size: 0.7rem;
+  }
+
+  .settings-backdrop {
+    position: fixed;
+    z-index: 40;
+    inset: 0;
+    display: flex;
+    justify-content: flex-end;
+    background: rgba(3, 5, 9, 0.7);
+    backdrop-filter: blur(8px);
+  }
+
+  .settings-drawer {
+    width: min(680px, 100%);
+    height: 100%;
+    overflow-y: auto;
+    border-left: 1px solid rgba(122, 136, 164, 0.22);
+    outline: none;
+    background: #0b0e14;
+    box-shadow: -30px 0 80px rgba(0, 0, 0, 0.42);
+  }
+
+  .settings-header {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 28px 30px 22px;
+    border-bottom: 1px solid rgba(122, 136, 164, 0.16);
+    background: rgba(11, 14, 20, 0.94);
+    backdrop-filter: blur(18px);
+  }
+
+  .settings-header h2,
+  .settings-header p {
+    margin: 0;
+  }
+
+  .settings-header > div > p:last-child {
+    margin-top: 7px;
+    color: #929baa;
+    font-size: 0.76rem;
+  }
+
+  .settings-close {
+    width: 38px;
+    height: 38px;
+    border: 1px solid #303747;
+    border-radius: 50%;
+    background: transparent;
+    color: #d9dee8;
+    cursor: pointer;
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+
+  .settings-content {
+    display: grid;
+    gap: 18px;
+    padding: 24px 30px 48px;
+  }
+
+  .settings-content > section {
+    padding: 18px;
+    border: 1px solid rgba(122, 136, 164, 0.17);
+    border-radius: 17px;
+    background: rgba(14, 17, 24, 0.78);
+  }
+
+  .settings-section-heading {
+    margin-bottom: 14px;
+  }
+
+  .settings-section-heading h2,
+  .settings-section-heading p {
+    margin: 0;
+  }
+
+  .settings-section-heading p {
+    margin-top: 6px;
+    color: #929baa;
+    font-size: 0.74rem;
+    line-height: 1.45;
+  }
+
+  .settings-connections {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .settings-connections article {
+    padding: 12px;
+    border: 1px solid rgba(122, 136, 164, 0.13);
+    border-radius: 12px;
+    outline: none;
+    background: rgba(255, 255, 255, 0.018);
+  }
+
+  .settings-connector-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .settings-connector-title span,
+  .settings-connections small {
+    color: #929baa;
+    font-size: 0.66rem;
+  }
+
+  .settings-connections article > p {
+    min-height: 42px;
+    margin: 9px 0;
+    color: #aab1bf;
+    font-size: 0.7rem;
+    line-height: 1.45;
+  }
+
+  .settings-drawer .monitoring-section,
+  .settings-drawer .diagnostics-section,
+  .settings-drawer .privacy-section {
+    display: block;
+    margin: 0;
+  }
+
+  .settings-drawer .monitoring-controls,
+  .settings-drawer .privacy-actions {
+    justify-content: flex-start;
+  }
+
+  .settings-drawer .privacy-section > small {
+    display: block;
+    margin-bottom: 12px;
+    color: #8f98a8;
+    font-size: 0.72rem;
+  }
+
+  .settings-target-active,
+  [data-settings-target]:focus-visible {
+    border-color: #6f89ef !important;
+    box-shadow: 0 0 0 3px rgba(98, 126, 239, 0.17);
+  }
+
   @keyframes spin {
     to {
       transform: rotate(360deg);
@@ -1936,12 +2297,18 @@
       flex-direction: column;
     }
 
-    .tokens {
-      grid-template-columns: repeat(2, 1fr);
+    .settings-header,
+    .settings-content {
+      padding-right: 18px;
+      padding-left: 18px;
     }
 
-    .risk-overview {
+    .settings-connections {
       grid-template-columns: 1fr;
+    }
+
+    .tokens {
+      grid-template-columns: repeat(2, 1fr);
     }
 
     .quota-meta {
@@ -1950,26 +2317,10 @@
       gap: 4px;
     }
 
-    .section-heading {
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 10px;
-    }
-
     .monitoring-section {
       align-items: flex-start;
       flex-direction: column;
     }
-
-    .section-heading > p {
-      text-align: left;
-    }
-  }
-
-  @media (max-width: 980px) {
-  }
-
-  @media (max-width: 560px) {
   }
 
   @media (prefers-reduced-motion: reduce) {
