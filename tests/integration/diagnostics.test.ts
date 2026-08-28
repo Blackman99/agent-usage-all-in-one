@@ -82,7 +82,37 @@ describe('diagnostics and recovery', () => {
           permissionDescription: 'Read Codex.',
           credentialOwner: 'official-client',
           experimental: false,
-          expectedCoverage: ['quota', 'tokens']
+          expectedCoverage: ['quota', 'tokens'],
+          target: {
+            provider: { id: 'codex', displayName: 'Codex' },
+            billingDomain: { id: 'subscription', displayName: 'Subscription' }
+          }
+        },
+        {
+          id: 'grok',
+          displayName: 'Grok',
+          command: 'grok',
+          permissionDescription: 'Read Grok Build usage.',
+          credentialOwner: 'official-client',
+          experimental: true,
+          expectedCoverage: ['quota', 'tokens', 'history'],
+          target: {
+            provider: { id: 'grok', displayName: 'Grok' },
+            billingDomain: { id: 'grok-build-subscription', displayName: 'Build / SuperGrok' }
+          }
+        },
+        {
+          id: 'xai-api',
+          displayName: 'xAI API (Grok)',
+          command: null,
+          permissionDescription: 'Read xAI API usage.',
+          credentialOwner: 'agent-usage',
+          experimental: false,
+          expectedCoverage: ['tokens', 'actual-cost', 'history'],
+          target: {
+            provider: { id: 'grok', displayName: 'Grok' },
+            billingDomain: { id: 'xai-api', displayName: 'xAI API' }
+          }
         }
       ],
       clock: () => now,

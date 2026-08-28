@@ -149,5 +149,9 @@ const definition: ConnectorDefinition = {
   permissionDescription: 'Read official client usage.',
   credentialOwner: 'official-client',
   experimental: false,
-  expectedCoverage: ['quota', 'tokens']
+  expectedCoverage: ['quota', 'tokens'],
+  target: {
+    provider: { id: 'codex', displayName: 'Codex' },
+    billingDomain: { id: 'subscription', displayName: 'Subscription' }
+  }
 };

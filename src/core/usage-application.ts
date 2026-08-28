@@ -129,7 +129,8 @@ export class UsageApplication {
             this.#saveConnectorDiagnostic(
               connector,
               snapshot.provider.id,
-              snapshot.billingDomains[0]?.id ?? defaultBillingDomain(connector.id),
+              snapshot.billingDomains[0]?.id ??
+                defaultBillingDomain(connector.id, this.#connectorDefinitions),
               failure
             );
             this.#recordConnectorOutcome(
@@ -143,7 +144,8 @@ export class UsageApplication {
             this.#saveHealthyConnectorDiagnostic(
               connector,
               snapshot.provider.id,
-              snapshot.billingDomains[0]?.id ?? defaultBillingDomain(connector.id),
+              snapshot.billingDomains[0]?.id ??
+                defaultBillingDomain(connector.id, this.#connectorDefinitions),
               snapshot.observedAt
             );
             this.#recordConnectorOutcome(
@@ -155,7 +157,7 @@ export class UsageApplication {
             );
           }
         } catch (error) {
-          const providerId = providerForConnector(connector.id);
+          const providerId = providerForConnector(connector.id, this.#connectorDefinitions);
           const failure = redactFailure(safeConnectorFailure(error));
           this.#repository.recordFailure(
             {
@@ -168,7 +170,7 @@ export class UsageApplication {
           this.#saveConnectorDiagnostic(
             connector,
             providerId,
-            defaultBillingDomain(connector.id),
+            defaultBillingDomain(connector.id, this.#connectorDefinitions),
             failure
           );
           this.#recordConnectorOutcome(
@@ -389,8 +391,8 @@ export class UsageApplication {
           : 'not-configured';
       stored.set(definition.id, {
         id: definition.id,
-        providerId: providerForConnector(definition.id),
-        billingDomainId: defaultBillingDomain(definition.id),
+        providerId: definition.target.provider.id,
+        billingDomainId: definition.target.billingDomain.id,
         status: connected ? 'healthy' : 'degraded',
         category,
         message: connected
@@ -439,7 +441,9 @@ export class UsageApplication {
             const domain = provider.billingDomains.find((candidate) => candidate.id === domainId);
             return {
               id: domainId,
-              displayName: domain?.displayName ?? billingDomainDisplayName(domainId),
+              displayName:
+                domain?.displayName ??
+                billingDomainDisplayName(domainId, this.#connectorDefinitions),
               status: diagnostic?.status ?? ('healthy' as const),
               category: diagnostic?.category ?? null,
               affectedCoverage: diagnostic?.affectedCoverage ?? [],
@@ -572,6 +576,7 @@ export class UsageApplication {
           credentialOwner: definition.credentialOwner,
           experimental: definition.experimental,
           expectedCoverage: definition.expectedCoverage,
+          target: definition.target,
           secretConfigured:
             record.secretReference !== null && this.#secretStore
               ? await this.#secretStore.has(record.secretReference)
@@ -621,6 +626,8 @@ export class UsageApplication {
       });
     }
 
+    if (input.action === 'connect') await this.refresh({ userInitiated: true });
+
     const status = (await this.getConnectorStatuses()).find((candidate) => candidate.id === id);
     if (!status) throw new Error(`Connector status disappeared: ${id}`);
     return status;
@@ -652,53 +659,25 @@ function combineFailures(failures: ConnectorFailure[]): ConnectorFailure {
   };
 }
 
-const CONNECTOR_ROUTES: Record<
-  string,
-  { providerId: string; billingDomainId: string; billingDomainDisplayName: string }
-> = {
-  codex: {
-    providerId: 'codex',
-    billingDomainId: 'subscription',
-    billingDomainDisplayName: 'Subscription'
-  },
-  'claude-code': {
-    providerId: 'claude-code',
-    billingDomainId: 'subscription',
-    billingDomainDisplayName: 'Subscription'
-  },
-  'opencode-go': {
-    providerId: 'opencode-go',
-    billingDomainId: 'go-subscription',
-    billingDomainDisplayName: 'OpenCode Go'
-  },
-  grok: {
-    providerId: 'grok',
-    billingDomainId: 'grok-build-subscription',
-    billingDomainDisplayName: 'Build / SuperGrok'
-  },
-  'xai-api': {
-    providerId: 'grok',
-    billingDomainId: 'xai-api',
-    billingDomainDisplayName: 'xAI API'
-  }
-};
-
-function providerForConnector(id: string): string {
-  return CONNECTOR_ROUTES[id]?.providerId ?? id;
+function providerForConnector(id: string, definitions: ConnectorDefinition[]): string {
+  return definitions.find((definition) => definition.id === id)?.target.provider.id ?? id;
 }
 
 function displayNameForProvider(providerId: string, connectorDisplayName?: string): string {
   return providerId === 'grok' ? 'Grok' : (connectorDisplayName ?? providerId);
 }
 
-function defaultBillingDomain(id: string): string {
-  return CONNECTOR_ROUTES[id]?.billingDomainId ?? 'subscription';
+function defaultBillingDomain(id: string, definitions: ConnectorDefinition[]): string {
+  return (
+    definitions.find((definition) => definition.id === id)?.target.billingDomain.id ??
+    'subscription'
+  );
 }
 
-function billingDomainDisplayName(id: string): string {
+function billingDomainDisplayName(id: string, definitions: ConnectorDefinition[]): string {
   return (
-    Object.values(CONNECTOR_ROUTES).find((route) => route.billingDomainId === id)
-      ?.billingDomainDisplayName ?? id
+    definitions.find((definition) => definition.target.billingDomain.id === id)?.target
+      .billingDomain.displayName ?? id
   );
 }
 

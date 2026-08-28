@@ -188,7 +188,11 @@ describe('local HTTP server', () => {
       permissionDescription: 'Store a managed API key.',
       credentialOwner: 'agent-usage',
       experimental: false,
-      expectedCoverage: ['actual-cost']
+      expectedCoverage: ['actual-cost'],
+      target: {
+        provider: { id: 'managed-provider', displayName: 'Managed provider' },
+        billingDomain: { id: 'api', displayName: 'API' }
+      }
     };
     const probe: DiscoveryProbe = {
       async inspect() {
@@ -216,7 +220,16 @@ describe('local HTTP server', () => {
       headers: authorization
     });
     expect(discoverResponse.status).toBe(200);
-    expect(await discoverResponse.json()).toMatchObject([{ id: 'managed', state: 'discovered' }]);
+    expect(await discoverResponse.json()).toMatchObject([
+      {
+        id: 'managed',
+        state: 'discovered',
+        target: {
+          provider: { id: 'managed-provider', displayName: 'Managed provider' },
+          billingDomain: { id: 'api', displayName: 'API' }
+        }
+      }
+    ]);
 
     const connectResponse = await fetch(`${server.origin}/api/connectors/managed/action`, {
       method: 'POST',

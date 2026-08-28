@@ -211,7 +211,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Store a product key.',
     credentialOwner: 'agent-usage',
     experimental: false,
-    expectedCoverage: ['tokens', 'actual-cost', 'history']
+    expectedCoverage: ['tokens', 'actual-cost', 'history'],
+    target: {
+      provider: { id: 'grok', displayName: 'Grok' },
+      billingDomain: { id: 'xai-api', displayName: 'xAI API' }
+    }
   },
   {
     id: 'codex',
@@ -220,7 +224,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Use the official client credential in place.',
     credentialOwner: 'official-client',
     experimental: false,
-    expectedCoverage: ['quota', 'tokens', 'history']
+    expectedCoverage: ['quota', 'tokens', 'history'],
+    target: {
+      provider: { id: 'codex', displayName: 'Codex' },
+      billingDomain: { id: 'subscription', displayName: 'Subscription' }
+    }
   }
 ];
 

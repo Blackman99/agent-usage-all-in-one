@@ -50,28 +50,73 @@ test('shows persisted provider usage and refreshes from the dashboard', async ({
   await expect(page.getByText('Updated just now')).toBeVisible();
 });
 
-test('shows independent connector onboarding and persists a skip decision', async ({ page }) => {
+test('puts usage first, keeps connection actions inside provider cards, and refreshes action state', async ({
+  page
+}) => {
+  const requestCounts = { connectors: 0, overview: 0, doctor: 0 };
+  let xaiConnected = false;
+  await page.route('**/api/connectors', async (route) => {
+    requestCounts.connectors += 1;
+    const response = await route.fetch();
+    const body = (await response.json()) as Array<Record<string, unknown>>;
+    await route.fulfill({
+      response,
+      json: body.map((connector) =>
+        connector.id === 'xai-api' && xaiConnected
+          ? {
+              ...connector,
+              state: 'connected',
+              secretReference: 'connector:xai-api',
+              secretConfigured: true
+            }
+          : connector
+      )
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    requestCounts.overview += 1;
+    await route.continue();
+  });
+  await page.route('**/api/doctor', async (route) => {
+    requestCounts.doctor += 1;
+    await route.continue();
+  });
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.goto(freshLaunch.stdout.trim());
 
-  await expect(page.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Connections' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
   await expect(page.getByTestId('diagnostic-codex')).toBeVisible();
-  for (const name of ['Codex', 'Claude Code', 'OpenCode Go', 'Grok', 'xAI API (Grok)']) {
+  for (const name of ['Codex', 'Claude Code', 'OpenCode Go', 'Grok']) {
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   }
+  expect(
+    await page.locator('.providers').evaluate((providers) => {
+      const monitoring = document.querySelector('.monitoring-section');
+      return monitoring
+        ? Boolean(providers.compareDocumentPosition(monitoring) & Node.DOCUMENT_POSITION_FOLLOWING)
+        : false;
+    })
+  ).toBe(true);
+  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
+    await expect(page.locator(`[data-provider-logo="${providerId}"]`)).toBeVisible();
+  }
+  await expect(page.locator('.provider-mark')).toHaveCount(0);
   await expect(page.getByTestId('connector-claude-code').getByText('Experimental')).toBeVisible();
   await expect(page.getByTestId('connector-codex').getByText('Official client')).toBeVisible();
   const notificationSetting = page.getByRole('checkbox', { name: 'Local notifications' });
   await expect(notificationSetting).not.toBeChecked();
   await notificationSetting.check();
   await expect(notificationSetting).toBeChecked();
-  const xaiApi = page.getByTestId('connector-xai-api');
+  const grokProvider = page.locator('.provider-card').filter({ hasText: 'Grok' });
+  await grokProvider.getByRole('tab', { name: 'xAI API' }).click();
+  const xaiApi = grokProvider.getByTestId('connector-xai-api');
   await expect(xaiApi.getByText('Agent Usage Keychain')).toBeVisible();
   await expect(xaiApi.getByRole('button', { name: 'Connect' })).toBeDisabled();
   let xaiActionBody: unknown = null;
   await page.route('**/api/connectors/xai-api/action', async (route) => {
     xaiActionBody = route.request().postDataJSON();
+    xaiConnected = true;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -89,15 +134,23 @@ test('shows independent connector onboarding and persists a skip decision', asyn
         credentialOwner: 'agent-usage',
         experimental: false,
         expectedCoverage: ['tokens', 'actual-cost', 'history'],
+        target: {
+          provider: { id: 'grok', displayName: 'Grok' },
+          billingDomain: { id: 'xai-api', displayName: 'xAI API' }
+        },
         secretConfigured: true
       })
     });
   });
+  const beforeAction = { ...requestCounts };
   await xaiApi.getByRole('textbox', { name: /Management API key/ }).fill('browser-fake-key');
   await xaiApi.getByRole('button', { name: 'Connect' }).click();
   expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-fake-key' });
   await expect(xaiApi.getByText('Connected')).toBeVisible();
   await expect(xaiApi).not.toContainText('browser-fake-key');
+  await expect.poll(() => requestCounts.connectors).toBeGreaterThan(beforeAction.connectors);
+  expect(requestCounts.overview).toBeGreaterThan(beforeAction.overview);
+  expect(requestCounts.doctor).toBeGreaterThan(beforeAction.doctor);
 
   const openCode = page.getByTestId('connector-opencode-go');
   await openCode.getByRole('button', { name: 'Skip' }).click();
@@ -576,7 +629,8 @@ test('switches the complete catalog to Simplified Chinese without translating pr
 
   await page.getByRole('button', { name: '中文' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-  await expect(page.getByRole('heading', { name: '连接' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '连接' })).toHaveCount(0);
+  await expect(page.getByText('连接设置').first()).toBeVisible();
   await expect(page.getByRole('heading', { name: '隐私与数据' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude Code' })).toBeVisible();
   const demoCard = page.locator('.provider-card').filter({ hasText: 'Demo Agent' });

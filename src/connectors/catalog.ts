@@ -9,6 +9,10 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
     credentialOwner: 'official-client',
     experimental: false,
     expectedCoverage: ['quota', 'tokens', 'history'],
+    target: {
+      provider: { id: 'codex', displayName: 'Codex' },
+      billingDomain: { id: 'subscription', displayName: 'Subscription' }
+    },
     officialCredentialPaths: ['.codex/auth.json']
   },
   {
@@ -19,6 +23,10 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
     credentialOwner: 'official-client',
     experimental: true,
     expectedCoverage: ['quota', 'tokens', 'history'],
+    target: {
+      provider: { id: 'claude-code', displayName: 'Claude Code' },
+      billingDomain: { id: 'subscription', displayName: 'Subscription' }
+    },
     officialCredentialPaths: ['.claude', '.claude.json']
   },
   {
@@ -30,6 +38,10 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
     credentialOwner: 'official-client',
     experimental: false,
     expectedCoverage: ['quota', 'tokens', 'history'],
+    target: {
+      provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
+      billingDomain: { id: 'go-subscription', displayName: 'OpenCode Go' }
+    },
     officialCredentialPaths: ['.local/share/opencode/auth.json']
   },
   {
@@ -41,6 +53,10 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
     credentialOwner: 'official-client',
     experimental: true,
     expectedCoverage: ['quota', 'tokens', 'history'],
+    target: {
+      provider: { id: 'grok', displayName: 'Grok' },
+      billingDomain: { id: 'grok-build-subscription', displayName: 'Build / SuperGrok' }
+    },
     officialCredentialPaths: ['.grok/auth.json']
   },
   {
@@ -51,6 +67,10 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
       'Store a dedicated xAI Management API key in macOS Keychain for official billing data.',
     credentialOwner: 'agent-usage',
     experimental: false,
-    expectedCoverage: ['tokens', 'actual-cost', 'history']
+    expectedCoverage: ['tokens', 'actual-cost', 'history'],
+    target: {
+      provider: { id: 'grok', displayName: 'Grok' },
+      billingDomain: { id: 'xai-api', displayName: 'xAI API' }
+    }
   }
 ];

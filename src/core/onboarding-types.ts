@@ -3,6 +3,17 @@ export type CredentialOwner = 'official-client' | 'agent-usage' | 'none';
 export type ConnectorSetupState =
   'not-checked' | 'not-installed' | 'discovered' | 'connected' | 'skipped' | 'error';
 
+export interface ConnectorTarget {
+  provider: {
+    id: string;
+    displayName: string;
+  };
+  billingDomain: {
+    id: string;
+    displayName: string;
+  };
+}
+
 export interface ConnectorDefinition {
   id: string;
   displayName: string;
@@ -11,6 +22,7 @@ export interface ConnectorDefinition {
   credentialOwner: CredentialOwner;
   experimental: boolean;
   expectedCoverage: CoverageDimension[];
+  target: ConnectorTarget;
   officialCredentialPaths?: string[];
 }
 
@@ -49,6 +61,7 @@ export interface ConnectorStatus extends ConnectorStatusRecord {
   credentialOwner: CredentialOwner;
   experimental: boolean;
   expectedCoverage: CoverageDimension[];
+  target: ConnectorTarget;
   secretConfigured: boolean;
 }
 

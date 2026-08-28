@@ -49,7 +49,15 @@ describe('provider discovery and onboarding', () => {
       { id: 'codex', state: 'discovered', installed: true, officialCredentialPresent: true },
       { id: 'claude-code', state: 'error', errorCode: 'discovery-failed' },
       { id: 'opencode-go', state: 'not-installed', installed: false },
-      { id: 'grok', state: 'discovered', installed: true },
+      {
+        id: 'grok',
+        state: 'discovered',
+        installed: true,
+        target: {
+          provider: { id: 'grok', displayName: 'Grok' },
+          billingDomain: { id: 'grok-build-subscription', displayName: 'Build / SuperGrok' }
+        }
+      },
       { id: 'managed-test', state: 'discovered', installed: true }
     ]);
 
@@ -89,6 +97,68 @@ describe('provider discovery and onboarding', () => {
     const databaseBytes = await readFile(databasePath);
     expect(databaseBytes.toString('utf8')).not.toContain('fake-super-secret-value');
   });
+
+  it('refreshes newly connected usage before the action completes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-connect-refresh-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let collections = 0;
+    const application = new UsageApplication({
+      repository,
+      connectors: [
+        {
+          id: 'grok-build',
+          displayName: 'Grok Build',
+          consentId: 'grok',
+          async collect() {
+            collections += 1;
+            return {
+              provider: { id: 'grok', displayName: 'Grok' },
+              billingDomains: [{ id: 'grok-build-subscription', displayName: 'Build / SuperGrok' }],
+              quotaBuckets: [
+                {
+                  id: 'weekly',
+                  billingDomainId: 'grok-build-subscription',
+                  label: 'Weekly limit',
+                  usedPercent: 21,
+                  resetsAt: '2026-09-01T00:00:00.000Z',
+                  authority: 'official-client' as const
+                }
+              ],
+              usage: [],
+              costs: [],
+              observedAt: '2026-08-28T02:00:00.000Z'
+            };
+          }
+        }
+      ],
+      connectorDefinitions: [definitions.find((definition) => definition.id === 'grok')!],
+      discoveryProbe: {
+        async inspect() {
+          return {
+            installed: true,
+            binaryPath: '/usr/local/bin/grok',
+            officialCredentialPresent: true
+          };
+        }
+      },
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await application.discoverConnectors();
+    await application.configureConnector('grok', { action: 'connect' });
+
+    expect(collections).toBe(1);
+    expect(await application.getOverview()).toMatchObject({
+      providers: [
+        {
+          id: 'grok',
+          quotaBuckets: [{ billingDomainId: 'grok-build-subscription', usedPercent: 21 }]
+        }
+      ]
+    });
+    repository.close();
+  });
 });
 
 const definitions: ConnectorDefinition[] = [
@@ -99,7 +169,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Read usage from the official Codex client.',
     credentialOwner: 'official-client',
     experimental: false,
-    expectedCoverage: ['quota', 'tokens']
+    expectedCoverage: ['quota', 'tokens'],
+    target: {
+      provider: { id: 'codex', displayName: 'Codex' },
+      billingDomain: { id: 'subscription', displayName: 'Subscription' }
+    }
   },
   {
     id: 'claude-code',
@@ -108,7 +182,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Read opt-in telemetry and official client usage.',
     credentialOwner: 'official-client',
     experimental: true,
-    expectedCoverage: ['quota', 'tokens']
+    expectedCoverage: ['quota', 'tokens'],
+    target: {
+      provider: { id: 'claude-code', displayName: 'Claude Code' },
+      billingDomain: { id: 'subscription', displayName: 'Subscription' }
+    }
   },
   {
     id: 'opencode-go',
@@ -117,7 +195,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Read account quota and local session exports.',
     credentialOwner: 'official-client',
     experimental: false,
-    expectedCoverage: ['quota', 'tokens', 'history']
+    expectedCoverage: ['quota', 'tokens', 'history'],
+    target: {
+      provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
+      billingDomain: { id: 'go-subscription', displayName: 'OpenCode Go' }
+    }
   },
   {
     id: 'grok',
@@ -126,7 +208,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Read Grok Build telemetry and usage.',
     credentialOwner: 'official-client',
     experimental: true,
-    expectedCoverage: ['quota', 'tokens']
+    expectedCoverage: ['quota', 'tokens'],
+    target: {
+      provider: { id: 'grok', displayName: 'Grok' },
+      billingDomain: { id: 'grok-build-subscription', displayName: 'Build / SuperGrok' }
+    }
   },
   {
     id: 'managed-test',
@@ -135,7 +221,11 @@ const definitions: ConnectorDefinition[] = [
     permissionDescription: 'Store a product-owned test credential.',
     credentialOwner: 'agent-usage',
     experimental: false,
-    expectedCoverage: ['actual-cost']
+    expectedCoverage: ['actual-cost'],
+    target: {
+      provider: { id: 'managed-test', displayName: 'Managed test' },
+      billingDomain: { id: 'api', displayName: 'API' }
+    }
   }
 ];
 
