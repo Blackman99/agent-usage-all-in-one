@@ -47,6 +47,46 @@ try {
   if (!Array.isArray(parsedStatus.providers)) throw new Error('Packaged status output is invalid');
   if (parsedDoctor.daemon?.status !== 'healthy') throw new Error('Packaged doctor is unhealthy');
 
+  const jsonExport = await execute(
+    executable,
+    ['--home', applicationHome, 'export', '--format', 'json', '--window', '30d'],
+    { timeout: 10_000 }
+  );
+  const parsedJsonExport = JSON.parse(jsonExport.stdout);
+  if (parsedJsonExport.query?.window !== '30d' || !Array.isArray(parsedJsonExport.rows)) {
+    throw new Error('Packaged JSON export output is invalid');
+  }
+  if (
+    parsedJsonExport.privacy?.accountIdentifiersIncluded !== false ||
+    parsedJsonExport.privacy?.secretsIncluded !== false
+  ) {
+    throw new Error('Packaged JSON export is not redacted by default');
+  }
+
+  const csvExport = await execute(
+    executable,
+    ['--home', applicationHome, 'export', '--format', 'csv', '--window', '7d'],
+    { timeout: 10_000 }
+  );
+  if (!csvExport.stdout.startsWith('window,windowStart,windowEnd')) {
+    throw new Error('Packaged CSV export output is invalid');
+  }
+
+  const retention = await execute(executable, ['--home', applicationHome, 'retention', '--json'], {
+    timeout: 10_000
+  });
+  if (JSON.parse(retention.stdout).rawRetentionDays !== 90) {
+    throw new Error('Packaged retention status is invalid');
+  }
+  const compacted = await execute(
+    executable,
+    ['--home', applicationHome, 'retention', '--compact', '--json'],
+    { timeout: 10_000 }
+  );
+  if (!JSON.parse(compacted.stdout).lastCompactedAt) {
+    throw new Error('Packaged retention compaction did not complete');
+  }
+
   await execute(executable, ['--home', applicationHome, 'clear', '--yes'], {
     timeout: 10_000
   });
@@ -71,6 +111,10 @@ try {
       installedDefaultCommand: 'passed',
       status: 'passed',
       doctor: 'passed',
+      jsonExport: 'passed',
+      csvExport: 'passed',
+      retention: 'passed',
+      retentionCompaction: 'passed',
       clear: 'passed',
       cleanUninstall: 'passed'
     })}\n`

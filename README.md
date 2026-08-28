@@ -4,6 +4,20 @@ Agent Usage 是一个 macOS 优先、完全本地运行的 coding-agent 用量�
 
 界面支持简体中文和 English。Grok 在一张 provider 卡片内明确分隔 `Build / SuperGrok` 与 `xAI API` 两个 billing domain，二者不会合并计数。
 
+## Usage-first Dashboard V2
+
+首页默认显示最近 7 天，并记住本机最后选择的 `24h`、`7d` 或 `30d` 时间窗口与 CNY/USD 展示币种。页面顺序固定为：全局摘要 → 四张 Provider 用量卡 → Token 与金额工作台 → 模型排行；连接状态和恢复动作直接位于对应 Provider 卡内，不再用独立配置面板抢占首屏。
+
+全局摘要展示已记录 Token、API 等价零售价及其定价覆盖率、最紧张原生 quota bucket 和最新观测时间。工作台将以下三类金额严格分开：
+
+- `actual`：Provider 账单实际费用；
+- `reported-estimate`：Provider 或客户端报告的估算；
+- `retail-equivalent`：按版本化官方 API 零售价计算的对等价值，不是账单。
+
+固定订阅费只保留在计费明细和导出中，不会按 Token、模型或日期摊派。趋势按 Provider 展示，模型排行按 Provider 与 billing domain 隔离；无法识别模型、Token 类型或价格档位的数据保持 unclassified/unpriced，不会猜测或写成 0。
+
+Token 证据会明确标出账户或本机范围、event/hour/day/billing-period 时间精度、分类覆盖率和定价覆盖率。切换分析窗口不会改写 Provider 原生的 5 小时、周、月等 quota 窗口。Monitoring、完整 Diagnostics、Privacy、导出、保留和清理统一放在顶部“设置”抽屉。
+
 ## 开发调试
 
 在仓库根目录执行：
@@ -85,7 +99,7 @@ npm uninstall --global agent-usage-all-in-one
 
 运行 `agent-usage doctor` 可检查 daemon、database、binary、连接状态、billing domain、freshness、影响的 coverage 和恢复动作。诊断区分 missing binary、not configured、unauthorized、unsupported、schema mismatch、rate limited、timeout、stale 与 unavailable。一个 connector 失败只会降级自己的范围，不会隐藏其他 provider。
 
-常见恢复顺序：安装或升级对应官方 CLI → 在官方客户端完成登录 → 回到 Connections 重试 → 手动 Refresh → 再运行 doctor。实验性 connector 会在界面明确标注；未知 schema 一律 fail closed。
+常见恢复顺序：安装或升级对应官方 CLI → 在官方客户端完成登录 → 在对应 Provider 卡点击“管理连接”（或打开顶部“设置”抽屉）重试 → 手动 Refresh → 再运行 doctor。实验性 connector 会在界面明确标注；未知 schema 一律 fail closed。
 
 ## 开发与验收
 
@@ -100,7 +114,7 @@ pnpm test:package
 pnpm test:e2e
 ```
 
-真实 connector 检查必须显式 opt-in，普通测试不读取个人 credentials。脱敏发布收据见 [`docs/release/connector-receipts-2026-08-28.md`](docs/release/connector-receipts-2026-08-28.md)，P0 验证记录见 [`docs/release/p0-validation-2026-08-28.md`](docs/release/p0-validation-2026-08-28.md)。
+真实 connector 检查必须显式 opt-in，普通测试不读取个人 credentials。脱敏发布收据见 [`docs/release/connector-receipts-2026-08-28.md`](docs/release/connector-receipts-2026-08-28.md)，V2 验证记录见 [`docs/release/p0-validation-2026-08-28.md`](docs/release/p0-validation-2026-08-28.md)，官方定价证据见 [`docs/research/official-pricing-sources-2026-08-28.md`](docs/research/official-pricing-sources-2026-08-28.md)，本地品牌资产审计见 [`static/brands/README.md`](static/brands/README.md)。
 
 ## English summary
 

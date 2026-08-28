@@ -876,6 +876,8 @@ test('follows system theme and keeps the usage dashboard responsive with local o
       .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
   ).toBe('/brands/xai-light.svg');
 
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await expect.poll(gridColumnCount).toBe(2);
   await page.setViewportSize({ width: 1680, height: 1000 });
   await expect.poll(gridColumnCount).toBe(4);
   await page.setViewportSize({ width: 390, height: 844 });

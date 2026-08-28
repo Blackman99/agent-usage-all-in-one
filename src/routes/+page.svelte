@@ -3990,7 +3990,7 @@
     }
   }
 
-  @media (min-width: 1440px) {
+  @media (min-width: 1640px) {
     .providers {
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
