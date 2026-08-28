@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 describe('OpenCodeGoConnector', () => {
-  it('keeps account quota and local model usage in distinct truthful scopes', async () => {
+  it('keeps the Go subscription limited to account quota', async () => {
     const accountClient: OpenCodeGoAccountClient = {
       async readUsage() {
         return goUsageFixture;
@@ -65,44 +65,12 @@ describe('OpenCodeGoConnector', () => {
         { id: 'weekly', label: 'Week', usedPercent: 40, limitAmount: 30 },
         { id: 'monthly', label: 'Month', usedPercent: 50, limitAmount: 60 }
       ],
-      usage: [
-        {
-          id: 'opencode-request:v2:684699faaac4917aaf69692cd648693c69e258a8b0c4c25cdce3ec664ca71f4e',
-          model: 'opencode-go/deepseek-v4-flash',
-          inputTokens: 700,
-          outputTokens: 250,
-          reasoningTokens: 50,
-          cacheReadTokens: 200,
-          tokenSemantics: {
-            reasoning: 'separate',
-            cacheRead: 'separate',
-            cacheWrite: 'separate'
-          },
-          modelAttribution: 'known',
-          timePrecision: 'event',
-          usageScope: 'this-mac',
-          aggregationTemporality: 'delta',
-          authority: 'local-observation'
-        }
-      ],
-      costs: [
-        expect.objectContaining({
-          id: 'opencode-request-cost:v2:684699faaac4917aaf69692cd648693c69e258a8b0c4c25cdce3ec664ca71f4e',
-          sourceId:
-            'opencode-request:v2:684699faaac4917aaf69692cd648693c69e258a8b0c4c25cdce3ec664ca71f4e',
-          kind: 'reported-estimate',
-          amount: 0.42,
-          authority: 'local-observation',
-          model: 'opencode-go/deepseek-v4-flash',
-          usageObservationId:
-            'opencode-request:v2:684699faaac4917aaf69692cd648693c69e258a8b0c4c25cdce3ec664ca71f4e'
-        })
-      ]
+      usage: [],
+      costs: []
     });
-    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
   });
 
-  it('returns local history with an actionable warning when account quota is unavailable', async () => {
+  it('retires legacy Go-attributed local history when account quota is unavailable', async () => {
     const accountClient: OpenCodeGoAccountClient = {
       async readUsage() {
         throw new OpenCodeGoClientError(
@@ -121,7 +89,11 @@ describe('OpenCodeGoConnector', () => {
 
     const snapshot = await connector.collect();
     expect(snapshot.quotaBuckets).toEqual([]);
-    expect(snapshot.usage).toHaveLength(1);
+    expect(snapshot.usage).toEqual([]);
+    expect(snapshot.usageReconciliation).toEqual({
+      authoritativeIdPrefix: 'opencode-request:',
+      retiredIdPrefixes: ['opencode-session:']
+    });
     expect(snapshot.warnings).toEqual([
       expect.objectContaining({ code: 'go-subscription-required' })
     ]);
@@ -147,7 +119,7 @@ describe('OpenCodeGoConnector', () => {
     ]);
   });
 
-  it('keeps request Tokens but omits a reported estimate when source cost is absent', async () => {
+  it('leaves local request Tokens to the OpenCode local Connector', async () => {
     const connector = new OpenCodeGoConnector({
       accountClient: { readUsage: async () => goUsageFixture },
       localHistoryClient: {
@@ -159,7 +131,7 @@ describe('OpenCodeGoConnector', () => {
 
     const snapshot = await connector.collect();
 
-    expect(snapshot.usage).toHaveLength(1);
+    expect(snapshot.usage).toEqual([]);
     expect(snapshot.costs).toEqual([]);
   });
 });
@@ -250,6 +222,49 @@ describe('CliOpenCodeLocalHistoryClient', () => {
     expect(JSON.stringify(history)).not.toContain('message-secret-123');
   });
 
+  it('keeps completed non-Go requests with their local Provider identity', async () => {
+    const client = new CliOpenCodeLocalHistoryClient({
+      execFile: async () => ({ stdout: '/private/opencode.db\n', stderr: '' }),
+      readDatabase: () => [
+        {
+          ...localMessageRowFixture,
+          sourceId: 'non-go-message-secret',
+          providerId: 'anthropic',
+          modelId: 'claude-sonnet-4'
+        }
+      ]
+    });
+
+    await expect(client.readHistory()).resolves.toEqual([
+      expect.objectContaining({
+        providerId: 'anthropic',
+        model: 'anthropic/claude-sonnet-4'
+      })
+    ]);
+  });
+
+  it('shares one local database scan across concurrent Connectors', async () => {
+    let pathReads = 0;
+    let databaseReads = 0;
+    const client = new CliOpenCodeLocalHistoryClient({
+      execFile: async () => {
+        pathReads += 1;
+        await Promise.resolve();
+        return { stdout: '/private/opencode.db\n', stderr: '' };
+      },
+      readDatabase: () => {
+        databaseReads += 1;
+        return [localMessageRowFixture];
+      }
+    });
+
+    const [go, local] = await Promise.all([client.readHistory(), client.readHistory()]);
+
+    expect(go).toEqual(local);
+    expect(pathReads).toBe(1);
+    expect(databaseReads).toBe(1);
+  });
+
   it('fails closed when the installed CLI schema has drifted', async () => {
     const client = new CliOpenCodeLocalHistoryClient({
       execFile: async () => ({ stdout: '/private/opencode.db\n', stderr: '' }),
@@ -298,6 +313,7 @@ const goUsageFixture = {
 
 const localSessionFixture = {
   id: 'v2:684699faaac4917aaf69692cd648693c69e258a8b0c4c25cdce3ec664ca71f4e',
+  providerId: 'opencode-go',
   model: 'opencode-go/deepseek-v4-flash',
   cost: 0.42,
   inputTokens: 700,

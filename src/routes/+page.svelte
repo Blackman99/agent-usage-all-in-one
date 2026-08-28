@@ -27,6 +27,8 @@
     isAutomaticallyManagedCategory
   } from '$lib/automatic-recovery.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
+  import UsageTrendChart from '$lib/UsageTrendChart.svelte';
+  import { trendSegmentColor } from '$lib/usage-trend.js';
 
   let locale: Locale = 'en';
   let metaDescription: string;
@@ -61,11 +63,6 @@
   let clearingData = false;
   let hardRebuilding = false;
   let workbenchLoading = false;
-  let trendViewportStart = 0;
-  let trendViewportSize: number | null = null;
-  let trendHoverIndex: number | null = null;
-  let trendPanOrigin: { clientX: number; viewportStart: number } | null = null;
-  let trendPanning = false;
   let processing: ProcessingStatus | null = null;
   let processingTimer: ReturnType<typeof setInterval> | null = null;
   let settingsOpen = false;
@@ -77,7 +74,6 @@
   let destroyed = false;
   let overviewRequestSequence = 0;
   let workbenchRequestSequence = 0;
-  const minimumTrendBuckets = 4;
   const automaticRecoveryController = createAutomaticRecoveryController(() => automaticRefresh());
 
   $: metaDescription = translate(locale, 'metaDescription');
@@ -744,7 +740,6 @@
   async function selectWindow(window: HistoryWindow): Promise<void> {
     if (selectedWindow === window && !workbenchLoading) return;
     selectedWindow = window;
-    resetTrendViewport();
     try {
       localStorage.setItem('agent-usage:history-window', window);
     } catch {
@@ -818,6 +813,10 @@
         dark: '/brands/opencode-dark.svg',
         light: '/brands/opencode-light.svg'
       },
+      opencode: {
+        dark: '/brands/opencode-dark.svg',
+        light: '/brands/opencode-light.svg'
+      },
       grok: {
         dark: '/brands/grok-light.svg',
         light: '/brands/grok-dark.svg'
@@ -830,10 +829,12 @@
     currentOverview: UsageOverview,
     connectionStatuses: ConnectorStatus[]
   ): ProviderOverview[] {
-    const providers = currentOverview.providers.map((provider) => ({
-      ...provider,
-      billingDomains: [...provider.billingDomains]
-    }));
+    const providers = currentOverview.providers
+      .filter((provider) => provider.id !== 'opencode')
+      .map((provider) => ({
+        ...provider,
+        billingDomains: [...provider.billingDomains]
+      }));
     for (const connector of connectionStatuses) {
       const { provider: targetProvider, billingDomain: targetDomain } = connector.target;
       let provider = providers.find((candidate) => candidate.id === targetProvider.id);
@@ -969,210 +970,6 @@
     return `${formatter.format(new Date(workbench.start))} – ${formatter.format(new Date(workbench.end))}`;
   }
 
-  type TrendBucket = UsageOverview['workbench']['trend']['buckets'][number];
-
-  function trendViewportBounds(
-    totalBuckets: number,
-    viewportStart = trendViewportStart,
-    viewportSize = trendViewportSize
-  ): { start: number; size: number } {
-    if (totalBuckets <= 0) return { start: 0, size: 0 };
-    const minimumSize = Math.min(minimumTrendBuckets, totalBuckets);
-    const size = Math.max(minimumSize, Math.min(viewportSize ?? totalBuckets, totalBuckets));
-    const start = Math.max(0, Math.min(viewportStart, totalBuckets - size));
-    return { start, size };
-  }
-
-  function visibleTrendBuckets(
-    workbench: UsageOverview['workbench'],
-    viewportStart = trendViewportStart,
-    viewportSize = trendViewportSize
-  ): TrendBucket[] {
-    const { start, size } = trendViewportBounds(
-      workbench.trend.buckets.length,
-      viewportStart,
-      viewportSize
-    );
-    return workbench.trend.buckets.slice(start, start + size);
-  }
-
-  function resetTrendViewport(): void {
-    trendViewportStart = 0;
-    trendViewportSize = null;
-    trendHoverIndex = null;
-    trendPanOrigin = null;
-    trendPanning = false;
-  }
-
-  function zoomTrend(totalBuckets: number, direction: 'in' | 'out', anchorRatio = 0.5): void {
-    if (totalBuckets <= 1) return;
-    const current = trendViewportBounds(totalBuckets);
-    const minimumSize = Math.min(minimumTrendBuckets, totalBuckets);
-    const nextSize =
-      direction === 'in'
-        ? Math.max(minimumSize, Math.round(current.size * 0.7))
-        : Math.min(totalBuckets, Math.ceil(current.size / 0.7));
-    if (nextSize === current.size) return;
-    const boundedAnchor = Math.max(0, Math.min(1, anchorRatio));
-    const anchorBucket = current.start + boundedAnchor * Math.max(0, current.size - 1);
-    const nextStart = Math.max(
-      0,
-      Math.min(
-        totalBuckets - nextSize,
-        Math.round(anchorBucket - boundedAnchor * Math.max(0, nextSize - 1))
-      )
-    );
-    trendViewportStart = nextStart;
-    trendViewportSize = nextSize === totalBuckets ? null : nextSize;
-    trendHoverIndex = null;
-  }
-
-  function handleTrendWheel(event: WheelEvent, totalBuckets: number): void {
-    if (event.deltaY === 0) return;
-    const bounds =
-      event.currentTarget instanceof HTMLElement
-        ? event.currentTarget.getBoundingClientRect()
-        : null;
-    const anchorRatio = bounds?.width ? (event.clientX - bounds.left) / bounds.width : 0.5;
-    zoomTrend(totalBuckets, event.deltaY < 0 ? 'in' : 'out', anchorRatio);
-  }
-
-  function updateTrendHover(event: PointerEvent, visibleBuckets: number): void {
-    if (!(event.currentTarget instanceof HTMLElement) || visibleBuckets === 0) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    trendHoverIndex = Math.round(ratio * Math.max(0, visibleBuckets - 1));
-  }
-
-  function handleTrendPointerDown(event: PointerEvent, totalBuckets: number): void {
-    const viewport = trendViewportBounds(totalBuckets);
-    if (!(event.currentTarget instanceof HTMLElement) || viewport.size >= totalBuckets) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    trendPanOrigin = { clientX: event.clientX, viewportStart: viewport.start };
-    trendPanning = true;
-  }
-
-  function handleTrendPointerMove(
-    event: PointerEvent,
-    totalBuckets: number,
-    visibleBuckets: number
-  ): void {
-    updateTrendHover(event, visibleBuckets);
-    if (!trendPanOrigin || !(event.currentTarget instanceof HTMLElement)) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const viewport = trendViewportBounds(totalBuckets);
-    const bucketShift = Math.round(
-      ((trendPanOrigin.clientX - event.clientX) / bounds.width) * viewport.size
-    );
-    trendViewportStart = Math.max(
-      0,
-      Math.min(totalBuckets - viewport.size, trendPanOrigin.viewportStart + bucketShift)
-    );
-  }
-
-  function finishTrendPan(event: PointerEvent): void {
-    if (
-      event.currentTarget instanceof HTMLElement &&
-      event.currentTarget.hasPointerCapture(event.pointerId)
-    ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    trendPanOrigin = null;
-    trendPanning = false;
-  }
-
-  function panTrend(totalBuckets: number, bucketDelta: number): void {
-    const viewport = trendViewportBounds(totalBuckets);
-    trendViewportStart = Math.max(
-      0,
-      Math.min(totalBuckets - viewport.size, viewport.start + bucketDelta)
-    );
-    trendHoverIndex = null;
-  }
-
-  function handleTrendKeydown(event: KeyboardEvent, totalBuckets: number): void {
-    if (event.key === '+' || event.key === '=') zoomTrend(totalBuckets, 'in');
-    else if (event.key === '-') zoomTrend(totalBuckets, 'out');
-    else if (event.key === 'ArrowLeft') panTrend(totalBuckets, -1);
-    else if (event.key === 'ArrowRight') panTrend(totalBuckets, 1);
-    else if (event.key === 'Home') resetTrendViewport();
-    else return;
-    event.preventDefault();
-  }
-
-  function trendTooltipPosition(index: number, visibleBuckets: number): number {
-    if (visibleBuckets <= 1) return 50;
-    return Math.max(8, Math.min(92, (index / (visibleBuckets - 1)) * 100));
-  }
-
-  function trendMaximum(
-    workbench: UsageOverview['workbench'],
-    metric: 'tokens' | 'retail-equivalent',
-    buckets: TrendBucket[] = workbench.trend.buckets
-  ): number | null {
-    const values = buckets.flatMap((bucket) =>
-      bucket.segments.flatMap((segment) =>
-        metric === 'tokens'
-          ? [segment.recordedTokens]
-          : [segment.retailEquivalent.amount, segment.reportedEstimate?.amount ?? null].filter(
-              (value): value is number => value !== null
-            )
-      )
-    );
-    return values.length > 0 ? Math.max(...values) : null;
-  }
-
-  function trendSeries(
-    workbench: UsageOverview['workbench'],
-    metric: 'tokens' | 'retail-equivalent',
-    buckets: TrendBucket[] = workbench.trend.buckets
-  ) {
-    const maximum = Math.max(1, trendMaximum(workbench, metric, buckets) ?? 0);
-    const identities = trendLegend(workbench, metric);
-    return identities.map((identity) => {
-      const key = `${identity.providerId}:${identity.billingDomainId}:${identity.costPurpose ?? 'tokens'}`;
-      const runs: Array<Array<{ x: number; y: number; value: number; label: string }>> = [];
-      let currentRun: Array<{ x: number; y: number; value: number; label: string }> = [];
-      for (const [index, bucket] of buckets.entries()) {
-        const segment = bucket.segments.find(
-          (candidate) =>
-            candidate.providerId === identity.providerId &&
-            candidate.billingDomainId === identity.billingDomainId
-        );
-        const value = segment
-          ? metric === 'tokens'
-            ? segment.recordedTokens
-            : identity.costPurpose === 'reported-estimate'
-              ? (segment.reportedEstimate?.amount ?? null)
-              : segment.retailEquivalent.amount
-          : null;
-        if (bucket.gap || value === null) {
-          if (currentRun.length > 0) runs.push(currentRun);
-          currentRun = [];
-          continue;
-        }
-        currentRun.push({
-          x: buckets.length <= 1 ? 500 : (index / (buckets.length - 1)) * 1000,
-          y: 226 - (value / maximum) * 196,
-          value,
-          label: bucket.label
-        });
-      }
-      if (currentRun.length > 0) runs.push(currentRun);
-      return { ...identity, key, runs };
-    });
-  }
-
-  function trendLinePath(run: Array<{ x: number; y: number }>): string {
-    return run.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
-  }
-
-  function trendAreaPath(run: Array<{ x: number; y: number }>): string {
-    if (run.length < 2) return '';
-    return `M ${run[0].x} 226 ${run.map((point) => `L ${point.x} ${point.y}`).join(' ')} L ${run.at(-1)?.x ?? 0} 226 Z`;
-  }
-
   function formatUsageMetric(
     value: number | null,
     currency: string,
@@ -1184,41 +981,53 @@
       : formatMoney(value, currency);
   }
 
-  function trendLegend(
-    workbench: UsageOverview['workbench'],
+  function providerMetricShare(
+    provider: UsageOverview['workbench']['providerSummary'][number],
     metric: 'tokens' | 'retail-equivalent'
-  ) {
-    const segments = workbench.trend.buckets.flatMap((bucket) => bucket.segments);
-    const identities =
-      metric === 'tokens'
-        ? segments.map((segment) => ({ ...segment, costPurpose: null }))
-        : segments.flatMap((segment) => [
-            ...(segment.retailEquivalent.amount === null
-              ? []
-              : [{ ...segment, costPurpose: 'retail-equivalent' as const }]),
-            ...(segment.reportedEstimate?.amount == null
-              ? []
-              : [{ ...segment, costPurpose: 'reported-estimate' as const }])
-          ]);
-    return [
-      ...new Map(
-        identities.map((segment) => [
-          `${segment.providerId}:${segment.billingDomainId}:${segment.costPurpose ?? 'tokens'}`,
-          segment
-        ])
-      ).values()
-    ];
+  ): number | null {
+    return metric === 'tokens' ? provider.tokenShare : provider.retailShare;
   }
 
-  function trendSegmentColor(providerId: string, billingDomainId: string): string {
-    const colors: Record<string, string> = {
-      codex: '#78a7ff',
-      'claude-code': '#d69b73',
-      'opencode-go': '#73d4b2',
-      'grok:grok-build-subscription': '#b28cff',
-      'grok:xai-api': '#f07f9a'
-    };
-    return colors[`${providerId}:${billingDomainId}`] ?? colors[providerId] ?? '#9aa5b8';
+  function providerShareGradient(
+    workbench: UsageOverview['workbench'],
+    metric: 'tokens' | 'retail-equivalent'
+  ): string {
+    let cursor = 0;
+    const segments = workbench.providerSummary.flatMap((provider) => {
+      const share = providerMetricShare(provider, metric);
+      if (provider.includedInHeadline === false || share === null || share <= 0) return [];
+      const start = cursor;
+      cursor = Math.min(100, cursor + share * 100);
+      return [
+        `${trendSegmentColor(provider.providerId, provider.billingDomainId)} ${start}% ${cursor}%`
+      ];
+    });
+    if (cursor < 100) segments.push(`rgba(122, 136, 164, 0.14) ${cursor}% 100%`);
+    return `conic-gradient(${segments.join(', ')})`;
+  }
+
+  function providerShareDescription(
+    workbench: UsageOverview['workbench'],
+    metric: 'tokens' | 'retail-equivalent'
+  ): string {
+    const shares = workbench.providerSummary.flatMap((provider) => {
+      const share = providerMetricShare(provider, metric);
+      return share === null || provider.includedInHeadline === false
+        ? []
+        : [`${provider.providerDisplayName} ${formatPercent(share)}`];
+    });
+    return `${t('providerShare')}: ${shares.length > 0 ? shares.join(', ') : t('notAvailable')}`;
+  }
+
+  function modelMetricShare(
+    model: UsageOverview['workbench']['modelRanking']['entries'][number],
+    metric: 'tokens' | 'retail-equivalent'
+  ): number | null {
+    if (model.includedInHeadline === false) return null;
+    if (metric === 'tokens') return model.tokenShare;
+    return model.retailEquivalent.amount === null && model.reportedEstimate.amount !== null
+      ? model.reportedShare
+      : model.retailShare;
   }
 
   function trendSegmentDescription(
@@ -1627,19 +1436,6 @@
           {/if}
           {#if overview.workbench}
             {@const workbench = overview.workbench}
-            {@const chartBuckets = visibleTrendBuckets(
-              workbench,
-              trendViewportStart,
-              trendViewportSize
-            )}
-            {@const chartViewport = trendViewportBounds(
-              workbench.trend.buckets.length,
-              trendViewportStart,
-              trendViewportSize
-            )}
-            {@const chartSeries = trendSeries(workbench, selectedTrendMetric, chartBuckets)}
-            {@const chartMaximum = trendMaximum(workbench, selectedTrendMetric, chartBuckets)}
-            {@const hoverBucket = trendHoverIndex === null ? null : chartBuckets[trendHoverIndex]}
             <section
               class="token-money-workbench"
               data-testid="token-money-workbench"
@@ -1721,405 +1517,227 @@
                   </div>
                 </div>
               {/if}
-              <div class:workbench-data-hidden={workbenchLoading} class="usage-overview-grid">
-                <section class="usage-summary" aria-label={t('usage')}>
-                  <div class="usage-headline" data-testid="usage-headline">
-                    <strong
-                      aria-label={selectedTrendMetric === 'tokens'
-                        ? workbench.recordedTokens === null
-                          ? t('notAvailable')
-                          : tokenValueLabel(workbench.recordedTokens)
-                        : formatMoney(
-                            workbench.costs.retailEquivalent.amount,
-                            workbench.comparisonCurrency
-                          )}
-                    >
-                      {selectedTrendMetric === 'tokens'
-                        ? workbench.recordedTokens === null
-                          ? t('notAvailable')
-                          : formatCompactNumber(workbench.recordedTokens)
-                        : formatMoney(
-                            workbench.costs.retailEquivalent.amount,
-                            workbench.comparisonCurrency
-                          )}
-                    </strong>
-                    <span data-testid="trend-mode">
-                      {selectedTrendMetric === 'tokens'
-                        ? t('recordedTokens')
-                        : t('apiRetailEquivalent')}
-                    </span>
-                    {#if selectedTrendMetric === 'retail-equivalent'}
-                      <small>
-                        {t('apiRateEstimate')} · {t('pricingCoverage')}
-                        {formatPercent(workbench.costs.retailEquivalent.pricingCoverage)} ·
-                        {displayAuthorities(workbench.costs.retailEquivalent.authorities)} ·
-                        {formatReset(workbench.costs.retailEquivalent.observedAt)}
-                      </small>
-                    {:else}
-                      <small>
-                        {displayAuthorities(overviewTokenEvidence.authorities)} ·
-                        {formatReset(overviewTokenEvidence.lastObservedAt)}
-                      </small>
-                    {/if}
-                  </div>
-
-                  <ol class="provider-usage-list" data-testid="usage-provider-summary">
-                    {#each workbench.providerSummary as provider (`${provider.providerId}:${provider.billingDomainId}`)}
-                      {@const providerLogo = providerLogoSources(provider.providerId)}
-                      {@const providerAmount =
-                        selectedTrendMetric === 'tokens'
-                          ? provider.recordedTokens
-                          : provider.retailEquivalent.amount}
-                      {@const providerShare =
-                        selectedTrendMetric === 'tokens'
-                          ? provider.tokenShare
-                          : provider.retailShare}
-                      {@const providerAuthorities =
-                        selectedTrendMetric === 'tokens'
-                          ? provider.authorities
-                          : provider.retailEquivalent.authorities}
-                      {@const providerObservedAt =
-                        selectedTrendMetric === 'tokens'
-                          ? provider.lastObservedAt
-                          : provider.retailEquivalent.observedAt}
-                      <li>
-                        <span class="provider-usage-identity">
-                          {#if providerLogo}
-                            <picture
-                              class="usage-provider-logo"
-                              data-provider-logo={provider.providerId}
-                            >
-                              <source
-                                media="(prefers-color-scheme: light)"
-                                srcset={providerLogo.light}
-                              />
-                              <source
-                                media="(prefers-color-scheme: dark)"
-                                srcset={providerLogo.dark}
-                              />
-                              <img src={providerLogo.dark} alt="" />
-                            </picture>
-                          {:else}
-                            <i
-                              style={`background: ${trendSegmentColor(provider.providerId, provider.billingDomainId)}`}
-                            ></i>
-                          {/if}
-                          <span>
-                            <strong>{provider.providerDisplayName}</strong>
-                            <small>{provider.billingDomainDisplayName}</small>
-                            <small>
-                              {displayAuthorities(providerAuthorities)} ·
-                              {formatReset(providerObservedAt)}
-                            </small>
-                          </span>
-                        </span>
-                        <span class="provider-usage-value">
-                          <strong
-                            >{formatUsageMetric(
-                              providerAmount,
-                              workbench.comparisonCurrency,
-                              selectedTrendMetric
-                            )}</strong
-                          >
-                          <small>
-                            {provider.includedInHeadline === false
-                              ? t('separateFromHeadline')
-                              : formatPercent(providerShare)}
-                          </small>
-                        </span>
-                      </li>
-                    {/each}
-                  </ol>
-                </section>
-
-                <article class="workbench-trend">
-                  <div class="trend-heading">
-                    <div>
-                      <span
-                        >{selectedTrendMetric === 'tokens' ? t('tokenTrend') : t('costTrend')}</span
-                      >
-                      <strong>{formatWorkbenchRange(workbench)}</strong>
-                    </div>
-                    <div class="trend-interactions">
-                      <span>{t('trendInteractionHint')}</span>
-                      <div
-                        class="trend-zoom-controls"
-                        role="group"
-                        aria-label={t('timeAxisControls')}
-                      >
-                        <button
-                          type="button"
-                          aria-label={t('zoomOutTimeAxis')}
-                          disabled={trendViewportSize === null}
-                          on:click={() => zoomTrend(workbench.trend.buckets.length, 'out')}
-                          >−</button
-                        >
-                        <button
-                          type="button"
-                          aria-label={t('zoomInTimeAxis')}
-                          disabled={(trendViewportSize ?? workbench.trend.buckets.length) <=
-                            Math.min(minimumTrendBuckets, workbench.trend.buckets.length)}
-                          on:click={() => zoomTrend(workbench.trend.buckets.length, 'in')}>+</button
-                        >
-                        <button
-                          type="button"
-                          aria-label={t('resetTimeAxis')}
-                          disabled={trendViewportSize === null && trendViewportStart === 0}
-                          on:click={() => resetTrendViewport()}>↺</button
-                        >
-                      </div>
-                    </div>
-                  </div>
-                  <div class="trend-chart" data-testid="usage-trend-chart">
-                    <div class="trend-y-axis">
-                      <span
-                        >{formatUsageMetric(
-                          chartMaximum,
-                          workbench.comparisonCurrency,
-                          selectedTrendMetric
-                        )}</span
-                      >
-                      <span
-                        >{formatUsageMetric(
-                          chartMaximum === null ? null : chartMaximum / 2,
-                          workbench.comparisonCurrency,
-                          selectedTrendMetric
-                        )}</span
-                      >
-                      <span
-                        >{formatUsageMetric(
-                          0,
-                          workbench.comparisonCurrency,
-                          selectedTrendMetric
-                        )}</span
-                      >
-                    </div>
-                    <div
-                      class:trend-panning={trendPanning}
-                      class="trend-plot"
-                      data-testid="trend-plot"
-                      data-total-buckets={workbench.trend.buckets.length}
-                      data-visible-buckets={chartViewport.size}
-                      data-viewport-start={chartViewport.start}
-                      role="slider"
-                      aria-label={t('interactiveTrend')}
-                      aria-valuemin="0"
-                      aria-valuemax={Math.max(
-                        0,
-                        workbench.trend.buckets.length - chartViewport.size
-                      )}
-                      aria-valuenow={chartViewport.start}
-                      aria-valuetext={`${chartBuckets[0]?.label ?? '—'} – ${chartBuckets.at(-1)?.label ?? '—'}`}
-                      tabindex="0"
-                      on:wheel|preventDefault={(event) =>
-                        handleTrendWheel(event, workbench.trend.buckets.length)}
-                      on:pointerdown={(event) =>
-                        handleTrendPointerDown(event, workbench.trend.buckets.length)}
-                      on:pointermove={(event) =>
-                        handleTrendPointerMove(
-                          event,
-                          workbench.trend.buckets.length,
-                          chartBuckets.length
-                        )}
-                      on:pointerup={finishTrendPan}
-                      on:pointercancel={finishTrendPan}
-                      on:pointerleave={() => {
-                        if (!trendPanOrigin) trendHoverIndex = null;
-                      }}
-                      on:keydown={(event) =>
-                        handleTrendKeydown(event, workbench.trend.buckets.length)}
-                    >
-                      <svg viewBox="0 0 1000 250" preserveAspectRatio="none" aria-hidden="true">
-                        <line x1="0" y1="30" x2="1000" y2="30"></line>
-                        <line x1="0" y1="128" x2="1000" y2="128"></line>
-                        <line x1="0" y1="226" x2="1000" y2="226"></line>
-                        {#if trendHoverIndex !== null && chartBuckets.length > 0}
-                          <line
-                            class="trend-hover-line"
-                            x1={chartBuckets.length <= 1
-                              ? 500
-                              : (trendHoverIndex / (chartBuckets.length - 1)) * 1000}
-                            y1="30"
-                            x2={chartBuckets.length <= 1
-                              ? 500
-                              : (trendHoverIndex / (chartBuckets.length - 1)) * 1000}
-                            y2="226"
-                          ></line>
-                        {/if}
-                        {#each chartSeries as series (series.key)}
-                          {#each series.runs as run, runIndex (`${series.key}:${runIndex}`)}
-                            {#if trendAreaPath(run) && series.costPurpose !== 'reported-estimate'}
-                              <path
-                                class="trend-area"
-                                data-cost-purpose={series.costPurpose ?? undefined}
-                                d={trendAreaPath(run)}
-                                style={`fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
-                              ></path>
-                            {/if}
-                            {#if run.length > 1}
-                              <path
-                                class="trend-line"
-                                data-cost-purpose={series.costPurpose ?? undefined}
-                                d={trendLinePath(run)}
-                                style={`stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; ${series.costPurpose === 'reported-estimate' ? 'stroke-dasharray: 10 7' : ''}`}
-                              ></path>
-                            {:else if run[0]}
-                              <circle
-                                class="trend-point"
-                                data-cost-purpose={series.costPurpose ?? undefined}
-                                cx={run[0].x}
-                                cy={run[0].y}
-                                r="4"
-                                style={series.costPurpose === 'reported-estimate'
-                                  ? `fill: transparent; stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; stroke-width: 2`
-                                  : `fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
-                              ></circle>
-                            {/if}
-                          {/each}
-                        {/each}
-                      </svg>
-                      {#if hoverBucket}
-                        <div
-                          class="trend-tooltip"
-                          data-testid="trend-tooltip"
-                          role="tooltip"
-                          style={`left: ${trendTooltipPosition(trendHoverIndex ?? 0, chartBuckets.length)}%`}
-                        >
-                          <strong>{hoverBucket.label}</strong>
-                          {#if hoverBucket.gap || hoverBucket.segments.length === 0}
-                            <span>{t('gap')}</span>
-                          {:else}
-                            {#each hoverBucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
-                              <span>
-                                <b>{segment.providerDisplayName}</b>
-                                <small
-                                  >{trendSegmentDescription(segment, selectedTrendMetric)}</small
-                                >
-                              </span>
-                            {/each}
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
-                    <div class="trend-x-axis">
-                      <span>{chartBuckets[0]?.label ?? '—'}</span>
-                      <span>{chartBuckets[Math.floor(chartBuckets.length / 2)]?.label ?? '—'}</span>
-                      <span>{chartBuckets.at(-1)?.label ?? '—'}</span>
-                    </div>
-                  </div>
-                  <div class="trend-legend" aria-hidden="true">
-                    {#each chartSeries as segment (segment.key)}
-                      <span>
-                        <i
-                          style={segment.costPurpose === 'reported-estimate'
-                            ? `background: repeating-linear-gradient(90deg, ${trendSegmentColor(segment.providerId, segment.billingDomainId)} 0 5px, transparent 5px 9px)`
-                            : `background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
-                        ></i>
-                        {segment.providerDisplayName} · {segment.billingDomainDisplayName}
-                        {#if segment.costPurpose}
-                          · {segment.costPurpose === 'reported-estimate'
-                            ? t('providerReportedEstimate')
-                            : t('apiRetailEquivalent')}{/if}
-                        {#if segment.includedInHeadline === false}
-                          · {t('separateFromHeadline')}{/if}
-                      </span>
-                    {/each}
-                  </div>
-                  <div class="trend-data">
-                    <table
-                      aria-label={`${t('trendData')} · ${selectedWindow} · ${workbench.timeZone} · ${workbench.trend.granularity === 'hour' ? t('precisionHour') : t('precisionDay')} · ${t('trendSummary')}`}
-                    >
-                      <thead>
-                        <tr>
-                          <th>{t('interval')}</th>
-                          <th>{t('providerEvidence')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {#each workbench.trend.buckets as bucket (bucket.start)}
-                          <tr>
-                            <td>{bucket.label}</td>
-                            <td>
-                              {bucket.gap
-                                ? t('gap')
-                                : bucket.segments
-                                    .map((segment) =>
-                                      trendSegmentDescription(segment, selectedTrendMetric)
-                                    )
-                                    .join('; ')}
-                            </td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  </div>
-                </article>
-              </div>
-
               <section
                 class:workbench-data-hidden={workbenchLoading}
-                class="usage-totals"
-                data-testid="usage-totals"
-                aria-labelledby="usage-totals-heading"
+                class="usage-summary-board"
+                data-testid="usage-summary-board"
+                aria-label={t('usageOverview')}
               >
-                <h3 id="usage-totals-heading">{t('usageTotals')}</h3>
-                <dl>
-                  <div>
-                    <dt>{t('recordedTokens')}</dt>
-                    <dd>
-                      {workbench.recordedTokens === null
+                <div class="usage-headline" data-testid="usage-headline">
+                  <strong
+                    aria-label={selectedTrendMetric === 'tokens'
+                      ? workbench.recordedTokens === null
                         ? t('notAvailable')
-                        : formatCompactNumber(workbench.recordedTokens)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('input')}</dt>
-                    <dd>
-                      {workbench.tokenBreakdown.status === 'available'
-                        ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.input)
-                        : t('notAvailable')}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('output')}</dt>
-                    <dd>
-                      {workbench.tokenBreakdown.status === 'available'
-                        ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.output)
-                        : t('notAvailable')}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('reasoning')}</dt>
-                    <dd>
-                      {workbench.tokenBreakdown.status === 'available'
-                        ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.reasoning)
-                        : t('notAvailable')}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('cacheRead')}</dt>
-                    <dd>
-                      {workbench.tokenBreakdown.status === 'available'
-                        ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheRead)
-                        : t('notAvailable')}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('cacheWrite')}</dt>
-                    <dd>
-                      {workbench.tokenBreakdown.status === 'available'
-                        ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheWrite)
-                        : t('notAvailable')}
-                    </dd>
-                  </div>
-                </dl>
-                <small class="usage-totals-evidence">
-                  {t('classificationCoverage')}
-                  {formatPercent(workbench.tokenBreakdown.classificationCoverage)} ·
-                  {displayAuthorities(workbench.tokenBreakdown.authorities)} ·
-                  {formatReset(workbench.tokenBreakdown.lastObservedAt)}
-                </small>
+                        : tokenValueLabel(workbench.recordedTokens)
+                      : formatMoney(
+                          workbench.costs.retailEquivalent.amount,
+                          workbench.comparisonCurrency
+                        )}
+                  >
+                    {selectedTrendMetric === 'tokens'
+                      ? workbench.recordedTokens === null
+                        ? t('notAvailable')
+                        : formatCompactNumber(workbench.recordedTokens)
+                      : formatMoney(
+                          workbench.costs.retailEquivalent.amount,
+                          workbench.comparisonCurrency
+                        )}
+                  </strong>
+                  <span data-testid="trend-mode">
+                    {selectedTrendMetric === 'tokens'
+                      ? t('recordedTokens')
+                      : t('apiRetailEquivalent')}
+                  </span>
+                  {#if selectedTrendMetric === 'retail-equivalent'}
+                    <small>
+                      {t('apiRateEstimate')} · {t('pricingCoverage')}
+                      {formatPercent(workbench.costs.retailEquivalent.pricingCoverage)} ·
+                      {displayAuthorities(workbench.costs.retailEquivalent.authorities)} ·
+                      {formatReset(workbench.costs.retailEquivalent.observedAt)}
+                    </small>
+                  {:else}
+                    <small>
+                      {displayAuthorities(overviewTokenEvidence.authorities)} ·
+                      {formatReset(overviewTokenEvidence.lastObservedAt)}
+                    </small>
+                  {/if}
+                </div>
+
+                <div
+                  class="usage-totals"
+                  data-testid="usage-totals"
+                  aria-labelledby="usage-totals-heading"
+                >
+                  <h3 id="usage-totals-heading">{t('usageTotals')}</h3>
+                  <dl>
+                    <div>
+                      <dt>{t('recordedTokens')}</dt>
+                      <dd>
+                        {workbench.recordedTokens === null
+                          ? t('notAvailable')
+                          : formatCompactNumber(workbench.recordedTokens)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('input')}</dt>
+                      <dd>
+                        {workbench.tokenBreakdown.status === 'available'
+                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.input)
+                          : t('notAvailable')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('output')}</dt>
+                      <dd>
+                        {workbench.tokenBreakdown.status === 'available'
+                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.output)
+                          : t('notAvailable')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('reasoning')}</dt>
+                      <dd>
+                        {workbench.tokenBreakdown.status === 'available'
+                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.reasoning)
+                          : t('notAvailable')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('cacheRead')}</dt>
+                      <dd>
+                        {workbench.tokenBreakdown.status === 'available'
+                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheRead)
+                          : t('notAvailable')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('cacheWrite')}</dt>
+                      <dd>
+                        {workbench.tokenBreakdown.status === 'available'
+                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheWrite)
+                          : t('notAvailable')}
+                      </dd>
+                    </div>
+                  </dl>
+                  <small class="usage-totals-evidence">
+                    {t('classificationCoverage')}
+                    {formatPercent(workbench.tokenBreakdown.classificationCoverage)} ·
+                    {displayAuthorities(workbench.tokenBreakdown.authorities)} ·
+                    {formatReset(workbench.tokenBreakdown.lastObservedAt)}
+                  </small>
+                </div>
               </section>
+
+              <div
+                class:workbench-data-hidden={workbenchLoading}
+                class="usage-overview-grid"
+                data-testid="usage-analysis-grid"
+              >
+                <section class="usage-summary" aria-labelledby="provider-share-heading">
+                  <div class="provider-share-heading">
+                    <h3 id="provider-share-heading">{t('providerShare')}</h3>
+                    <small>{t('providerShareSubtitle')}</small>
+                  </div>
+
+                  <div class="provider-share-content">
+                    <div
+                      class="provider-share-chart"
+                      data-testid="provider-share-chart"
+                      role="img"
+                      aria-label={providerShareDescription(workbench, selectedTrendMetric)}
+                      style={`--provider-share-gradient: ${providerShareGradient(workbench, selectedTrendMetric)}`}
+                    >
+                      <span>
+                        <strong>{workbench.providerSummary.length}</strong>
+                        <small>{t('providersLabel')}</small>
+                      </span>
+                    </div>
+
+                    <ol class="provider-usage-list" data-testid="usage-provider-summary">
+                      {#each workbench.providerSummary as provider (`${provider.providerId}:${provider.billingDomainId}`)}
+                        {@const providerLogo = providerLogoSources(provider.providerId)}
+                        {@const providerAmount =
+                          selectedTrendMetric === 'tokens'
+                            ? provider.recordedTokens
+                            : provider.retailEquivalent.amount}
+                        {@const providerShare =
+                          selectedTrendMetric === 'tokens'
+                            ? provider.tokenShare
+                            : provider.retailShare}
+                        {@const providerAuthorities =
+                          selectedTrendMetric === 'tokens'
+                            ? provider.authorities
+                            : provider.retailEquivalent.authorities}
+                        {@const providerObservedAt =
+                          selectedTrendMetric === 'tokens'
+                            ? provider.lastObservedAt
+                            : provider.retailEquivalent.observedAt}
+                        <li>
+                          <span class="provider-usage-identity">
+                            {#if providerLogo}
+                              <picture
+                                class="usage-provider-logo"
+                                data-provider-logo={provider.providerId}
+                              >
+                                <source
+                                  media="(prefers-color-scheme: light)"
+                                  srcset={providerLogo.light}
+                                />
+                                <source
+                                  media="(prefers-color-scheme: dark)"
+                                  srcset={providerLogo.dark}
+                                />
+                                <img src={providerLogo.dark} alt="" />
+                              </picture>
+                            {:else}
+                              <i
+                                style={`background: ${trendSegmentColor(provider.providerId, provider.billingDomainId)}`}
+                              ></i>
+                            {/if}
+                            <span>
+                              <strong>{provider.providerDisplayName}</strong>
+                              <small>{provider.billingDomainDisplayName}</small>
+                              <small>
+                                {displayAuthorities(providerAuthorities)} ·
+                                {formatReset(providerObservedAt)}
+                              </small>
+                            </span>
+                          </span>
+                          <span class="provider-usage-value">
+                            <strong
+                              >{formatUsageMetric(
+                                providerAmount,
+                                workbench.comparisonCurrency,
+                                selectedTrendMetric
+                              )}</strong
+                            >
+                            <small>
+                              {provider.includedInHeadline === false
+                                ? t('separateFromHeadline')
+                                : formatPercent(providerShare)}
+                            </small>
+                          </span>
+                        </li>
+                      {/each}
+                    </ol>
+                  </div>
+                </section>
+
+                {#key selectedWindow}
+                  <UsageTrendChart
+                    buckets={workbench.trend.buckets}
+                    metric={selectedTrendMetric}
+                    currency={workbench.comparisonCurrency}
+                    {locale}
+                    {selectedWindow}
+                    timeZone={workbench.timeZone}
+                    granularity={workbench.trend.granularity}
+                    rangeLabel={formatWorkbenchRange(workbench)}
+                    {formatUsageMetric}
+                    describeSegment={trendSegmentDescription}
+                  />
+                {/key}
+              </div>
 
               <section
                 class:workbench-data-hidden={workbenchLoading}
@@ -2167,6 +1785,7 @@
                       {@const modelCostIsReported =
                         model.retailEquivalent.amount === null &&
                         model.reportedEstimate?.amount != null}
+                      {@const modelShare = modelMetricShare(model, selectedTrendMetric)}
                       <li>
                         <button
                           type="button"
@@ -2221,18 +1840,26 @@
                                 : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
                             </strong>
                           </span>
-                          <span class="ranking-value">
+                          <span class="ranking-value ranking-share-value">
                             <strong>
                               {model.includedInHeadline === false
                                 ? t('headlineShareNotApplicable')
-                                : formatPercent(
-                                    selectedTrendMetric === 'tokens'
-                                      ? model.tokenShare
-                                      : modelCostIsReported
-                                        ? model.reportedShare
-                                        : model.retailShare
-                                  )}
+                                : formatPercent(modelShare)}
                             </strong>
+                            {#if modelShare !== null}
+                              <span
+                                class="model-share-track"
+                                data-testid="model-share-meter"
+                                role="meter"
+                                aria-label={`${model.model} ${selectedTrendMetric === 'tokens' ? t('tokenShare') : t('costShare')}`}
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                                aria-valuenow={Math.round(modelShare * 1000) / 10}
+                              >
+                                <i style={`width: ${Math.max(2, Math.min(100, modelShare * 100))}%`}
+                                ></i>
+                              </span>
+                            {/if}
                           </span>
                           <span class="ranking-value">
                             <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
@@ -3049,8 +2676,7 @@
     height: 54px;
   }
 
-  .usage-toolbar,
-  .trend-heading {
+  .usage-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3064,9 +2690,7 @@
   }
 
   .usage-toolbar h2,
-  .usage-toolbar p,
-  .trend-heading span,
-  .trend-heading strong {
+  .usage-toolbar p {
     margin: 0;
   }
 
@@ -3131,15 +2755,27 @@
 
   .usage-overview-grid {
     display: grid;
-    grid-template-columns: minmax(230px, 0.36fr) minmax(0, 1fr);
+    grid-template-columns: minmax(340px, 0.42fr) minmax(0, 1fr);
     gap: 14px;
     align-items: stretch;
   }
 
+  .usage-summary-board {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.3fr) minmax(0, 1fr);
+    gap: 28px;
+    align-items: center;
+    margin-bottom: 14px;
+    padding: 22px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--surface-subtle);
+  }
+
   .usage-summary {
     display: grid;
-    align-content: space-between;
-    gap: 24px;
+    align-content: start;
+    gap: 18px;
     min-width: 0;
     padding: 22px;
     border: 1px solid var(--border-soft);
@@ -3171,6 +2807,74 @@
   .usage-headline > span {
     color: #c8ced8;
     font-size: 0.76rem;
+  }
+
+  .provider-share-heading {
+    display: grid;
+    gap: 5px;
+  }
+
+  .provider-share-heading h3,
+  .provider-share-heading small {
+    margin: 0;
+  }
+
+  .provider-share-heading h3 {
+    color: var(--text-strong);
+    font-size: 0.88rem;
+    font-weight: 570;
+  }
+
+  .provider-share-heading small {
+    color: var(--muted);
+    font-size: 0.64rem;
+  }
+
+  .provider-share-content {
+    display: grid;
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 18px;
+    align-items: center;
+  }
+
+  .provider-share-chart {
+    display: grid;
+    width: 116px;
+    aspect-ratio: 1;
+    padding: 16px;
+    border-radius: 50%;
+    background: var(--provider-share-gradient);
+    box-shadow: inset 0 0 0 1px rgba(122, 136, 164, 0.14);
+    place-items: center;
+  }
+
+  .provider-share-chart::before {
+    grid-area: 1 / 1;
+    width: 72px;
+    aspect-ratio: 1;
+    border: 1px solid var(--border-soft);
+    border-radius: 50%;
+    background: var(--surface-subtle);
+    content: '';
+  }
+
+  .provider-share-chart > span {
+    display: grid;
+    z-index: 1;
+    grid-area: 1 / 1;
+    gap: 1px;
+    text-align: center;
+  }
+
+  .provider-share-chart strong {
+    color: var(--text-strong);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .provider-share-chart small {
+    color: var(--muted);
+    font-size: 0.58rem;
   }
 
   .provider-usage-list {
@@ -3262,226 +2966,10 @@
     text-align: right;
   }
 
-  .workbench-trend {
-    min-width: 0;
-    padding: 20px;
-    border: 1px solid var(--border-soft);
-    border-radius: 18px;
-    background: var(--surface-subtle);
-  }
-
-  .trend-heading > div:first-child {
-    display: grid;
-    gap: 4px;
-  }
-
-  .trend-interactions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .trend-interactions > span {
-    color: #747d8b;
-    font-size: 0.62rem;
-  }
-
-  .trend-zoom-controls {
-    display: inline-flex;
-    overflow: hidden;
-    border: 1px solid rgba(122, 136, 164, 0.2);
-    border-radius: 10px;
-    background: rgba(8, 10, 15, 0.58);
-  }
-
-  .trend-zoom-controls button {
-    width: 30px;
-    height: 28px;
-    padding: 0;
-    border: 0;
-    border-left: 1px solid rgba(122, 136, 164, 0.14);
-    background: transparent;
-    color: #c8ced8;
-    cursor: pointer;
-    font-size: 0.82rem;
-  }
-
-  .trend-zoom-controls button:first-child {
-    border-left: 0;
-  }
-
-  .trend-zoom-controls button:disabled {
-    color: #555d69;
-    cursor: default;
-  }
-
-  .trend-heading strong {
-    color: #e6eaf2;
-    font-size: 0.84rem;
-  }
-
-  .trend-chart {
-    display: grid;
-    grid-template-columns: 72px minmax(0, 1fr);
-    grid-template-rows: 250px auto;
-    column-gap: 10px;
-    margin-top: 20px;
-  }
-
-  .trend-y-axis {
-    display: grid;
-    grid-row: 1;
-    grid-template-rows: repeat(3, 1fr);
-    align-items: start;
-    height: 226px;
-  }
-
-  .trend-y-axis span,
-  .trend-x-axis span {
-    color: #747d8b;
-    font-size: 0.6rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .trend-y-axis span:nth-child(2) {
-    align-self: center;
-  }
-
-  .trend-y-axis span:last-child {
-    align-self: end;
-  }
-
-  .trend-plot {
-    position: relative;
-    min-width: 0;
-    height: 250px;
-    overflow: hidden;
-    cursor: crosshair;
-    touch-action: none;
-    user-select: none;
-  }
-
-  .trend-plot.trend-panning {
-    cursor: grabbing;
-  }
-
-  .trend-plot svg {
-    width: 100%;
-    height: 250px;
-    overflow: hidden;
-  }
-
-  .trend-chart line {
-    stroke: rgba(122, 136, 164, 0.16);
-    stroke-width: 1;
-    vector-effect: non-scaling-stroke;
-  }
-
-  .trend-area {
-    opacity: 0.11;
-  }
-
-  .trend-line {
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    stroke-width: 2.5;
-    vector-effect: non-scaling-stroke;
-  }
-
-  .trend-point {
-    vector-effect: non-scaling-stroke;
-  }
-
-  .trend-chart .trend-hover-line {
-    stroke: rgba(225, 231, 241, 0.52);
-    stroke-dasharray: 4 4;
-  }
-
-  .trend-tooltip {
-    position: absolute;
-    z-index: 2;
-    top: 12px;
-    display: grid;
-    width: min(240px, 72%);
-    gap: 7px;
-    padding: 10px 12px;
-    transform: translateX(-50%);
-    border: 1px solid rgba(148, 163, 190, 0.28);
-    border-radius: 10px;
-    background: rgba(12, 15, 21, 0.96);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
-    color: #dce2ec;
-    pointer-events: none;
-  }
-
-  .trend-tooltip > strong {
-    color: #f2f5fa;
-    font-size: 0.7rem;
-  }
-
-  .trend-tooltip > span {
-    display: grid;
-    gap: 2px;
-    font-size: 0.66rem;
-  }
-
-  .trend-tooltip b {
-    font-weight: 600;
-  }
-
-  .trend-tooltip small {
-    color: #9aa4b3;
-    font-size: 0.6rem;
-    line-height: 1.35;
-  }
-
-  .trend-x-axis {
-    display: flex;
-    grid-column: 2;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .trend-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 14px;
-    margin-top: 10px;
-  }
-
-  .trend-legend span {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: #929baa;
-    font-size: 0.64rem;
-  }
-
-  .trend-legend i {
-    width: 18px;
-    height: 3px;
-    border-radius: 999px;
-  }
-
-  .trend-data {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    border: 0;
-    white-space: nowrap;
-  }
-
   .usage-totals {
-    margin-top: 14px;
-    padding: 20px;
-    border: 1px solid var(--border-soft);
-    border-radius: 18px;
-    background: var(--surface-subtle);
+    min-width: 0;
+    padding-left: 26px;
+    border-left: 1px solid var(--border-soft);
   }
 
   .usage-totals h3 {
@@ -3662,6 +3150,30 @@
   .ranking-value strong {
     color: #dce2ec;
     font-size: 0.76rem;
+  }
+
+  .ranking-share-value {
+    gap: 7px;
+  }
+
+  .model-share-track {
+    display: block;
+    width: min(100%, 96px);
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--progress-track);
+  }
+
+  .model-share-track i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      var(--primary),
+      color-mix(in srgb, var(--primary) 55%, #78d9b2)
+    );
   }
 
   .unclassified-usage {
@@ -4714,10 +4226,6 @@
   .usage-headline > small,
   .provider-usage-identity small,
   .provider-usage-value small,
-  .trend-heading span,
-  .trend-y-axis span,
-  .trend-x-axis span,
-  .trend-legend span,
   .ranking-identity small,
   .breakdown-header,
   .usage-totals dt,
@@ -4762,7 +4270,6 @@
   .usage-headline > strong,
   .provider-usage-identity strong,
   .provider-usage-value strong,
-  .trend-heading strong,
   .usage-totals h3,
   .usage-totals dd,
   .ranking-heading h3,
@@ -4930,8 +4437,7 @@
       grid-template-columns: 1fr;
     }
 
-    .usage-toolbar,
-    .trend-heading {
+    .usage-toolbar {
       align-items: flex-start;
       flex-direction: column;
     }
@@ -4951,18 +4457,24 @@
       gap: 16px;
     }
 
+    .usage-summary-board {
+      grid-template-columns: 1fr;
+      gap: 18px;
+      padding: 16px;
+    }
+
     .usage-summary {
       padding: 16px;
     }
 
-    .workbench-trend,
-    .usage-totals,
     .model-ranking {
       padding: 16px;
     }
 
-    .trend-chart {
-      grid-template-columns: 54px minmax(0, 1fr);
+    .usage-totals {
+      padding: 18px 0 0;
+      border-top: 1px solid var(--border-soft);
+      border-left: 0;
     }
 
     .provider-card {

@@ -80,6 +80,7 @@
     "@sveltejs/kit": "latest",
     "@sveltejs/vite-plugin-svelte": "latest",
     "@types/node": "latest",
+    "echarts": "^6.1.0",
     "eslint": "latest",
     "eslint-plugin-svelte": "latest",
     "globals": "latest",

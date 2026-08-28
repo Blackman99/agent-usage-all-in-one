@@ -112,6 +112,7 @@ Run `pnpm licenses:generate` after dependency changes and review the diff before
 | `define-lazy-prop`                      | 3.0.0               | MIT           | [link](https://github.com/sindresorhus/define-lazy-prop#readme)                            |
 | `detect-libc`                           | 2.1.2               | Apache-2.0    | [link](https://github.com/lovell/detect-libc#readme)                                       |
 | `devalue`                               | 5.9.2               | MIT           | [link](https://github.com/sveltejs/devalue#readme)                                         |
+| `echarts`                               | 6.1.0               | Apache-2.0    | [link](https://echarts.apache.org)                                                         |
 | `es-module-lexer`                       | 2.3.2               | MIT           | [link](https://github.com/guybedford/es-module-lexer#readme)                               |
 | `esbuild`                               | 0.27.7, 0.28.2      | MIT           | [link](https://github.com/evanw/esbuild#readme)                                            |
 | `escape-string-regexp`                  | 4.0.0               | MIT           | [link](https://github.com/sindresorhus/escape-string-regexp#readme)                        |
@@ -242,7 +243,7 @@ Run `pnpm licenses:generate` after dependency changes and review the diff before
 | `tree-kill`                             | 1.2.2               | MIT           | [link](https://github.com/pkrumins/node-tree-kill)                                         |
 | `ts-api-utils`                          | 2.5.0               | MIT           | [link](https://github.com/JoshuaKGoldberg/ts-api-utils#readme)                             |
 | `ts-interface-checker`                  | 0.1.13              | Apache-2.0    | [link](https://github.com/gristlabs/ts-interface-checker#readme)                           |
-| `tslib`                                 | 2.8.1               | 0BSD          | [link](https://www.typescriptlang.org/)                                                    |
+| `tslib`                                 | 2.3.0, 2.8.1        | 0BSD          | [link](https://www.typescriptlang.org/)                                                    |
 | `tsup`                                  | 8.5.1               | MIT           | [link](https://tsup.egoist.dev/)                                                           |
 | `tsx`                                   | 4.23.12             | MIT           | [link](https://tsx.hirok.io)                                                               |
 | `type-check`                            | 0.4.0               | MIT           | [link](https://github.com/gkz/type-check)                                                  |
@@ -263,6 +264,7 @@ Run `pnpm licenses:generate` after dependency changes and review the diff before
 | `yocto-queue`                           | 0.1.0               | MIT           | [link](https://github.com/sindresorhus/yocto-queue#readme)                                 |
 | `zimmerframe`                           | 1.1.4               | MIT           | [link](https://github.com/sveltejs/zimmerframe#readme)                                     |
 | `zod`                                   | 4.4.3               | MIT           | [link](https://zod.dev)                                                                    |
+| `zrender`                               | 6.1.0               | BSD-3-Clause  | [link](https://github.com/ecomfe/zrender#readme)                                           |
 
 Complete license texts for dependencies bundled into the browser distribution are in
 [BUNDLED_LICENSES.md](BUNDLED_LICENSES.md). Dependencies installed separately retain

@@ -1362,10 +1362,23 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   expect(providerSurface.borderRadius).toBeGreaterThanOrEqual(22);
 
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const summaryBoard = page.getByTestId('usage-summary-board');
+  const analysisGrid = page.getByTestId('usage-analysis-grid');
+  await expect(summaryBoard).toBeVisible();
+  await expect(analysisGrid).toBeVisible();
+  const [summaryBox, analysisBox] = await Promise.all([
+    summaryBoard.boundingBox(),
+    analysisGrid.boundingBox()
+  ]);
+  expect(summaryBox).not.toBeNull();
+  expect(analysisBox).not.toBeNull();
+  expect(summaryBox!.y + summaryBox!.height).toBeLessThanOrEqual(analysisBox!.y);
+  await expect(page.getByTestId('provider-share-chart')).toHaveAttribute('role', 'img');
+  await expect(page.getByTestId('model-share-meter').first()).toHaveAttribute('role', 'meter');
   for (const selector of [
+    '.usage-summary-board',
     '.usage-summary',
     '.workbench-trend',
-    '.usage-totals',
     '.model-ranking'
   ]) {
     const surface = await page.locator(selector).evaluate((element) => {

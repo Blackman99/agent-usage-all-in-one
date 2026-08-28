@@ -1,3 +1,12 @@
 {
-  "packages": ["@sveltejs/kit", "clsx", "devalue", "esm-env", "svelte"]
+  "packages": [
+    "@sveltejs/kit",
+    "clsx",
+    "devalue",
+    "echarts",
+    "esm-env",
+    "svelte",
+    "tslib",
+    "zrender"
+  ]
 }

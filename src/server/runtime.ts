@@ -12,6 +12,7 @@ import { parseClaudeOtlpMetrics } from '../connectors/claude-code/claude-otlp.js
 import { ScreenReaderClaudeQuotaClient } from '../connectors/claude-code/claude-usage-screen-client.js';
 import { CodexConnector } from '../connectors/codex/codex-connector.js';
 import { StdioCodexAccountClient } from '../connectors/codex/stdio-codex-account-client.js';
+import { OpenCodeLocalConnector } from '../connectors/opencode-local/opencode-local-connector.js';
 import { CliOpenCodeLocalHistoryClient } from '../connectors/opencode-go/local-opencode-history-client.js';
 import { OfficialOpenCodeGoClient } from '../connectors/opencode-go/official-opencode-go-client.js';
 import { OpenCodeAuthFileReader } from '../connectors/opencode-go/opencode-auth-reader.js';
@@ -46,6 +47,7 @@ export async function runDaemon(home: string): Promise<void> {
   const secretStore = new MacOsKeychainSecretStore(undefined, {
     service: keychainService
   });
+  const openCodeLocalHistoryClient = new CliOpenCodeLocalHistoryClient();
   const application = new UsageApplication({
     repository,
     connectors: [
@@ -63,8 +65,9 @@ export async function runDaemon(home: string): Promise<void> {
         accountClient: new OfficialOpenCodeGoClient({
           authReader: new OpenCodeAuthFileReader()
         }),
-        localHistoryClient: new CliOpenCodeLocalHistoryClient()
+        localHistoryClient: openCodeLocalHistoryClient
       }),
+      new OpenCodeLocalConnector({ localHistoryClient: openCodeLocalHistoryClient }),
       new GrokBuildConnector({
         billingClient: new StdioGrokBillingClient(),
         historyClient: localTranscriptClient('grok', home)
@@ -92,7 +95,7 @@ export async function runDaemon(home: string): Promise<void> {
       }
     }),
     connectorPolicies: Object.fromEntries(
-      ['codex', 'claude-code', 'opencode-go', 'grok', 'xai-api'].map((id) => [
+      ['codex', 'claude-code', 'opencode-go', 'opencode', 'grok', 'xai-api'].map((id) => [
         id,
         { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: id === 'claude-code' ? 25_000 : 20_000 }
       ])

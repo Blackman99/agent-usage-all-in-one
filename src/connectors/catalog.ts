@@ -31,10 +31,10 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
   },
   {
     id: 'opencode-go',
-    displayName: 'OpenCode Go',
+    displayName: 'OpenCode',
     command: 'opencode',
     permissionDescription:
-      'Read account quota and local exports through official OpenCode surfaces.',
+      'Read local usage and optional Go account quota through official OpenCode surfaces.',
     credentialOwner: 'official-client',
     experimental: false,
     expectedCoverage: ['quota', 'tokens', 'history'],

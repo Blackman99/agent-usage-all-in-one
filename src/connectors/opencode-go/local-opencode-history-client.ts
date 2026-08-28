@@ -67,6 +67,7 @@ export class CliOpenCodeLocalHistoryClient implements OpenCodeGoLocalHistoryClie
   readonly #command: string;
   readonly #execFile: ExecFile;
   readonly #readDatabase: ReadDatabase;
+  #activeRead: Promise<OpenCodeLocalRequest[]> | null = null;
 
   constructor(options: CliOpenCodeLocalHistoryClientOptions = {}) {
     this.#command = options.command ?? 'opencode';
@@ -74,7 +75,22 @@ export class CliOpenCodeLocalHistoryClient implements OpenCodeGoLocalHistoryClie
     this.#readDatabase = options.readDatabase ?? readDatabase;
   }
 
-  async readHistory(): Promise<OpenCodeLocalRequest[]> {
+  readHistory(): Promise<OpenCodeLocalRequest[]> {
+    if (this.#activeRead) return this.#activeRead;
+    const activeRead = this.#readHistory();
+    this.#activeRead = activeRead;
+    activeRead.then(
+      () => {
+        if (this.#activeRead === activeRead) this.#activeRead = null;
+      },
+      () => {
+        if (this.#activeRead === activeRead) this.#activeRead = null;
+      }
+    );
+    return activeRead;
+  }
+
+  async #readHistory(): Promise<OpenCodeLocalRequest[]> {
     let databasePath: string;
     try {
       const { stdout } = await this.#execFile(this.#command, ['db', 'path']);
@@ -107,20 +123,18 @@ export class CliOpenCodeLocalHistoryClient implements OpenCodeGoLocalHistoryClie
         { cause: error }
       );
     }
-    return completedAssistantRows
-      .filter((row) => row.providerId === 'opencode-go')
-      .filter(hasCategorizedTokens)
-      .map((row) => ({
-        id: `v2:${createHash('sha256').update(row.sourceId).digest('hex')}`,
-        model: `${row.providerId}/${row.modelId}`,
-        cost: row.cost,
-        inputTokens: row.inputTokens,
-        outputTokens: row.outputTokens,
-        reasoningTokens: row.reasoningTokens,
-        cacheReadTokens: row.cacheReadTokens,
-        cacheWriteTokens: row.cacheWriteTokens,
-        observedAtMs: row.observedAtMs
-      }));
+    return completedAssistantRows.filter(hasCategorizedTokens).map((row) => ({
+      id: `v2:${createHash('sha256').update(row.sourceId).digest('hex')}`,
+      providerId: row.providerId,
+      model: `${row.providerId}/${row.modelId}`,
+      cost: row.cost,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      reasoningTokens: row.reasoningTokens,
+      cacheReadTokens: row.cacheReadTokens,
+      cacheWriteTokens: row.cacheWriteTokens,
+      observedAtMs: row.observedAtMs
+    }));
   }
 }
 

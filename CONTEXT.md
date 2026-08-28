@@ -8,9 +8,13 @@ command and exposes the same core summary through a CLI. It never switches an
 agent automatically and does not upload private usage data or telemetry to a
 product-owned service.
 
-The initial providers are Codex, Claude Code, OpenCode Go, and Grok. Grok is one
-top-level provider with two independent billing domains: Grok Build/SuperGrok
-subscriptions and the xAI API. Their usage and costs must never be merged.
+The initial products are Codex, Claude Code, OpenCode, and Grok. OpenCode Go
+quota and OpenCode local history use separate internal Provider identities: Go
+represents subscription allowance only, while local history represents every
+completed request made through OpenCode regardless of its underlying Provider.
+Grok is one top-level provider with two independent billing domains: Grok
+Build/SuperGrok subscriptions and the xAI API. Their usage and costs must never
+be merged.
 
 ## Ubiquitous language
 
@@ -200,3 +204,8 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 35. A hard rebuild requires explicit user confirmation, runs asynchronously, and
     may delete only recalculable retail-equivalent evidence. It never deletes or
     relabels actual, subscription, or Provider-reported costs.
+36. OpenCode local history includes every completed local request and retains the
+    source `providerID` as part of model identity. It is never filtered to
+    `opencode-go`, attributed to the Go subscription, or added to Go allowance
+    values. A successful local scan retires legacy Go-attributed local rows; a
+    failed scan retains the last successful snapshot.

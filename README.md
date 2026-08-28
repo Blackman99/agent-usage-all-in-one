@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Agent Usage is a macOS-first, fully local usage center for Codex, Claude Code,
-OpenCode Go, and Grok. One command opens a dashboard for native quota windows,
+OpenCode, and Grok. One command opens a dashboard for native quota windows,
 reset times, tokens, model rankings, equivalent API cost, history, and diagnostics.
 It offers advice but never switches agents automatically.
 
@@ -19,9 +19,10 @@ The dashboard has two primary tabs:
 
 - **Agent usage** preserves each provider's native five-hour, weekly, monthly,
   All models, and Fable-only quota labels and reset times.
-- **Tokens & model costs** supports 24-hour, 7-day, and 30-day ranges. It shows
-  token categories, provider totals, daily trends, model rankings, and the public
-  API retail equivalent of eligible token usage.
+- **Tokens & model costs** supports 24-hour, 7-day, and 30-day ranges. It puts
+  totals first, charts Provider share and the interactive daily trend, then shows
+  model rankings with visual share bars and the public API retail equivalent of
+  eligible token usage.
 
 Actual charges, provider-reported estimates, fixed subscription fees, and API
 retail equivalents are separate evidence. The API retail equivalent is not a bill
@@ -96,13 +97,14 @@ agent-usage clear --yes
 
 ## Provider coverage
 
-| Provider / billing domain | Native quota                                                            | Token history                                       | Cost evidence                                                                          |
-| ------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Codex                     | Official account buckets when available                                 | Local rollouts with account-day reconciliation      | API retail equivalent                                                                  |
-| Claude Code               | Experimental official-client usage, including All models and Fable only | Local session transcripts; optional OTLP supplement | Client estimate and API retail equivalent                                              |
-| OpenCode Go               | Official account-wide five-hour, weekly, and monthly windows            | Official CLI/session export                         | Provider-reported or explicitly estimated values                                       |
-| Grok Build / SuperGrok    | Experimental shared subscription allowance                              | Local `updates.jsonl`; optional OTLP supplement     | Client estimate and API retail equivalent, including recognized Grok 4.6 Build aliases |
-| Grok · xAI API            | No subscription quota                                                   | Official Management API aggregation                 | Actual USD amounts, balance, limit, and invoice when available                         |
+| Provider / billing domain | Native quota                                                            | Token history                                            | Cost evidence                                                                          |
+| ------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Codex                     | Official account buckets when available                                 | Local rollouts with account-day reconciliation           | API retail equivalent                                                                  |
+| Claude Code               | Experimental official-client usage, including All models and Fable only | Local session transcripts; optional OTLP supplement      | Client estimate and API retail equivalent                                              |
+| OpenCode Go               | Official account-wide five-hour, weekly, and monthly windows            | Kept separate from local history                         | Quota context only                                                                     |
+| OpenCode · local history  | No subscription quota                                                   | All completed local requests across configured Providers | Client-reported estimate; API retail equivalent when eligible                          |
+| Grok Build / SuperGrok    | Experimental shared subscription allowance                              | Local `updates.jsonl`; optional OTLP supplement          | Client estimate and API retail equivalent, including recognized Grok 4.6 Build aliases |
+| Grok · xAI API            | No subscription quota                                                   | Official Management API aggregation                      | Actual USD amounts, balance, limit, and invoice when available                         |
 
 Every value retains its authority and observation time. Account-wide and this-Mac
 evidence remain visibly distinct.

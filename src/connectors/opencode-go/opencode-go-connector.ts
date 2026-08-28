@@ -2,9 +2,7 @@ import type {
   Connector,
   ConnectorFailure,
   ConnectorSnapshot,
-  CostRecord,
-  QuotaBucket,
-  UsageObservation
+  QuotaBucket
 } from '../../core/types.js';
 import type { OpenCodeGoUsageResponse } from './official-opencode-go-client.js';
 
@@ -14,6 +12,7 @@ export interface OpenCodeGoAccountClient {
 
 export interface OpenCodeLocalRequest {
   id: string;
+  providerId: string;
   model: string;
   cost: number | null;
   inputTokens: number;
@@ -65,12 +64,11 @@ export class OpenCodeGoConnector implements Connector {
     if (localResult.status === 'rejected') warnings.push(safeFailure(localResult.reason));
 
     const account = accountResult.status === 'fulfilled' ? accountResult.value : null;
-    const local = localResult.status === 'fulfilled' ? localResult.value : [];
     return {
       provider: { id: this.id, displayName: this.displayName },
       billingDomains: [{ id: 'go-subscription', displayName: 'OpenCode Go subscription' }],
       quotaBuckets: account ? mapQuota(account) : [],
-      usage: local.map(mapLocalUsage),
+      usage: [],
       ...(localResult.status === 'fulfilled'
         ? {
             usageReconciliation: {
@@ -79,9 +77,7 @@ export class OpenCodeGoConnector implements Connector {
             }
           }
         : {}),
-      costs: local.flatMap((request) =>
-        request.cost === null ? [] : [mapLocalCost(request, request.cost)]
-      ),
+      costs: [],
       warnings,
       observedAt
     };
@@ -102,62 +98,6 @@ function mapQuota(response: OpenCodeGoUsageResponse): QuotaBucket[] {
     limitCurrency: 'USD',
     fallbackStatus: 'unknown'
   }));
-}
-
-function mapLocalUsage(request: OpenCodeLocalRequest): UsageObservation {
-  return {
-    id: `opencode-request:${request.id}`,
-    billingDomainId: 'go-subscription',
-    model: request.model,
-    observedAt: new Date(request.observedAtMs).toISOString(),
-    inputTokens: request.inputTokens,
-    outputTokens: request.outputTokens,
-    reasoningTokens: request.reasoningTokens,
-    cacheReadTokens: request.cacheReadTokens,
-    cacheWriteTokens: request.cacheWriteTokens,
-    tokenSemantics: {
-      reasoning: 'separate',
-      cacheRead: 'separate',
-      cacheWrite: 'separate'
-    },
-    modelAttribution: 'known',
-    timePrecision: 'event',
-    usageScope: 'this-mac',
-    aggregationTemporality: 'delta',
-    authority: 'local-observation'
-  };
-}
-
-function mapLocalCost(request: OpenCodeLocalRequest, cost: number): CostRecord {
-  const usageObservationId = `opencode-request:${request.id}`;
-  return {
-    id: `opencode-request-cost:${request.id}`,
-    sourceId: usageObservationId,
-    billingDomainId: 'go-subscription',
-    observedAt: new Date(request.observedAtMs).toISOString(),
-    kind: 'reported-estimate',
-    amount: cost,
-    currency: 'USD',
-    authority: 'local-observation',
-    model: request.model,
-    usageObservationId,
-    priceSnapshot: {
-      id: 'opencode-message-reported-cost-v2',
-      version: '2026-08-28',
-      source: 'OpenCode local message history reported cost',
-      canonicalModel: request.model,
-      effectiveAt: '2026-08-28T00:00:00.000Z',
-      effectiveUntil: null,
-      currency: 'USD',
-      ratesPerMillion: {
-        input: null,
-        output: null,
-        reasoning: null,
-        'cache-read': null,
-        'cache-write': null
-      }
-    }
-  };
 }
 
 function safeFailure(error: unknown): ConnectorFailure {
