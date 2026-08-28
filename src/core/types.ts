@@ -215,7 +215,24 @@ export interface Connector {
   readonly id: string;
   readonly displayName?: string;
   readonly consentId?: string;
-  collect(): Promise<ConnectorSnapshot>;
+  collect(options?: { forceRebuild?: boolean }): Promise<ConnectorSnapshot>;
+}
+
+export type ProcessingModuleId = 'discovery' | 'usage' | 'pricing' | 'retention';
+export type ProcessingModuleState = 'pending' | 'running' | 'ready' | 'failed';
+
+export interface ProcessingStatus {
+  startedAt: string;
+  hardRebuild: boolean;
+  modules: Record<
+    ProcessingModuleId,
+    {
+      state: ProcessingModuleState;
+      startedAt: string | null;
+      completedAt: string | null;
+      message: string | null;
+    }
+  >;
 }
 
 export interface ConnectorFailure {
@@ -771,6 +788,9 @@ export interface UsageRepository {
   getConnectorStatuses(): ConnectorStatusRecord[];
   getRetailPricingBackfillSnapshots?(): ConnectorSnapshot[];
   saveDerivedCosts?(providerId: string, costs: CostRecord[]): void;
+  deleteDerivedRetailCosts?(): void;
+  getApplicationState?(key: string): string | null;
+  saveApplicationState?(key: string, value: string): void;
   close(): void;
 }
 

@@ -55,7 +55,7 @@ test('shows persisted provider usage and refreshes from the dashboard', async ({
     /[\d,]+ Tokens/
   );
   await page.getByRole('tab', { name: 'Agent usage' }).click();
-  expect(refreshRequests).toBe(1);
+  expect(refreshRequests).toBe(0);
 
   await page.getByRole('button', { name: 'Refresh' }).click();
   await expect(page.getByText('Updated just now')).toBeVisible();
@@ -1209,6 +1209,7 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(freshLaunch.stdout.trim());
   await expect(page.getByRole('main')).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh' }).click();
 
   const quota = page.getByRole('progressbar', { name: '5 hour' });
   await expect(quota).toHaveAttribute('aria-valuenow', '42');

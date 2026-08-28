@@ -9,6 +9,7 @@
     DoctorReport,
     HistoryWindow,
     MonitoringSettings,
+    ProcessingStatus,
     ProviderOverview,
     RetentionStatus,
     UsageOverview
@@ -56,6 +57,10 @@
   let deleteProductSecrets = false;
   let includeAccountIdentifiers = false;
   let clearingData = false;
+  let hardRebuilding = false;
+  let workbenchLoading = false;
+  let processing: ProcessingStatus | null = null;
+  let processingTimer: ReturnType<typeof setInterval> | null = null;
   let settingsOpen = false;
   let settingsTarget: string | null = null;
   let settingsButton: HTMLButtonElement | null = null;
@@ -74,15 +79,22 @@
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     selectedWindow = storedWindow();
     selectedCurrency = storedCurrency();
-    await Promise.all([refresh(), loadConnectors(), loadMonitoring(), loadRetention()]);
-    if (!overview) await loadOverview();
+    await Promise.all([
+      loadOverview(),
+      loadConnectors(),
+      loadMonitoring(),
+      loadRetention(),
+      loadProcessing()
+    ]);
     if (!diagnostics) await loadDiagnostics();
+    startProcessingPolling();
     const deepLink = new URL(window.location.href).searchParams.get('settings');
     if (deepLink) await openSettings(deepLink, false);
   });
 
   onDestroy(() => {
     destroyed = true;
+    if (processingTimer) clearInterval(processingTimer);
     automaticRecoveryController.dispose();
   });
 
@@ -192,6 +204,82 @@
       retentionError = false;
     } catch {
       retentionError = true;
+    }
+  }
+
+  async function loadProcessing(): Promise<void> {
+    try {
+      const response = await fetch('/api/processing');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const next = (await response.json()) as ProcessingStatus;
+      const previous = processing;
+      processing = next;
+      if (
+        previous?.modules.discovery.state !== 'ready' &&
+        next.modules.discovery.state === 'ready'
+      ) {
+        void loadConnectors();
+      }
+      if (
+        (previous?.modules.usage.state !== 'ready' && next.modules.usage.state === 'ready') ||
+        (previous?.modules.pricing.state !== 'ready' && next.modules.pricing.state === 'ready')
+      ) {
+        void loadOverview();
+      }
+      if (
+        previous?.modules.retention.state !== 'ready' &&
+        next.modules.retention.state === 'ready'
+      ) {
+        void loadRetention();
+      }
+      hardRebuilding =
+        next.hardRebuild &&
+        Object.values(next.modules).some(
+          (module) => module.state === 'pending' || module.state === 'running'
+        );
+      if (
+        processingTimer &&
+        Object.values(next.modules).every(
+          (module) => module.state === 'ready' || module.state === 'failed'
+        )
+      ) {
+        clearInterval(processingTimer);
+        processingTimer = null;
+      }
+    } catch {
+      // Processing progress is optional; cached data remains usable.
+    }
+  }
+
+  function startProcessingPolling(): void {
+    if (processingTimer) return;
+    if (
+      processing &&
+      Object.values(processing.modules).every(
+        (module) => module.state === 'ready' || module.state === 'failed'
+      )
+    ) {
+      return;
+    }
+    processingTimer = setInterval(() => void loadProcessing(), 1_000);
+  }
+
+  async function hardRebuild(): Promise<void> {
+    if (!window.confirm(t('hardRebuildConfirmation'))) return;
+    hardRebuilding = true;
+    try {
+      const response = await fetch('/api/rebuild', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirmExpensiveOperation: true })
+      });
+      if (response.status !== 202) throw new Error(`HTTP ${response.status}`);
+      await loadProcessing();
+      startProcessingPolling();
+      privacyActionError = false;
+    } catch {
+      hardRebuilding = false;
+      privacyActionError = true;
     }
   }
 
@@ -643,8 +731,9 @@
     } catch {
       // A disabled local preference store must not block usage queries.
     }
-    loading = true;
+    workbenchLoading = true;
     await loadOverview();
+    workbenchLoading = false;
   }
 
   async function selectCurrency(currency: 'CNY' | 'USD'): Promise<void> {
@@ -655,8 +744,9 @@
     } catch {
       // A disabled local preference store must not block usage queries.
     }
-    loading = true;
+    workbenchLoading = true;
     await loadOverview();
+    workbenchLoading = false;
   }
 
   function storedWindow(): HistoryWindow {
@@ -1054,11 +1144,7 @@
 {#key locale}
   <main class="shell" inert={settingsOpen || selectedModelEntry !== null}>
     <header class="product-banner">
-      <img
-        class="product-banner-art"
-        src="/brand/agent-usage-banner.svg"
-        alt="Agent Usage — one local view for quota, tokens, and equivalent API cost"
-      />
+      <img class="product-banner-art" src="/brand/agent-usage-banner.svg" alt={t('bannerAlt')} />
       <h1 class="visually-hidden">{t('title')}</h1>
       <div class="header-actions">
         <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
@@ -1074,8 +1160,33 @@
       </div>
     </header>
 
+    <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
+      <button
+        id="agent-usage-tab"
+        type="button"
+        role="tab"
+        aria-selected={activeDashboardView === 'agents'}
+        aria-controls="agent-usage-panel"
+        tabindex={activeDashboardView === 'agents' ? 0 : -1}
+        on:click={() => (activeDashboardView = 'agents')}
+        on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
+      >
+      <button
+        id="token-model-costs-tab"
+        type="button"
+        role="tab"
+        aria-selected={activeDashboardView === 'models'}
+        aria-controls="token-model-costs-panel"
+        tabindex={activeDashboardView === 'models' ? 0 : -1}
+        on:click={() => (activeDashboardView = 'models')}
+        on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
+      >
+    </div>
+
     {#if loading}
-      <div class="state" aria-live="polite">{t('loading')}</div>
+      <div class="state section-loading" aria-live="polite">
+        {activeDashboardView === 'agents' ? t('loadingAgentUsage') : t('loadingModelCosts')}
+      </div>
     {:else if overviewError && !overview}
       <div class="state error" role="alert">{t('error')}</div>
     {:else if overview}
@@ -1086,28 +1197,6 @@
       {#if overview.providers.length === 0}
         <div class="state compact">{t('noProviders')}</div>
       {/if}
-      <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
-        <button
-          id="agent-usage-tab"
-          type="button"
-          role="tab"
-          aria-selected={activeDashboardView === 'agents'}
-          aria-controls="agent-usage-panel"
-          tabindex={activeDashboardView === 'agents' ? 0 : -1}
-          on:click={() => (activeDashboardView = 'agents')}
-          on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
-        >
-        <button
-          id="token-model-costs-tab"
-          type="button"
-          role="tab"
-          aria-selected={activeDashboardView === 'models'}
-          aria-controls="token-model-costs-panel"
-          tabindex={activeDashboardView === 'models' ? 0 : -1}
-          on:click={() => (activeDashboardView = 'models')}
-          on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
-        >
-      </div>
       {#if activeDashboardView === 'agents'}
         <div
           id="agent-usage-panel"
@@ -1115,6 +1204,9 @@
           role="tabpanel"
           aria-labelledby="agent-usage-tab"
         >
+          {#if processing?.modules.usage.state === 'running'}
+            <p class="module-progress" role="status">{t('updatingAgentUsage')}</p>
+          {/if}
           <section class="providers" aria-label={t('providersLabel')}>
             {#each displayProviders(overview, connectors) as provider (provider.id)}
               {@const logo = providerLogoSources(provider.id)}
@@ -1347,6 +1439,9 @@
           role="tabpanel"
           aria-labelledby="token-model-costs-tab"
         >
+          {#if processing?.modules.pricing.state === 'running' || workbenchLoading}
+            <p class="module-progress" role="status">{t('updatingModelCosts')}</p>
+          {/if}
           {#if overview.workbench}
             {@const workbench = overview.workbench}
             {@const chartSeries = trendSeries(workbench, selectedTrendMetric)}
@@ -2099,6 +2194,10 @@
                 <input type="checkbox" bind:checked={deleteProductSecrets} />
                 {t('deleteProductSecrets')}
               </label>
+              <button class="danger-action" disabled={hardRebuilding} on:click={hardRebuild}>
+                {hardRebuilding ? t('hardRebuilding') : t('hardRebuild')}
+              </button>
+              <small>{t('hardRebuildWarning')}</small>
               <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
                 {clearingData ? t('clearing') : t('clearData')}
               </button>
@@ -3094,6 +3193,16 @@
     background: var(--danger-bg);
     color: var(--danger-text);
     font-size: 0.74rem;
+  }
+
+  .module-progress {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.78rem;
   }
 
   .diagnostics-section {

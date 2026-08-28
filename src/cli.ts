@@ -323,7 +323,7 @@ async function ensureDaemon(home: string): Promise<DaemonState> {
 
 async function isHealthy(state: DaemonState): Promise<boolean> {
   try {
-    const response = await fetch(`${state.origin}/api/overview`, {
+    const response = await fetch(`${state.origin}/api/health`, {
       headers: { authorization: `Bearer ${state.apiToken}` },
       signal: AbortSignal.timeout(500)
     });

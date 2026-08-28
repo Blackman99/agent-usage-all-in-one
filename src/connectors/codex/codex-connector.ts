@@ -87,7 +87,7 @@ export class CodexConnector implements Connector {
     this.#historyClient = historyClient;
   }
 
-  async collect(): Promise<ConnectorSnapshot> {
+  async collect(options: { forceRebuild?: boolean } = {}): Promise<ConnectorSnapshot> {
     const observedAt = this.#clock().toISOString();
     const warnings: ConnectorFailure[] = [];
     let payload: CodexAccountPayload | null = null;
@@ -97,7 +97,7 @@ export class CodexConnector implements Connector {
       warnings.push(safeFailure(error));
     }
     const history = this.#historyClient
-      ? await this.#historyClient.readUsage()
+      ? await this.#historyClient.readUsage(options)
       : { usage: [], costs: [], complete: true };
     const hasLocalHistory = history.usage.length > 0;
     const accountUsage = mapTokenUsage(payload?.tokenUsage ?? null);

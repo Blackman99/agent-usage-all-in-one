@@ -48,6 +48,7 @@ describe('one-command development mode', () => {
     expect(page.status).toBe(200);
     expect(await page.text()).toContain('data-sveltekit-preload-data');
 
+    await waitForProcessing(origin, cookie!, 'usage');
     const overview = await fetch(`${origin}/api/overview`, { headers: { cookie } });
     expect(overview.status).toBe(200);
     expect(await overview.json()).toMatchObject({
@@ -121,6 +122,23 @@ async function waitForLaunchUrl(child: ChildProcess): Promise<string> {
       reject(new Error(`Development server exited with ${code}. Output:\n${output}`));
     });
   });
+}
+
+async function waitForProcessing(
+  origin: string,
+  cookie: string,
+  module: 'discovery' | 'usage' | 'pricing' | 'retention'
+): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${origin}/api/processing`, { headers: { cookie } });
+    const body = (await response.json()) as {
+      modules: Record<string, { state: string }>;
+    };
+    if (body.modules[module]?.state === 'ready') return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  throw new Error(`Processing module ${module} did not become ready`);
 }
 
 async function stopChild(child: ChildProcess): Promise<void> {

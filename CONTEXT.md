@@ -96,6 +96,12 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
   healthier capacity. Recommendations never perform an automatic switch.
 - **Collector**: The optional local background process that refreshes connectors
   and persists observations for 24-hour, 7-day, and 30-day views.
+- **Processing module**: One independently observable background unit: connector
+  discovery, Provider usage, model pricing, or retention. A module never blocks
+  loopback-server readiness or hides cached results from another module.
+- **Hard rebuild**: An explicitly confirmed, asynchronous recovery operation that
+  ignores optimization caches and recalculates derived evidence. It is not the
+  normal startup or refresh path.
 - **Degraded state**: A truthful partial result that retains the provider card,
   explains the missing field, and offers a recovery action.
 
@@ -186,3 +192,11 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     installing a client, connecting an account, signing in again, or upgrading
     an unsupported integration, remain available only in connection management
     and Settings diagnostics; they never interrupt the usage-first dashboard.
+33. Loopback health and cached reads become available before discovery or data
+    processing. Each processing module reports its own state and failure boundary.
+34. Normal startup reuses versioned, disposable optimization caches. Cache keys
+    do not persist personal transcript paths, and cache corruption never changes
+    source evidence or prevents a source scan.
+35. A hard rebuild requires explicit user confirmation, runs asynchronously, and
+    may delete only recalculable retail-equivalent evidence. It never deletes or
+    relabels actual, subscription, or Provider-reported costs.

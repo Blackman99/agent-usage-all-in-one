@@ -63,7 +63,7 @@ export class GrokBuildConnector implements Connector {
     this.#clock = options.clock ?? (() => new Date());
   }
 
-  async collect(): Promise<ConnectorSnapshot> {
+  async collect(options: { forceRebuild?: boolean } = {}): Promise<ConnectorSnapshot> {
     const warnings: ConnectorFailure[] = [];
     let quotaBuckets: QuotaBucket[] = [];
     let observedAt = this.#clock().toISOString();
@@ -82,7 +82,7 @@ export class GrokBuildConnector implements Connector {
       warnings.push(safeFailure(error));
     }
     const history = this.#historyClient
-      ? await this.#historyClient.readUsage()
+      ? await this.#historyClient.readUsage(options)
       : { usage: [], costs: [], complete: true };
     if (!history.complete) warnings.push(incompleteTranscriptFailure());
 

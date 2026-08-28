@@ -1135,6 +1135,26 @@ export class SqliteUsageRepository implements UsageRepository {
     }
   }
 
+  deleteDerivedRetailCosts(): void {
+    this.#database.prepare("DELETE FROM cost_records WHERE kind = 'retail-equivalent'").run();
+  }
+
+  getApplicationState(key: string): string | null {
+    const row = this.#database
+      .prepare('SELECT value FROM application_state WHERE key = ?')
+      .get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  saveApplicationState(key: string, value: string): void {
+    this.#database
+      .prepare(
+        `INSERT INTO application_state (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+      )
+      .run(key, value);
+  }
+
   close(): void {
     this.#database.close();
   }
@@ -1891,6 +1911,24 @@ export class SqliteUsageRepository implements UsageRepository {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         last_compacted_at TEXT
       );
+      CREATE TABLE IF NOT EXISTS application_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS usage_observed_at_idx
+        ON usage_observations(observed_at);
+      CREATE INDEX IF NOT EXISTS usage_provider_domain_time_idx
+        ON usage_observations(provider_id, billing_domain_id, observed_at);
+      CREATE INDEX IF NOT EXISTS usage_provider_model_time_idx
+        ON usage_observations(provider_id, model, observed_at);
+      CREATE INDEX IF NOT EXISTS cost_observed_at_idx
+        ON cost_records(observed_at);
+      CREATE INDEX IF NOT EXISTS cost_provider_domain_time_idx
+        ON cost_records(provider_id, billing_domain_id, observed_at);
+      CREATE INDEX IF NOT EXISTS cost_usage_observation_idx
+        ON cost_records(provider_id, usage_observation_id);
+      CREATE INDEX IF NOT EXISTS quota_provider_bucket_time_idx
+        ON quota_observations(provider_id, bucket_id, observed_at);
     `);
     const usageColumns = this.#database
       .prepare('PRAGMA table_info(usage_observations)')

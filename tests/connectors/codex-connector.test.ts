@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -28,6 +28,53 @@ afterEach(async () => {
 });
 
 describe('CodexConnector', () => {
+  it('persists a path-redacted transcript index and reuses it after restart', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-cache-'));
+    transcriptWorkspaces.push(workspace);
+    const cachePath = join(workspace, 'cache', 'codex.json');
+    await writeFile(
+      join(workspace, 'rollout.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'cached-session' }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        JSON.stringify({
+          timestamp: '2026-08-28T01:00:00.000Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: {
+                input_tokens: 80,
+                cached_input_tokens: 30,
+                output_tokens: 20,
+                total_tokens: 100
+              }
+            }
+          }
+        })
+      ].join('\n')
+    );
+    const options = {
+      provider: 'codex' as const,
+      root: workspace,
+      cachePath,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    };
+
+    const first = await new LocalTranscriptUsageClient(options).readUsage();
+    const persisted = await readFile(cachePath, 'utf8');
+    const restarted = await new LocalTranscriptUsageClient(options).readUsage();
+
+    expect(first.usage).toHaveLength(1);
+    expect(restarted).toEqual(first);
+    expect(persisted).not.toContain(workspace);
+    expect(JSON.parse(persisted)).toMatchObject({ version: 1, files: [expect.any(Object)] });
+  });
+
   it('keeps official account totals and adds model usage from local rollouts for reconciliation', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-transcript-'));
     transcriptWorkspaces.push(workspace);

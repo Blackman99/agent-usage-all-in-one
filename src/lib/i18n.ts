@@ -4,6 +4,7 @@ const messages = {
   en: {
     eyebrow: 'LOCAL USAGE CENTER',
     title: 'Agent Usage',
+    bannerAlt: 'Agent Usage — one local view for quota, tokens, and equivalent API cost',
     subtitle: 'Quota, tokens, and freshness in one private local view.',
     mainViews: 'Main views',
     agentUsageTab: 'Agent usage',
@@ -21,6 +22,11 @@ const messages = {
     privacyActionUnavailable: 'The local data action could not be completed.',
     refreshUnavailable: 'Refresh failed. Existing usage is still shown.',
     loading: 'Loading provider usage…',
+    loadingAgentUsage: 'Loading cached agent usage…',
+    loadingModelCosts: 'Loading cached token and model cost data…',
+    updatingAgentUsage: 'Updating agent usage in the background. Cached data remains available.',
+    updatingModelCosts:
+      'Updating token and model cost calculations in the background. Cached results remain available.',
     error: 'Usage data could not be loaded.',
     updatedNow: 'Updated just now',
     updated: 'Updated',
@@ -232,11 +238,18 @@ const messages = {
     deleteProductSecrets: 'Also delete product Keychain entries',
     clearData: 'Clear local usage',
     clearing: 'Clearing…',
-    clearConfirmation: 'Clear all local usage history? Official-client credentials are preserved.'
+    clearConfirmation: 'Clear all local usage history? Official-client credentials are preserved.',
+    hardRebuild: 'Hard rebuild all data',
+    hardRebuilding: 'Hard rebuild running…',
+    hardRebuildWarning:
+      'High-cost operation: ignores scan and pricing caches. It can take a long time, but the dashboard remains usable.',
+    hardRebuildConfirmation:
+      'Hard rebuild all local usage and cost data? This ignores caches, is resource-intensive, and may take a long time.'
   },
   'zh-CN': {
     eyebrow: '本地用量中心',
     title: 'Agent Usage',
+    bannerAlt: 'Agent Usage——在一个本地视图中查看额度、Token 和 API 对等费用',
     subtitle: '在一个私密的本地视图中查看额度、Token 与数据新鲜度。',
     mainViews: '主要视图',
     agentUsageTab: 'Agent 用量',
@@ -254,6 +267,10 @@ const messages = {
     privacyActionUnavailable: '无法完成本地数据操作。',
     refreshUnavailable: '刷新失败，继续显示已有用量。',
     loading: '正在加载 provider 用量…',
+    loadingAgentUsage: '正在加载已缓存的 Agent 用量…',
+    loadingModelCosts: '正在加载已缓存的 Token 与模型费用…',
+    updatingAgentUsage: '正在后台更新 Agent 用量，已缓存的数据仍可查看。',
+    updatingModelCosts: '正在后台更新 Token 与模型费用，已缓存的结果仍可查看。',
     error: '无法加载用量数据。',
     updatedNow: '刚刚更新',
     updated: '更新于',
@@ -462,7 +479,12 @@ const messages = {
     deleteProductSecrets: '同时删除产品 Keychain 条目',
     clearData: '清除本地用量',
     clearing: '清除中…',
-    clearConfirmation: '清除全部本地用量历史？官方客户端凭据会保留。'
+    clearConfirmation: '清除全部本地用量历史？官方客户端凭据会保留。',
+    hardRebuild: '硬重算全部数据',
+    hardRebuilding: '硬重算进行中…',
+    hardRebuildWarning: '高代价操作：忽略扫描与定价缓存，可能等待很久，但不会阻塞页面使用。',
+    hardRebuildConfirmation:
+      '确定硬重算全部本地用量与费用数据吗？该操作会忽略缓存、消耗较多资源，并且可能需要等待很长时间。'
   }
 } as const;
 

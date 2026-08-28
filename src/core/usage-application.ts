@@ -16,7 +16,9 @@ import type {
   UsageExportRequest,
   UsageQuery,
   UsageRepository,
-  RetentionStatus
+  RetentionStatus,
+  ProcessingModuleId,
+  ProcessingStatus
 } from './types.js';
 import type {
   ConfigureConnectorInput,
@@ -52,6 +54,7 @@ export interface UsageApplicationOptions {
 
 export interface RefreshOptions {
   userInitiated?: boolean;
+  forceRebuild?: boolean;
 }
 
 export class UsageApplication {
@@ -68,6 +71,9 @@ export class UsageApplication {
   readonly #startAtLoginManager?: StartAtLoginManager;
   readonly #priceCatalog: RetailPriceCatalog | null;
   #refreshPromise: Promise<void> | null = null;
+  #backgroundPromise: Promise<void> | null = null;
+  #queuedHardRebuildPromise: Promise<void> | null = null;
+  #processingStatus: ProcessingStatus;
 
   constructor(options: UsageApplicationOptions) {
     this.#repository = options.repository;
@@ -83,10 +89,10 @@ export class UsageApplication {
     this.#startAtLoginManager = options.startAtLoginManager;
     this.#priceCatalog =
       options.priceCatalog === undefined ? OFFICIAL_PRICING_CATALOG : options.priceCatalog;
-    this.#backfillRetailCosts();
+    this.#processingStatus = createProcessingStatus(this.#clock().toISOString(), false);
   }
 
-  #backfillRetailCosts(): void {
+  #backfillRetailCosts(force = false): void {
     if (
       !this.#priceCatalog ||
       !this.#repository.getRetailPricingBackfillSnapshots ||
@@ -94,11 +100,75 @@ export class UsageApplication {
     ) {
       return;
     }
+    const catalogVersionKey = 'retail-pricing-catalog-version';
+    if (
+      !force &&
+      this.#repository.getApplicationState?.(catalogVersionKey) === this.#priceCatalog.version
+    ) {
+      return;
+    }
+    if (force) this.#repository.deleteDerivedRetailCosts?.();
     const calculatedAt = this.#clock().toISOString();
-    const snapshots = this.#repository.getRetailPricingBackfillSnapshots();
-    for (const snapshot of snapshots) {
+    for (const snapshot of this.#repository.getRetailPricingBackfillSnapshots()) {
       const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
       if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
+    }
+    this.#repository.saveApplicationState?.(catalogVersionKey, this.#priceCatalog.version);
+  }
+
+  getProcessingStatus(): ProcessingStatus {
+    return structuredClone(this.#processingStatus);
+  }
+
+  startBackgroundProcessing(): Promise<void> {
+    return this.#startProcessing(false);
+  }
+
+  startHardRebuild(): Promise<void> {
+    return this.#startProcessing(true);
+  }
+
+  #startProcessing(forceRebuild: boolean): Promise<void> {
+    if (this.#backgroundPromise) {
+      if (forceRebuild && !this.#processingStatus.hardRebuild) {
+        this.#queuedHardRebuildPromise ??= this.#backgroundPromise
+          .then(() => this.#startProcessing(true))
+          .finally(() => {
+            this.#queuedHardRebuildPromise = null;
+          });
+        return this.#queuedHardRebuildPromise;
+      }
+      return this.#backgroundPromise;
+    }
+    this.#processingStatus = createProcessingStatus(this.#clock().toISOString(), forceRebuild);
+    this.#backgroundPromise = this.#runProcessing(forceRebuild).finally(() => {
+      this.#backgroundPromise = null;
+    });
+    return this.#backgroundPromise;
+  }
+
+  async #runProcessing(forceRebuild: boolean): Promise<void> {
+    await this.#runModule('discovery', () => this.discoverConnectors().then(() => undefined));
+    await Promise.all([
+      this.#runModule('usage', () => this.refresh({ userInitiated: forceRebuild, forceRebuild })),
+      this.#runModule('retention', () => this.compactRetention().then(() => undefined))
+    ]);
+    await this.#runModule('pricing', async () => this.#backfillRetailCosts(forceRebuild));
+  }
+
+  async #runModule(id: ProcessingModuleId, action: () => Promise<void>): Promise<void> {
+    const module = this.#processingStatus.modules[id];
+    module.state = 'running';
+    module.startedAt = this.#clock().toISOString();
+    module.message = null;
+    try {
+      await action();
+      module.state = 'ready';
+    } catch (error) {
+      module.state = 'failed';
+      module.message = redactSensitiveText(error instanceof Error ? error.message : String(error));
+    } finally {
+      module.completedAt = this.#clock().toISOString();
     }
   }
 
@@ -146,7 +216,7 @@ export class UsageApplication {
         };
         try {
           const snapshot = await withTimeout(
-            connector.collect(),
+            connector.collect({ forceRebuild: options.forceRebuild }),
             policy.timeoutMs,
             `${connector.id} timed out`
           );
@@ -214,7 +284,6 @@ export class UsageApplication {
     if (this.#repository.getMonitoringSettings().notificationsEnabled) {
       await this.#sendNotificationTransitions();
     }
-    this.#repository.compactUsageHistory(this.#clock());
   }
 
   #saveHealthyConnectorDiagnostic(
@@ -697,6 +766,25 @@ function combineFailures(failures: ConnectorFailure[]): ConnectorFailure {
     code: failures.map((failure) => failure.code).join(','),
     message: failures.map((failure) => failure.message).join(' '),
     recovery: [...new Set(failures.map((failure) => failure.recovery))].join(' ')
+  };
+}
+
+function createProcessingStatus(startedAt: string, hardRebuild: boolean): ProcessingStatus {
+  const module = () => ({
+    state: 'pending' as const,
+    startedAt: null,
+    completedAt: null,
+    message: null
+  });
+  return {
+    startedAt,
+    hardRebuild,
+    modules: {
+      discovery: module(),
+      usage: module(),
+      pricing: module(),
+      retention: module()
+    }
   };
 }
 

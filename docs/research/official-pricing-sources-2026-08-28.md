@@ -89,6 +89,11 @@ Missing cache-write rates remain unknown.
 
 - [Grok 4.6 model page](https://docs.x.ai/developers/models/grok-4.6) identifies
   `grok-4.6` and its $2 input, $0.50 cached-input, and $6 output short-context
+  rates. The [Grok 4.6 developer page](https://docs.x.ai/developers/grok-4-6)
+  also identifies Grok 4.6 as the default Grok Build coding-agent model. Agent
+  Usage therefore applies the same public API list-price evidence to recognized
+  `grok-4.6-build` subscription observations as a separate `retail-equivalent`
+  calculation; it is never merged with xAI API actual billing.
   rates per million Tokens.
 - [xAI release notes](https://docs.x.ai/developers/release-notes) record Grok 4.6
   availability on 2026-08-12 and the doubled rates above 200K prompt Tokens.

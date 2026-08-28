@@ -50,10 +50,14 @@ export async function runDaemon(home: string): Promise<void> {
     repository,
     connectors: [
       ...(process.env.AGENT_USAGE_DEMO === '1' ? [createDemoConnector()] : []),
-      new CodexConnector(new StdioCodexAccountClient(), undefined, localTranscriptClient('codex')),
+      new CodexConnector(
+        new StdioCodexAccountClient(),
+        undefined,
+        localTranscriptClient('codex', home)
+      ),
       new ClaudeCodeConnector({
         quotaClient: new ScreenReaderClaudeQuotaClient(),
-        historyClient: localTranscriptClient('claude-code')
+        historyClient: localTranscriptClient('claude-code', home)
       }),
       new OpenCodeGoConnector({
         accountClient: new OfficialOpenCodeGoClient({
@@ -63,7 +67,7 @@ export async function runDaemon(home: string): Promise<void> {
       }),
       new GrokBuildConnector({
         billingClient: new StdioGrokBillingClient(),
-        historyClient: localTranscriptClient('grok')
+        historyClient: localTranscriptClient('grok', home)
       }),
       new XaiApiConnector({ accountClient: new XaiManagementApiClient({ secretStore }) })
     ],
@@ -106,8 +110,7 @@ export async function runDaemon(home: string): Promise<void> {
       }
     ]
   });
-  await application.discoverConnectors();
-  await application.refresh();
+  process.stderr.write('Agent Usage: starting local web service…\n');
   const server = await startLocalServer({
     application,
     staticDirectory: locateStaticDirectory()
@@ -116,6 +119,11 @@ export async function runDaemon(home: string): Promise<void> {
     pid: process.pid,
     origin: server.origin,
     apiToken: server.apiToken
+  });
+  process.stderr.write(`Agent Usage: web service ready at ${server.origin}\n`);
+  process.stderr.write('Agent Usage: updating cached usage in the background…\n');
+  void application.startBackgroundProcessing().then(() => {
+    process.stderr.write('Agent Usage: background data update finished.\n');
   });
   const scheduler = new CollectionScheduler({ application });
   scheduler.start();
@@ -136,10 +144,14 @@ export async function runDaemon(home: string): Promise<void> {
   });
 }
 
-function localTranscriptClient(provider: LocalTranscriptProvider): LocalTranscriptUsageClient {
+function localTranscriptClient(
+  provider: LocalTranscriptProvider,
+  applicationHome: string
+): LocalTranscriptUsageClient {
   return new LocalTranscriptUsageClient({
     provider,
-    root: localTranscriptRoot(provider)
+    root: localTranscriptRoot(provider),
+    cachePath: join(applicationHome, 'cache', `${provider}-transcripts.json`)
   });
 }
 

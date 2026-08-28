@@ -18,6 +18,54 @@ afterEach(async () => {
 });
 
 describe('UsageApplication', () => {
+  it('reports independent background processing progress while cached reads stay available', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-processing-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let releaseCollection!: () => void;
+    const collectionGate = new Promise<void>((resolve) => {
+      releaseCollection = resolve;
+    });
+    const connector: Connector = {
+      id: 'slow',
+      async collect() {
+        await collectionGate;
+        return {
+          provider: { id: 'slow', displayName: 'Slow Agent' },
+          billingDomains: [{ id: 'subscription', displayName: 'Subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-28T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({ repository, connectors: [connector] });
+
+    const processing = application.startBackgroundProcessing();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+    expect(application.getProcessingStatus()).toMatchObject({
+      modules: {
+        discovery: { state: 'ready' },
+        usage: { state: 'running' },
+        pricing: { state: 'pending' }
+      }
+    });
+    expect(await application.getOverview()).toMatchObject({ providers: [] });
+
+    releaseCollection();
+    await processing;
+    expect(application.getProcessingStatus()).toMatchObject({
+      modules: {
+        discovery: { state: 'ready' },
+        usage: { state: 'ready' },
+        pricing: { state: 'ready' },
+        retention: { state: 'ready' }
+      }
+    });
+    repository.close();
+  });
+
   it('persists an idempotent provider summary across application restarts', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-'));
     workspaces.push(workspace);

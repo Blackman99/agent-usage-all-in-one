@@ -318,7 +318,7 @@ const WEEKDAY_PEAK_RANGES = [
 ];
 
 export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
-  version: '2026-08-28',
+  version: '2026-08-28-grok-4.6-build',
   entries: [
     ...ANTHROPIC_PRICING_CATALOG.entries,
     ...openAiGpt56Entries('gpt-5.6-sol', [
@@ -396,6 +396,32 @@ export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
       input: 2,
       output: 4,
       cacheRead: 0.4,
+      contextRule: { kind: 'prompt-tokens', minimumExclusive: 200_000 }
+    }),
+    xaiEntry({
+      id: 'xai-grok-4.6-build-short-2026-08-12',
+      priceVersion: 'xai-2026-08-12',
+      billingDomainId: 'grok-build-subscription',
+      model: 'grok-4.6',
+      aliases: ['grok-4.6-build', 'grok-4.6-latest'],
+      effectiveFrom: '2026-08-12T00:00:00.000Z',
+      contextTier: 'prompt-at-or-below-200k',
+      input: 2,
+      output: 6,
+      cacheRead: 0.5,
+      contextRule: { kind: 'prompt-tokens', maximumInclusive: 200_000 }
+    }),
+    xaiEntry({
+      id: 'xai-grok-4.6-build-long-2026-08-12',
+      priceVersion: 'xai-2026-08-12',
+      billingDomainId: 'grok-build-subscription',
+      model: 'grok-4.6',
+      aliases: ['grok-4.6-build', 'grok-4.6-latest'],
+      effectiveFrom: '2026-08-12T00:00:00.000Z',
+      contextTier: 'prompt-above-200k',
+      input: 4,
+      output: 12,
+      cacheRead: 1,
       contextRule: { kind: 'prompt-tokens', minimumExclusive: 200_000 }
     }),
     xaiEntry({

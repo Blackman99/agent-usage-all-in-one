@@ -491,6 +491,43 @@ describe('API retail-equivalent pricing', () => {
       );
     }
   });
+
+  it('prices Grok 4.6 Build subscription tokens independently from xAI API billing', () => {
+    const result = deriveRetailEquivalentCosts(
+      {
+        provider: { id: 'grok', displayName: 'Grok' },
+        billingDomains: [
+          { id: 'grok-build-subscription', displayName: 'Grok Build / SuperGrok shared pool' }
+        ],
+        quotaBuckets: [],
+        usage: [
+          observation({
+            id: 'grok-build-event',
+            billingDomainId: 'grok-build-subscription',
+            model: 'grok-4.6-build',
+            inputTokens: 100_000,
+            outputTokens: 100_000,
+            cacheReadTokens: 100_000,
+            observedAt: '2026-08-28T00:00:00.000Z'
+          })
+        ],
+        costs: [],
+        observedAt: '2026-08-28T00:00:00.000Z'
+      },
+      OFFICIAL_PRICING_CATALOG,
+      '2026-08-28T01:00:00.000Z'
+    );
+
+    expect(result.costs[0]).toMatchObject({
+      billingDomainId: 'grok-build-subscription',
+      kind: 'retail-equivalent',
+      amount: 0.85,
+      priceSnapshot: {
+        canonicalModel: 'grok-4.6',
+        ratesPerMillion: { input: 2, output: 6, 'cache-read': 0.5 }
+      }
+    });
+  });
 });
 
 function observation(overrides: Partial<UsageObservation> = {}): UsageObservation {

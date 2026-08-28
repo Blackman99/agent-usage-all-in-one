@@ -159,7 +159,7 @@ function parseDaemonState(value) {
 
 async function daemonIsHealthy(state) {
   try {
-    const response = await fetch(`${state.origin}/api/overview`, {
+    const response = await fetch(`${state.origin}/api/health`, {
       headers: { authorization: `Bearer ${state.apiToken}` },
       signal: AbortSignal.timeout(500)
     });

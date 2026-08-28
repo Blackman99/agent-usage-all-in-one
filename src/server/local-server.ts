@@ -31,6 +31,7 @@ const monitoringSettingsSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one setting is required');
 const clearDataSchema = z.object({ deleteProductSecrets: z.boolean().default(false) });
+const hardRebuildSchema = z.object({ confirmExpensiveOperation: z.literal(true) });
 
 export interface LocalServerOptions {
   application: UsageApplication;
@@ -80,6 +81,32 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
       const authentication = authenticate(request, apiToken, browserSessions);
       if (requestUrl.pathname.startsWith('/api/') && authentication === 'none') {
         sendJson(response, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/api/health') {
+        response.writeHead(204, { 'cache-control': 'no-store' });
+        response.end();
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/api/processing') {
+        sendJson(response, 200, options.application.getProcessingStatus());
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/api/rebuild') {
+        if (!validMutationOrigin(authentication, request, origin)) {
+          sendJson(response, 403, { error: 'invalid-origin' });
+          return;
+        }
+        const input = hardRebuildSchema.safeParse(await readJsonBody(request));
+        if (!input.success) {
+          sendJson(response, 400, { error: 'explicit-confirmation-required' });
+          return;
+        }
+        void options.application.startHardRebuild();
+        sendJson(response, 202, { accepted: true });
         return;
       }
 

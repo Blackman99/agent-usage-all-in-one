@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { opendir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, opendir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import type { CostRecord, UsageObservation } from '../core/types.js';
@@ -15,7 +15,7 @@ export interface LocalTranscriptUsageResult {
 }
 
 export interface TranscriptUsageClient {
-  readUsage(): Promise<LocalTranscriptUsageResult>;
+  readUsage(options?: { forceRebuild?: boolean }): Promise<LocalTranscriptUsageResult>;
 }
 
 export interface LocalTranscriptUsageClientOptions {
@@ -23,6 +23,7 @@ export interface LocalTranscriptUsageClientOptions {
   root: string;
   clock?: () => Date;
   lookbackDays?: number;
+  cachePath?: string;
 }
 
 interface ParsedTranscriptRecord {
@@ -55,16 +56,21 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   readonly #root: string;
   readonly #clock: () => Date;
   readonly #lookbackDays: number;
+  readonly #cachePath?: string;
   readonly #fileCache = new Map<string, CachedTranscriptFile>();
+  #cacheLoaded = false;
 
   constructor(options: LocalTranscriptUsageClientOptions) {
     this.#provider = options.provider;
     this.#root = options.root;
     this.#clock = options.clock ?? (() => new Date());
     this.#lookbackDays = options.lookbackDays ?? 90;
+    this.#cachePath = options.cachePath;
   }
 
-  async readUsage(): Promise<LocalTranscriptUsageResult> {
+  async readUsage(options: { forceRebuild?: boolean } = {}): Promise<LocalTranscriptUsageResult> {
+    await this.#loadCache();
+    if (options.forceRebuild) this.#fileCache.clear();
     const cutoff = this.#clock().getTime() - this.#lookbackDays * 24 * 60 * 60 * 1000;
     const discovered = await listTranscriptFiles(this.#root, cutoff);
     const files = discovered.files;
@@ -72,7 +78,7 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     const usage: UsageObservation[] = [];
     const costs: CostRecord[] = [];
     const seen = new Set<string>();
-    const livePaths = new Set(files.map((file) => file.path));
+    const livePaths = new Set(files.map((file) => stableId(file.path)));
     for (const path of this.#fileCache.keys()) {
       if (!livePaths.has(path)) this.#fileCache.delete(path);
     }
@@ -103,13 +109,16 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
       }
     }
 
+    await this.#persistCache();
+
     return { usage, costs, complete };
   }
 
   async #readFile(
     file: TranscriptFile
   ): Promise<{ records: ParsedTranscriptRecord[]; complete: boolean }> {
-    const cached = this.#fileCache.get(file.path);
+    const cacheKey = stableId(file.path);
+    const cached = this.#fileCache.get(cacheKey);
     if (cached && cached.size === file.size && cached.mtimeMs === file.mtimeMs) {
       return { records: cached.records, complete: true };
     }
@@ -143,8 +152,40 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     } catch {
       return { records: cached?.records ?? [], complete: false };
     }
-    this.#fileCache.set(file.path, { ...file, records });
+    this.#fileCache.set(cacheKey, { ...file, path: cacheKey, records });
     return { records, complete: true };
+  }
+
+  async #loadCache(): Promise<void> {
+    if (this.#cacheLoaded) return;
+    this.#cacheLoaded = true;
+    if (!this.#cachePath) return;
+    try {
+      const stored = JSON.parse(await readFile(this.#cachePath, 'utf8')) as {
+        version?: number;
+        files?: CachedTranscriptFile[];
+      };
+      if (stored.version !== 1 || !Array.isArray(stored.files)) return;
+      for (const file of stored.files) this.#fileCache.set(file.path, file);
+    } catch {
+      // A missing or corrupt optimization cache is rebuilt from source transcripts.
+    }
+  }
+
+  async #persistCache(): Promise<void> {
+    if (!this.#cachePath) return;
+    try {
+      await mkdir(dirname(this.#cachePath), { recursive: true, mode: 0o700 });
+      const temporary = `${this.#cachePath}.${process.pid}.tmp`;
+      await writeFile(
+        temporary,
+        JSON.stringify({ version: 1, files: [...this.#fileCache.values()] }),
+        { mode: 0o600 }
+      );
+      await rename(temporary, this.#cachePath);
+    } catch {
+      // Cache persistence never makes transcript collection fail.
+    }
   }
 }
 

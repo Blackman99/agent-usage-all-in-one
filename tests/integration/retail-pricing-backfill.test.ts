@@ -87,6 +87,7 @@ describe('retained retail-equivalent backfill', () => {
 
     const restarted = new SqliteUsageRepository(databasePath);
     const restartedApplication = application(restarted);
+    await restartedApplication.startBackgroundProcessing();
     const provider = (await restartedApplication.getOverview({ window: '30d', timeZone: 'UTC' }))
       .providers[0];
     const cost = provider.billingDomains[0].history.costs.find(
@@ -112,6 +113,7 @@ function application(
 }
 
 async function retailHistory(application: UsageApplication) {
+  await application.startBackgroundProcessing();
   const domain = (await application.getOverview({ window: '30d', timeZone: 'UTC' })).providers[0]
     .billingDomains[0];
   return domain.history.costs.find((cost) => cost.kind === 'retail-equivalent');

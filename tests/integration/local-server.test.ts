@@ -24,6 +24,79 @@ afterEach(async () => {
 });
 
 describe('local HTTP server', () => {
+  it('reports authenticated process health without building the usage overview', async () => {
+    let overviewCalls = 0;
+    const application = {
+      async getOverview() {
+        overviewCalls += 1;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 1_000));
+        throw new Error('The health endpoint must not build the usage overview');
+      }
+    } as unknown as UsageApplication;
+    const server = await startLocalServer({ application, apiToken: 'health-token' });
+    servers.push(server);
+
+    expect((await fetch(`${server.origin}/api/health`)).status).toBe(401);
+    const startedAt = performance.now();
+    const response = await fetch(`${server.origin}/api/health`, {
+      headers: { authorization: 'Bearer health-token' }
+    });
+
+    expect(response.status).toBe(204);
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    expect(overviewCalls).toBe(0);
+  });
+
+  it('reports background processing and accepts a confirmed hard rebuild without waiting', async () => {
+    let resolveRebuild!: () => void;
+    const rebuildFinished = new Promise<void>((resolve) => {
+      resolveRebuild = resolve;
+    });
+    const application = {
+      getProcessingStatus() {
+        return {
+          startedAt: '2026-08-28T12:00:00.000Z',
+          modules: {
+            discovery: { state: 'ready' },
+            usage: { state: 'running' },
+            pricing: { state: 'pending' },
+            retention: { state: 'ready' }
+          }
+        };
+      },
+      startHardRebuild() {
+        return rebuildFinished;
+      }
+    } as unknown as UsageApplication;
+    const server = await startLocalServer({ application, apiToken: 'processing-token' });
+    servers.push(server);
+    const headers = {
+      authorization: 'Bearer processing-token',
+      'content-type': 'application/json'
+    };
+
+    const status = await fetch(`${server.origin}/api/processing`, { headers });
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ modules: { usage: { state: 'running' } } });
+
+    const rejected = await fetch(`${server.origin}/api/rebuild`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ confirmExpensiveOperation: false })
+    });
+    expect(rejected.status).toBe(400);
+
+    const startedAt = performance.now();
+    const accepted = await fetch(`${server.origin}/api/rebuild`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ confirmExpensiveOperation: true })
+    });
+    expect(accepted.status).toBe(202);
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    resolveRebuild();
+  });
+
   it('redacts credentials from adapter error responses', async () => {
     const application = {
       async getOverview() {
