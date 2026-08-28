@@ -280,8 +280,52 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
-    if (selectedModelId && event.key === 'Escape') void closeModelDetail();
+    const activeDialog = selectedModelId ? modelDetailPanel : settingsOpen ? settingsPanel : null;
+    if (event.key === 'Tab' && activeDialog) trapDialogFocus(event, activeDialog);
+    else if (selectedModelId && event.key === 'Escape') void closeModelDetail();
     else if (settingsOpen && event.key === 'Escape') void closeSettings();
+  }
+
+  function trapDialogFocus(event: KeyboardEvent, panel: HTMLElement): void {
+    const focusable = [
+      ...panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+      )
+    ].filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    if (focusable.length === 0) {
+      event.preventDefault();
+      panel.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1)!;
+    const active = document.activeElement;
+    if (event.shiftKey && (active === panel || active === first || !panel.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function handleTablistKeydown(event: KeyboardEvent): void {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [
+      ...(event.currentTarget as HTMLElement).parentElement!.querySelectorAll<HTMLButtonElement>(
+        '[role="tab"]'
+      )
+    ];
+    const current = tabs.indexOf(event.currentTarget as HTMLButtonElement);
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabs.length - 1
+          : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    tabs[next]?.focus();
+    tabs[next]?.click();
   }
 
   function connectorStateLabel(state: ConnectorSetupState): string {
@@ -917,7 +961,7 @@
 <svelte:window on:keydown={handleWindowKeydown} />
 
 {#key locale}
-  <div class="shell">
+  <main class="shell" inert={settingsOpen || selectedModelEntry !== null}>
     <header>
       <div>
         <p class="eyebrow">{t('eyebrow')}</p>
@@ -1058,7 +1102,7 @@
           <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
         </section>
       {/if}
-      <section class="providers" aria-label="Providers">
+      <section class="providers" aria-label={t('providersLabel')}>
         {#each displayProviders(overview, connectors) as provider (provider.id)}
           {@const logo = providerLogoSources(provider.id)}
           <article class="provider-card">
@@ -1107,18 +1151,19 @@
               <div
                 class="domain-tabs"
                 role="tablist"
-                aria-label={`${provider.displayName} billing`}
+                aria-label={`${provider.displayName} ${t('billingDomainTabs')}`}
               >
                 {#each provider.billingDomains as domain (domain.id)}
+                  {@const selected =
+                    activeBillingDomain(provider, selectedBillingDomains[provider.id]).id ===
+                    domain.id}
                   <button
                     type="button"
                     role="tab"
-                    aria-selected={activeBillingDomain(
-                      provider,
-                      selectedBillingDomains[provider.id]
-                    ).id === domain.id}
+                    aria-selected={selected}
+                    tabindex={selected ? 0 : -1}
                     on:click={() => selectBillingDomain(provider.id, domain.id)}
-                    >{domain.displayName}</button
+                    on:keydown={handleTablistKeydown}>{domain.displayName}</button
                   >
                 {/each}
               </div>
@@ -1232,7 +1277,10 @@
                       aria-label={bucket.label}
                       aria-valuemin="0"
                       aria-valuemax="100"
-                      aria-valuenow={bucket.usedPercent ?? 0}
+                      aria-valuenow={bucket.usedPercent ?? undefined}
+                      aria-valuetext={bucket.usedPercent === null
+                        ? t('notAvailable')
+                        : `${formatNumber(bucket.usedPercent)}% ${t('used')}`}
                     >
                       <span style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
                       ></span>
@@ -1618,7 +1666,9 @@
               {/each}
             </div>
             <div class="trend-data">
-              <table aria-label={t('trendData')}>
+              <table
+                aria-label={`${t('trendData')} · ${selectedWindow} · ${workbench.timeZone} · ${workbench.trend.granularity === 'hour' ? t('precisionHour') : t('precisionDay')} · ${t('trendSummary')}`}
+              >
                 <thead>
                   <tr>
                     <th>{t('interval')}</th>
@@ -1733,7 +1783,7 @@
         </section>
       {/if}
     {/if}
-  </div>
+  </main>
 
   {#if settingsOpen}
     <div class="settings-backdrop" role="presentation">
@@ -2129,6 +2179,7 @@
     --danger-bg: #fff4f2;
     --danger-border: #d8a29e;
     --danger-text: #922f2b;
+    --focus: #315fd3;
     color-scheme: light dark;
     background: var(--page);
     font-family:
@@ -3038,8 +3089,8 @@
   }
 
   .connection-actions button.primary-action {
-    border-color: #627eef;
-    background: #5870d4;
+    border-color: #4e62bd;
+    background: #4e62bd;
     color: white;
   }
 
@@ -3930,6 +3981,7 @@
       --danger-bg: #241416;
       --danger-border: #71363a;
       --danger-text: #ffaaa5;
+      --focus: #9bb1ff;
     }
 
     .provider-card,
@@ -3962,6 +4014,17 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  :global(button:focus-visible),
+  :global(a[href]:focus-visible),
+  :global(input:focus-visible),
+  :global(select:focus-visible),
+  :global(textarea:focus-visible),
+  :global(summary:focus-visible),
+  :global([tabindex]:focus-visible) {
+    outline: 3px solid var(--focus) !important;
+    outline-offset: 2px;
   }
 
   @media (max-width: 680px) {
@@ -4042,8 +4105,16 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    :global(*),
+    :global(*::before),
+    :global(*::after) {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      transition-delay: 0ms !important;
+    }
+
     .spin {
-      animation: none;
+      animation: none !important;
     }
   }
 </style>

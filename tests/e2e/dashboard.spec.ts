@@ -787,6 +787,12 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await fableRow.press('Enter');
   const detail = page.getByRole('dialog', { name: 'Model detail: fable-model' });
   await expect(detail).toBeVisible();
+  await expect(detail).toBeFocused();
+  await expect(page.locator('.shell')).toHaveAttribute('inert', '');
+  await page.keyboard.press('Shift+Tab');
+  await expect(detail.getByRole('button', { name: 'Close model detail' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(detail.getByRole('button', { name: 'Close model detail' })).toBeFocused();
   await expect(detail).toContainText('Claude Code · Subscription');
   await expect(detail).toContainText('Recorded total 400');
   await expect(detail).toContainText('Source-reported total 400');
@@ -913,6 +919,61 @@ test('follows system theme and keeps the usage dashboard responsive with local o
       .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
   ).toBe('/brands/xai-dark.svg');
   expect(externalRequests).toEqual([]);
+});
+
+test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe', async ({
+  page
+}) => {
+  let delayRefresh = false;
+  await page.route('**/api/refresh', async (route) => {
+    if (delayRefresh) await new Promise((resolve) => setTimeout(resolve, 250));
+    await route.continue();
+  });
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByRole('main')).toBeVisible();
+
+  const quota = page.getByRole('progressbar', { name: '5 hour' });
+  await expect(quota).toHaveAttribute('aria-valuenow', '42');
+  await expect(quota).toHaveAttribute('aria-valuetext', '42% used');
+  await expect(page.getByRole('table', { name: /Trend data · 7d/ })).toBeAttached();
+
+  const grok = page.locator('.provider-card').filter({ hasText: 'Grok' });
+  const buildTab = grok.getByRole('tab', { name: 'Build / SuperGrok' });
+  const apiTab = grok.getByRole('tab', { name: 'xAI API' });
+  await buildTab.focus();
+  await buildTab.press('ArrowRight');
+  await expect(apiTab).toBeFocused();
+  await expect(apiTab).toHaveAttribute('aria-selected', 'true');
+
+  const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
+  await settingsButton.focus();
+  const focusStyle = await settingsButton.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
+  });
+  expect(focusStyle.outlineStyle).not.toBe('none');
+  expect(focusStyle.outlineWidth).not.toBe('0px');
+  await settingsButton.press('Enter');
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeFocused();
+  await expect(page.locator('.shell')).toHaveAttribute('inert', '');
+  await page.keyboard.press('Shift+Tab');
+  await expect(settings.getByRole('button', { name: 'Clear local usage' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(settings.getByRole('button', { name: 'Close settings' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(settingsButton).toBeFocused();
+  await expect(page.locator('.shell')).not.toHaveAttribute('inert', '');
+
+  delayRefresh = true;
+  await settingsButton.press('Tab');
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  const refreshButton = page.getByRole('button', { name: 'Refreshing…' });
+  await expect(refreshButton).toBeVisible();
+  await expect(refreshButton.locator('span')).toHaveCSS('animation-name', 'none');
 });
 
 test('switches the complete catalog to Simplified Chinese without translating provider labels', async ({
