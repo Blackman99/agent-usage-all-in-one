@@ -1886,24 +1886,10 @@ export class SqliteUsageRepository implements UsageRepository {
         WHERE providers.id = billing_domains.provider_id
       )
       WHERE last_success_at IS NULL
-        AND id = (
-          SELECT candidate.id
-          FROM billing_domains AS candidate
-          WHERE candidate.provider_id = billing_domains.provider_id
-          ORDER BY
-            CASE
-              WHEN candidate.provider_id = 'grok'
-                AND candidate.id = 'grok-build-subscription' THEN 0
-              ELSE 1
-            END,
-            candidate.id
-          LIMIT 1
-        )
-        AND NOT EXISTS (
-          SELECT 1
+        AND 1 = (
+          SELECT COUNT(*)
           FROM billing_domains AS sibling
           WHERE sibling.provider_id = billing_domains.provider_id
-            AND sibling.last_success_at IS NOT NULL
         )
     `);
     const costColumns = this.#database

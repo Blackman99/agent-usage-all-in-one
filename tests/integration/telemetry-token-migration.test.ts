@@ -70,7 +70,7 @@ describe('legacy telemetry token migration', () => {
     database.close();
   });
 
-  it('repairs domain freshness after an earlier upgrade already added the empty column', async () => {
+  it('repairs a single domain but does not invent ownership for ambiguous multi-domain freshness', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-domain-freshness-repair-'));
     workspaces.push(workspace);
     const databasePath = join(workspace, 'usage.sqlite');
@@ -84,14 +84,14 @@ describe('legacy telemetry token migration', () => {
       overview.providers.map((provider) => [provider.id, provider.freshness.lastSuccessAt])
     ).toEqual([
       ['claude-code', '2026-08-28T01:00:00.000Z'],
-      ['grok', '2026-08-28T01:30:00.000Z']
+      ['grok', null]
     ]);
     expect(
       overview.providers
         .find((provider) => provider.id === 'grok')
         ?.billingDomains.map((domain) => [domain.id, domain.freshness.lastSuccessAt])
     ).toEqual([
-      ['grok-build-subscription', '2026-08-28T01:30:00.000Z'],
+      ['grok-build-subscription', null],
       ['xai-api', null]
     ]);
     migrated.close();
