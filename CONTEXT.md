@@ -72,6 +72,11 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Token and money workbench**: The selected-window read model that keeps
   recorded Tokens, actual cost, reported estimate, and API retail equivalent
   separate while exposing Provider and billing-domain trend intervals.
+- **Model ranking identity**: The tuple of Provider, billing domain, and model.
+  Matching model names from different identities remain separate ranking rows.
+- **Model ranking**: The selected-window Top 5 known model identities, ordered
+  deterministically by recorded Tokens or available API retail equivalent.
+  Unclassified usage remains visible beside the ranking and never occupies it.
 - **Trend gap**: An hourly or daily interval with no Token observation. It stays
   visibly discontinuous; cost evidence does not fabricate a Token observation.
 - **Data authority**: The provenance level of a value: official account,
@@ -143,3 +148,13 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 25. Workbench trend segments retain Provider and billing-domain identity. An
     interval without observations remains a gap, and day or billing-period
     precision remains explicit in visual and accessible output.
+26. Model rankings use Provider, billing domain, and model as their identity.
+    Equal values are ordered by that stable identity, never by collection order.
+27. Token ranking includes known unpriced models and labels retail equivalent as
+    unavailable. Retail ranking puts priced models first and never represents an
+    unavailable amount as zero.
+28. Ranked known-model Tokens plus separately disclosed unclassified Tokens
+    reconcile to the workbench recorded Token total for the selected window.
+29. Model details retain observation-level Token evidence and immutable price
+    snapshots so displayed totals, line items, authority, precision, time, and
+    trend can be audited without joining model names across sources.

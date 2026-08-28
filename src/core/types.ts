@@ -241,6 +241,19 @@ export interface HistoryModel {
   model: string;
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
+  observations: HistoryModelObservation[];
+  priceEvidence: HistoryModelPriceEvidence[];
+}
+
+export interface HistoryModelObservation {
+  id: string;
+  observedAt: string;
+  authority: DataAuthority;
+  timePrecision: TokenTimePrecision;
+  sourceReportedTotalTokens: number | null;
+  recordedTokens: number;
+  totalDerivation: TokenTotalDerivation;
+  tokenTotals: TokenTotals;
 }
 
 export interface HistoryDay {
@@ -280,6 +293,23 @@ export interface HistoryCost {
   };
 }
 
+export interface HistoryModelPriceEvidence extends HistoryCost {
+  id: string;
+  usageObservationId: string | null;
+  pricedTokens: number;
+  lineItems: RetailPriceLineItem[];
+  priceSnapshot: PriceSnapshotReference | null;
+  authority: DataAuthority;
+  calculatedAt: string | null;
+}
+
+export interface HistoryUnclassifiedUsage {
+  tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+}
+
 export interface BillingHistory {
   window: HistoryWindow;
   start: string;
@@ -288,6 +318,7 @@ export interface BillingHistory {
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
   models: HistoryModel[];
+  unclassified: HistoryUnclassifiedUsage;
   days: HistoryDay[];
   intervals: HistoryInterval[];
   costs: HistoryCost[];
@@ -453,6 +484,57 @@ export interface TokenMoneyWorkbench {
     granularity: 'hour' | 'day';
     buckets: WorkbenchTrendBucket[];
   };
+  modelRanking: WorkbenchModelRanking;
+}
+
+export interface WorkbenchModelTrendBucket {
+  start: string;
+  end: string;
+  label: string;
+  gap: boolean;
+  tokenTotals: TokenTotals;
+  retailEquivalent: Pick<
+    WorkbenchMoneyMetric,
+    'status' | 'amount' | 'comparisonCurrency' | 'pricingCoverage'
+  >;
+}
+
+export interface WorkbenchModelEntry {
+  id: string;
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  model: string;
+  tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
+  tokenShare: number | null;
+  retailEquivalent: WorkbenchMoneyMetric;
+  retailShare: number | null;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+  observations: HistoryModelObservation[];
+  priceEvidence: HistoryModelPriceEvidence[];
+  trend: WorkbenchModelTrendBucket[];
+}
+
+export interface WorkbenchUnclassifiedUsage {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
+  tokenShare: number | null;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+}
+
+export interface WorkbenchModelRanking {
+  byTokens: string[];
+  byRetailEquivalent: string[];
+  entries: WorkbenchModelEntry[];
+  unclassified: WorkbenchUnclassifiedUsage[];
 }
 
 export interface GlobalUsageContribution {

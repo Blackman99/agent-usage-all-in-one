@@ -752,6 +752,52 @@ test('downloads a redacted export and clears only the selected local scope', asy
   await expect(privacy).toContainText('0 raw observations');
 });
 
+test('shows isolated model ranking and returns focus after keyboard detail review', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 2900, 'USD'))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  const ranking = page.getByTestId('model-ranking');
+  await expect(ranking.getByRole('heading', { name: 'Top models' })).toBeVisible();
+  const rows = ranking.getByTestId('model-ranking-row');
+  await expect(rows).toHaveCount(5);
+  await expect(rows.first()).toContainText('shared-model');
+  await expect(rows.first()).toContainText('Codex · Subscription');
+  await expect(rows.first()).toContainText('Unavailable');
+  await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/openai.svg');
+  await expect(ranking.getByText('Unclassified usage')).toBeVisible();
+  await expect(ranking.getByText('1,000 Tokens')).toBeVisible();
+
+  await ranking.getByRole('button', { name: 'Sort by API retail equivalent' }).click();
+  await expect(rows.first()).toContainText('fable-model');
+  const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
+  await expect(grokRow.locator('img')).toHaveAttribute('src', '/brands/xai-dark.svg');
+  await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
+
+  const fableRow = rows.filter({ hasText: 'fable-model' });
+  await fableRow.focus();
+  await fableRow.press('Enter');
+  const detail = page.getByRole('dialog', { name: 'Model detail: fable-model' });
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText('Claude Code · Subscription');
+  await expect(detail).toContainText('Recorded total 400');
+  await expect(detail).toContainText('Source-reported total 400');
+  await expect(detail).toContainText('Input · 320 · $3.20');
+  await expect(detail).toContainText('2026-08-01 · Official fixture pricing');
+  await expect(detail).toContainText('Local observation · Event');
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Gap');
+  await page.keyboard.press('Escape');
+  await expect(detail).toBeHidden();
+  await expect(fableRow).toBeFocused();
+});
+
 test('switches the complete catalog to Simplified Chinese without translating provider labels', async ({
   page
 }) => {
@@ -1119,7 +1165,168 @@ function tokenMoneyWorkbenchFixture(window: string, total: number, currency: str
               ]
             : []
       }))
+    },
+    modelRanking: modelRankingFixture(currency, bucketCount)
+  };
+}
+
+function modelRankingFixture(currency: string, bucketCount: number): unknown {
+  const models = [
+    ['codex', 'Codex', 'subscription', 'Subscription', 'shared-model', 500, null],
+    ['claude-code', 'Claude Code', 'subscription', 'Subscription', 'fable-model', 400, 4],
+    ['opencode-go', 'OpenCode Go', 'subscription', 'Subscription', 'open-model', 400, 2],
+    ['grok', 'Grok', 'xai-api', 'xAI API', 'shared-model', 300, 3],
+    ['codex', 'Codex', 'subscription', 'Subscription', 'model-four', 200, null],
+    ['codex', 'Codex', 'subscription', 'Subscription', 'model-five', 100, null]
+  ] as const;
+  const entries = models.map(
+    ([
+      providerId,
+      providerDisplayName,
+      billingDomainId,
+      billingDomainDisplayName,
+      model,
+      tokens,
+      amount
+    ]) => {
+      const id = `${providerId}::${billingDomainId}::${model}`;
+      const tokenTotals = {
+        total: tokens,
+        input: tokens * 0.8,
+        output: tokens * 0.2,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      };
+      const tokenEvidence = tokenEvidenceFixture(tokenTotals, {
+        totalDerivations: ['source-reported'],
+        timePrecisions: ['event'],
+        usageScopes: ['this-mac']
+      });
+      const convertedAmount = amount === null ? null : currency === 'USD' ? amount : amount * 7.2;
+      const retailEquivalent = {
+        purpose: 'retail-equivalent',
+        status: amount === null ? 'unavailable' : 'available',
+        amount: convertedAmount,
+        comparisonCurrency: currency,
+        nativeAmounts:
+          amount === null ? [] : [{ currency: 'USD', amount, records: 1, knownRecords: 1 }],
+        authorities: amount === null ? [] : ['estimate'],
+        observedAt: '2026-08-28T00:30:00.000Z',
+        records: amount === null ? 0 : 1,
+        knownRecords: amount === null ? 0 : 1,
+        amountCoverage: amount === null ? null : 1,
+        pricingCoverage: amount === null ? 0 : 1,
+        pricedTokens: amount === null ? 0 : tokens,
+        recordedTokens: tokens,
+        conversionUnavailableReasons: [],
+        exchangeRates: []
+      };
+      return {
+        id,
+        providerId,
+        providerDisplayName,
+        billingDomainId,
+        billingDomainDisplayName,
+        model,
+        tokenTotals,
+        tokenEvidence,
+        tokenShare: tokens / 2900,
+        retailEquivalent,
+        retailShare: amount === null ? null : amount / 9,
+        authorities: ['local-observation'],
+        lastObservedAt: '2026-08-28T00:30:00.000Z',
+        observations: [
+          {
+            id: `${model}-observation`,
+            observedAt: '2026-08-28T00:30:00.000Z',
+            authority: 'local-observation',
+            timePrecision: 'event',
+            sourceReportedTotalTokens: tokens,
+            recordedTokens: tokens,
+            totalDerivation: 'source-reported',
+            tokenTotals
+          }
+        ],
+        priceEvidence:
+          model === 'fable-model'
+            ? [
+                {
+                  id: 'fable-retail',
+                  kind: 'retail-equivalent',
+                  currency: 'USD',
+                  amount: 4,
+                  convertedAmount,
+                  comparisonCurrency: currency,
+                  conversionUnavailableReason: null,
+                  priceSnapshots: [],
+                  authorities: ['estimate'],
+                  observedAt: '2026-08-28T00:30:00.000Z',
+                  records: 1,
+                  knownRecords: 1,
+                  usageObservationId: 'fable-model-observation',
+                  pricedTokens: 400,
+                  lineItems: [
+                    { tokenKind: 'input', tokens: 320, ratePerMillion: 10000, amount: 3.2 },
+                    { tokenKind: 'output', tokens: 80, ratePerMillion: 10000, amount: 0.8 }
+                  ],
+                  priceSnapshot: {
+                    id: 'fable-price',
+                    version: '2026-08-01',
+                    source: 'Official fixture pricing',
+                    effectiveAt: '2026-08-01T00:00:00.000Z'
+                  },
+                  authority: 'estimate',
+                  calculatedAt: '2026-08-28T00:31:00.000Z'
+                }
+              ]
+            : [],
+        trend: Array.from({ length: bucketCount }, (_, index) => ({
+          start: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+          end: `2026-08-${String(index + 2).padStart(2, '0')}T00:00:00.000Z`,
+          label: `Bucket ${index + 1}`,
+          gap: index > 0,
+          tokenTotals:
+            index === 0 ? tokenTotals : { ...tokenTotals, total: 0, input: 0, output: 0 },
+          retailEquivalent: {
+            status: index === 0 && amount !== null ? 'available' : 'unavailable',
+            amount: index === 0 ? convertedAmount : null,
+            comparisonCurrency: currency,
+            pricingCoverage: index === 0 && amount !== null ? 1 : null
+          }
+        }))
+      };
     }
+  );
+  return {
+    byTokens: entries.slice(0, 5).map((entry) => entry.id),
+    byRetailEquivalent: [entries[1], entries[3], entries[2], entries[0], entries[4]].map(
+      (entry) => entry.id
+    ),
+    entries,
+    unclassified: [
+      {
+        providerId: 'codex',
+        providerDisplayName: 'Codex',
+        billingDomainId: 'subscription',
+        billingDomainDisplayName: 'Subscription',
+        tokenTotals: {
+          total: 1000,
+          input: 800,
+          output: 200,
+          reasoning: 0,
+          cacheRead: 0,
+          cacheWrite: 0
+        },
+        tokenEvidence: tokenEvidenceFixture(
+          { total: 1000 },
+          { totalDerivations: ['source-reported'], timePrecisions: ['event'] }
+        ),
+        tokenShare: 1000 / 2900,
+        authorities: ['local-observation'],
+        lastObservedAt: '2026-08-28T00:30:00.000Z'
+      }
+    ]
   };
 }
 

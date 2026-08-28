@@ -41,6 +41,10 @@
   let selectedWindow: HistoryWindow = '7d';
   let selectedCurrency: 'CNY' | 'USD' = 'CNY';
   let selectedTrendMetric: 'tokens' | 'retail-equivalent' = 'tokens';
+  let modelRankingSort: 'tokens' | 'retail-equivalent' = 'tokens';
+  let selectedModelId: string | null = null;
+  let modelDetailTrigger: HTMLButtonElement | null = null;
+  let modelDetailPanel: HTMLElement | null = null;
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
   let diagnostics: DoctorReport | null = null;
@@ -52,6 +56,10 @@
   let settingsTarget: string | null = null;
   let settingsButton: HTMLButtonElement | null = null;
   let settingsPanel: HTMLElement | null = null;
+  let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
+
+  $: selectedModelEntry =
+    overview?.workbench?.modelRanking.entries.find((entry) => entry.id === selectedModelId) ?? null;
 
   onMount(async () => {
     locale = detectLocale(navigator.language);
@@ -272,7 +280,8 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
-    if (settingsOpen && event.key === 'Escape') void closeSettings();
+    if (selectedModelId && event.key === 'Escape') void closeModelDetail();
+    else if (settingsOpen && event.key === 'Escape') void closeSettings();
   }
 
   function connectorStateLabel(state: ConnectorSetupState): string {
@@ -516,6 +525,12 @@
       tokenTotals,
       tokenEvidence,
       models: [],
+      unclassified: {
+        tokenTotals: emptyTokenTotals(),
+        tokenEvidence: emptyTokenEvidence(),
+        authorities: [],
+        lastObservedAt: null
+      },
       days: [],
       intervals: [],
       costs: costs.map((cost) => ({
@@ -594,7 +609,8 @@
     const paths: Record<string, string> = {
       codex: '/brands/openai.svg',
       'claude-code': '/brands/claude.svg',
-      'opencode-go': '/brands/opencode.svg'
+      'opencode-go': '/brands/opencode.svg',
+      grok: '/brands/xai-dark.svg'
     };
     return paths[providerId] ?? null;
   }
@@ -834,6 +850,44 @@
     const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
     return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}: ${value} · ${t('timePrecision')}: ${precision}`;
   }
+
+  function rankedModels(
+    workbench: UsageOverview['workbench'],
+    sort: 'tokens' | 'retail-equivalent'
+  ) {
+    const ids =
+      sort === 'tokens'
+        ? workbench.modelRanking.byTokens
+        : workbench.modelRanking.byRetailEquivalent;
+    return ids.flatMap((id) => {
+      const entry = workbench.modelRanking.entries.find((candidate) => candidate.id === id);
+      return entry ? [entry] : [];
+    });
+  }
+
+  async function openModelDetail(id: string, trigger: HTMLButtonElement): Promise<void> {
+    selectedModelId = id;
+    modelDetailTrigger = trigger;
+    await tick();
+    modelDetailPanel?.focus();
+  }
+
+  async function closeModelDetail(): Promise<void> {
+    selectedModelId = null;
+    await tick();
+    modelDetailTrigger?.focus();
+  }
+
+  function tokenKindLabel(kind: string): string {
+    const keys: Record<string, MessageKey> = {
+      input: 'input',
+      output: 'output',
+      reasoning: 'reasoning',
+      'cache-read': 'cacheRead',
+      'cache-write': 'cacheWrite'
+    };
+    return t(keys[kind] ?? 'unknown');
+  }
 </script>
 
 <svelte:head>
@@ -846,887 +900,1148 @@
 
 <svelte:window on:keydown={handleWindowKeydown} />
 
-<div class="shell">
-  <header>
-    <div>
-      <p class="eyebrow">{t('eyebrow')}</p>
-      <h1>{t('title')}</h1>
-      <p class="subtitle">{t('subtitle')}</p>
-    </div>
-    <div class="header-actions">
-      <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
-        {t('settings')}
-      </button>
-      <button class="locale-toggle" on:click={toggleLocale}>
-        {locale === 'en' ? '中文' : 'EN'}
-      </button>
-      <button class="refresh" on:click={refresh} disabled={refreshing}>
-        <span class:spin={refreshing} aria-hidden="true">↻</span>
-        {refreshing ? t('refreshing') : t('refresh')}
-      </button>
-    </div>
-  </header>
-
-  {#if loading}
-    <div class="state" aria-live="polite">{t('loading')}</div>
-  {:else if overviewError && !overview}
-    <div class="state error" role="alert">{t('error')}</div>
-  {:else if overview}
-    {@const risk = actionableRisk(overview, diagnostics, locale)}
-    {#if refreshError}
-      <div class="inline-error" role="status">{t('refreshUnavailable')}</div>
-    {/if}
-    {#if overview.providers.length === 0}
-      <div class="state compact">{t('noProviders')}</div>
-    {/if}
-    <section class="global-summary" aria-labelledby="global-summary-heading">
-      <div class="global-summary-heading">
-        <div>
-          <p class="eyebrow">{selectedWindow}</p>
-          <h2 id="global-summary-heading">{t('globalSummary')}</h2>
-        </div>
-        <div class="history-toolbar" aria-label={t('history')}>
-          {#each ['24h', '7d', '30d'] as window (window)}
-            <button
-              type="button"
-              aria-pressed={selectedWindow === window}
-              on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
-            >
-          {/each}
-        </div>
+{#key locale}
+  <div class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">{t('eyebrow')}</p>
+        <h1>{t('title')}</h1>
+        <p class="subtitle">{t('subtitle')}</p>
       </div>
-      {#if overview.globalSummary}
-        {@const summary = overview.globalSummary}
-        <div class="summary-metrics">
-          <article>
-            <span>{t('recordedTokens')}</span>
-            <strong data-testid="summary-recorded-tokens">
-              {summary.recordedTokens === null
-                ? t('notAvailable')
-                : formatNumber(summary.recordedTokens)}
-            </strong>
-            <small>
-              {#if summary.recordedTokens === null}
-                {t('noObservations')}
-              {:else}
-                {t('classificationCoverage')}:
-                {formatPercent(summary.tokenEvidence.classificationCoverage)} ·
-                {t('timePrecision')}:
-                {summary.tokenEvidence.timePrecisions.map(timePrecisionLabel).join(' + ') ||
-                  t('unknown')}
-              {/if}
-            </small>
-          </article>
-          <article>
-            <span>{t('apiRetailEquivalent')}</span>
-            <strong data-testid="summary-retail-equivalent">
-              {summary.apiRetailEquivalent.status === 'available'
-                ? formatMoney(
-                    summary.apiRetailEquivalent.amount,
-                    summary.apiRetailEquivalent.currency
-                  )
-                : t('notAvailable')}
-            </strong>
-            <small>
-              {t('pricingCoverage')}:
-              {formatPercent(summary.apiRetailEquivalent.pricingCoverage)}
-            </small>
-          </article>
-          <article>
-            <span>{t('mostConstrained')}</span>
-            <strong>
-              {summary.mostConstrained
-                ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label}`
-                : t('notAvailable')}
-            </strong>
-            <small>
-              {#if summary.mostConstrained}
-                {formatNumber(summary.mostConstrained.remainingPercent)}% {t('remaining')} ·
-                {formatRelativeReset(summary.mostConstrained.resetsAt)} ·
-                {formatReset(summary.mostConstrained.resetsAt)}
-              {:else}
-                {t('notAvailable')}
-              {/if}
-            </small>
-          </article>
-          <article>
-            <span>{t('latestData')}</span>
-            <strong>
-              {summary.latestObservedAt ? formatReset(summary.latestObservedAt) : t('notAvailable')}
-            </strong>
-            <small>{t('generatedAt')}: {formatReset(summary.generatedAt)}</small>
-          </article>
-        </div>
-        {#if summary.contributions.length > 0}
-          <div class="summary-contributions" aria-label={t('domainContributions')}>
-            {#each summary.contributions as contribution (`${contribution.providerId}:${contribution.billingDomainId}`)}
-              <span>
-                {contribution.providerDisplayName} · {contribution.billingDomainDisplayName}
-                <b>{formatNumber(contribution.recordedTokens)}</b>
-              </span>
+      <div class="header-actions">
+        <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
+          {t('settings')}
+        </button>
+        <button class="locale-toggle" on:click={toggleLocale}>
+          {locale === 'en' ? '中文' : 'EN'}
+        </button>
+        <button class="refresh" on:click={refresh} disabled={refreshing}>
+          <span class:spin={refreshing} aria-hidden="true">↻</span>
+          {refreshing ? t('refreshing') : t('refresh')}
+        </button>
+      </div>
+    </header>
+
+    {#if loading}
+      <div class="state" aria-live="polite">{t('loading')}</div>
+    {:else if overviewError && !overview}
+      <div class="state error" role="alert">{t('error')}</div>
+    {:else if overview}
+      {@const risk = actionableRisk(overview, diagnostics, locale)}
+      {#if refreshError}
+        <div class="inline-error" role="status">{t('refreshUnavailable')}</div>
+      {/if}
+      {#if overview.providers.length === 0}
+        <div class="state compact">{t('noProviders')}</div>
+      {/if}
+      <section class="global-summary" aria-labelledby="global-summary-heading">
+        <div class="global-summary-heading">
+          <div>
+            <p class="eyebrow">{selectedWindow}</p>
+            <h2 id="global-summary-heading">{t('globalSummary')}</h2>
+          </div>
+          <div class="history-toolbar" aria-label={t('history')}>
+            {#each ['24h', '7d', '30d'] as window (window)}
+              <button
+                type="button"
+                aria-pressed={selectedWindow === window}
+                on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
+              >
             {/each}
           </div>
-        {/if}
-      {/if}
-    </section>
-    {#if risk}
-      <section class="risk-banner" aria-label={t('riskOverview')}>
-        <div>
-          <strong>{risk.title}</strong>
-          <span>{risk.detail}</span>
         </div>
-        <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
-      </section>
-    {/if}
-    <section class="providers" aria-label="Providers">
-      {#each displayProviders(overview, connectors) as provider (provider.id)}
-        {@const logoPath = providerLogoPath(provider.id)}
-        <article class="provider-card">
-          <div class="provider-heading">
-            <div>
-              {#if logoPath}
-                <img class="provider-logo" data-provider-logo={provider.id} src={logoPath} alt="" />
-              {/if}
-              <div>
-                <h2 data-provider-logo={logoPath ? undefined : provider.id}>
-                  {provider.displayName}
-                </h2>
-                <p class="freshness" data-status={provider.freshness.status}>
-                  <span></span>
-                  {provider.freshness.status === 'fresh'
-                    ? t('updatedNow')
-                    : provider.freshness.status === 'stale'
-                      ? t('stale')
-                      : t('unavailable')}
-                  {provider.freshness.lastSuccessAt
-                    ? ` · ${formatReset(provider.freshness.lastSuccessAt)}`
-                    : ''}
-                </p>
-              </div>
-            </div>
-            <div class="coverage">{coverageLevelLabel(provider.coverage.quota)}</div>
+        {#if overview.globalSummary}
+          {@const summary = overview.globalSummary}
+          <div class="summary-metrics">
+            <article>
+              <span>{t('recordedTokens')}</span>
+              <strong data-testid="summary-recorded-tokens">
+                {summary.recordedTokens === null
+                  ? t('notAvailable')
+                  : formatNumber(summary.recordedTokens)}
+              </strong>
+              <small>
+                {#if summary.recordedTokens === null}
+                  {t('noObservations')}
+                {:else}
+                  {t('classificationCoverage')}:
+                  {formatPercent(summary.tokenEvidence.classificationCoverage)} ·
+                  {t('timePrecision')}:
+                  {summary.tokenEvidence.timePrecisions.map(timePrecisionLabel).join(' + ') ||
+                    t('unknown')}
+                {/if}
+              </small>
+            </article>
+            <article>
+              <span>{t('apiRetailEquivalent')}</span>
+              <strong data-testid="summary-retail-equivalent">
+                {summary.apiRetailEquivalent.status === 'available'
+                  ? formatMoney(
+                      summary.apiRetailEquivalent.amount,
+                      summary.apiRetailEquivalent.currency
+                    )
+                  : t('notAvailable')}
+              </strong>
+              <small>
+                {t('pricingCoverage')}:
+                {formatPercent(summary.apiRetailEquivalent.pricingCoverage)}
+              </small>
+            </article>
+            <article>
+              <span>{t('mostConstrained')}</span>
+              <strong>
+                {summary.mostConstrained
+                  ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label}`
+                  : t('notAvailable')}
+              </strong>
+              <small>
+                {#if summary.mostConstrained}
+                  {formatNumber(summary.mostConstrained.remainingPercent)}% {t('remaining')} ·
+                  {formatRelativeReset(summary.mostConstrained.resetsAt)} ·
+                  {formatReset(summary.mostConstrained.resetsAt)}
+                {:else}
+                  {t('notAvailable')}
+                {/if}
+              </small>
+            </article>
+            <article>
+              <span>{t('latestData')}</span>
+              <strong>
+                {summary.latestObservedAt
+                  ? formatReset(summary.latestObservedAt)
+                  : t('notAvailable')}
+              </strong>
+              <small>{t('generatedAt')}: {formatReset(summary.generatedAt)}</small>
+            </article>
           </div>
-
-          {#if provider.health.status === 'degraded'}
-            <div class="degraded" role="status">
-              <strong>{providerHealthMessage(provider)}</strong>
-              <code>{providerHealthRecovery(provider)}</code>
-              <button
-                on:click={() => openSettings(diagnosticTargetForProvider(diagnostics, provider.id))}
-                >{t('reviewInSettings')}</button
-              >
-            </div>
-          {/if}
-
-          {#if (provider.billingDomains?.length ?? 0) > 1}
-            <div class="domain-tabs" role="tablist" aria-label={`${provider.displayName} billing`}>
-              {#each provider.billingDomains as domain (domain.id)}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeBillingDomain(provider, selectedBillingDomains[provider.id])
-                    .id === domain.id}
-                  on:click={() => selectBillingDomain(provider.id, domain.id)}
-                  >{domain.displayName}</button
-                >
+          {#if summary.contributions.length > 0}
+            <div class="summary-contributions" aria-label={t('domainContributions')}>
+              {#each summary.contributions as contribution (`${contribution.providerId}:${contribution.billingDomainId}`)}
+                <span>
+                  {contribution.providerDisplayName} · {contribution.billingDomainDisplayName}
+                  <b>{formatNumber(contribution.recordedTokens)}</b>
+                </span>
               {/each}
             </div>
           {/if}
-
-          {#each [activeBillingDomain(provider, selectedBillingDomains[provider.id])] as domain (domain.id)}
-            {@const history = activeHistory(domain)}
-            {@const tokenAuthority = historyTokenAuthority(history, domain.tokenAuthority)}
-            {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
-            {#if connector}
-              {#if connector.state === 'connected'}
-                <div class="connected-summary" data-testid={`connector-${connector.id}`}>
-                  <span>
-                    <strong>{connectorStateLabel(connector.state)}</strong>
-                    <small>{connector.target.billingDomain.displayName}</small>
-                  </span>
-                  <button on:click={() => openSettings(`connector:${connector.id}`)}
-                    >{t('manageConnection')}</button
-                  >
-                </div>
-              {:else}
-                <details
-                  class:connection-pending={pendingConnectorId === connector.id}
-                  class="inline-connection"
-                  data-testid={`connector-${connector.id}`}
-                  aria-busy={pendingConnectorId === connector.id}
-                  open
-                >
-                  <summary>
-                    <span>
-                      <strong>{connectorStateLabel(connector.state)}</strong>
-                      {#if connector.experimental}<small>{t('experimental')}</small>{/if}
-                    </span>
-                    {t('connectionSetup')}
-                  </summary>
-                  <div class="inline-connection-body">
-                    <p class="permission">{connectorPermission(connector)}</p>
-                    <div class="connection-meta">
-                      <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
-                      <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
-                    </div>
-                    <div class="coverage-list">
-                      <span>{t('coverageLabel')}</span>
-                      <strong
-                        >{connector.expectedCoverage
-                          .map(coverageDimensionLabel)
-                          .join(' · ')}</strong
-                      >
-                    </div>
-                    {#if connector.credentialOwner === 'agent-usage'}
-                      <label class="secret-field">
-                        <span>{t('managementKey')}</span>
-                        <input
-                          type="password"
-                          autocomplete="off"
-                          aria-label={`${connector.displayName} ${t('managementKey')}`}
-                          value={secretInputs[connector.id] ?? ''}
-                          on:input={(event) =>
-                            (secretInputs = {
-                              ...secretInputs,
-                              [connector.id]: event.currentTarget.value
-                            })}
-                        />
-                      </label>
-                    {/if}
-                    <div class="connection-actions">
-                      {#if connector.state === 'discovered' || connector.state === 'skipped'}
-                        <button
-                          class="primary-action"
-                          disabled={!connector.installed ||
-                            pendingConnectorId === connector.id ||
-                            (connector.credentialOwner === 'agent-usage' &&
-                              !secretInputs[connector.id])}
-                          on:click={() => configureConnector(connector.id, 'connect')}
-                          >{t('connect')}</button
-                        >
-                      {/if}
-                      {#if connector.state === 'error' || connector.state === 'not-installed'}
-                        <button
-                          disabled={pendingConnectorId === connector.id}
-                          on:click={() => configureConnector(connector.id, 'retry')}
-                          >{t('retry')}</button
-                        >
-                      {/if}
-                      {#if connector.state !== 'skipped'}
-                        <button
-                          disabled={pendingConnectorId === connector.id}
-                          on:click={() => configureConnector(connector.id, 'skip')}
-                          >{t('skip')}</button
-                        >
-                      {/if}
-                    </div>
-                  </div>
-                </details>
-              {/if}
-            {/if}
-            <div class="section-label">{t('quota')}</div>
-            <div class="quotas">
-              {#each domain.quotaBuckets as bucket (bucket.id)}
-                <div class="quota-row">
-                  <div class="quota-copy">
-                    <strong>{bucket.label}</strong>
-                    <span>{bucket.usedPercent ?? '—'}% {t('used')}</span>
-                  </div>
-                  <div
-                    class="progress"
-                    role="progressbar"
-                    aria-label={bucket.label}
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow={bucket.usedPercent ?? 0}
-                  >
-                    <span style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
-                    ></span>
-                  </div>
-                  <div class="quota-meta">
-                    <span>
-                      {t('resets')}
-                      {formatReset(bucket.resetsAt)} · {formatRelativeReset(bucket.resetsAt)}
-                    </span>
-                    <span>{t('source')}: {authorityLabel(bucket.authority)}</span>
-                    <span>{formatReset(bucket.observedAt ?? provider.freshness.lastSuccessAt)}</span
-                    >
-                    {#if bucket.scope}
-                      <span
-                        >{t('scope')}: {bucket.scope === 'account-wide'
-                          ? t('accountWide')
-                          : t('localOnly')}</span
-                      >
-                    {/if}
-                    {#if bucket.status}
-                      <span>{t('plan')}: {bucket.status}</span>
-                    {/if}
-                    {#if bucket.limitAmount !== null && bucket.limitAmount !== undefined}
-                      <span>{t('limit')}: ${bucket.limitAmount} {bucket.limitCurrency ?? ''}</span>
-                    {/if}
-                    {#if bucket.fallbackStatus}
-                      <span
-                        >{t('fallback')}: {bucket.fallbackStatus === 'unknown'
-                          ? t('unknown')
-                          : bucket.fallbackStatus === 'enabled'
-                            ? t('enabled')
-                            : t('disabled')}</span
-                      >
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-            {#if (domain.forecasts?.length ?? 0) > 0}
-              <div class="forecast-list">
-                {#each domain.forecasts as forecast (forecast.bucketId)}
-                  <p>
-                    <strong>{forecast.label}</strong>
-                    <span
-                      >{forecast.willLastUntilReset
-                        ? t('lastsUntilReset')
-                        : t('exhaustsBeforeReset')}</span
-                    >
-                    <small>
-                      {confidenceLabel(forecast.confidence)} · {forecast.evidence.samples}
-                      {t('samples')} ·
-                      {t('predictedExhaustion')}
-                      {formatReset(forecast.predictedExhaustionAt)}
-                      · {authorityLabel('estimate')} · {formatReset(forecast.evidence.windowEnd)}
-                    </small>
+        {/if}
+      </section>
+      {#if risk}
+        <section class="risk-banner" aria-label={t('riskOverview')}>
+          <div>
+            <strong>{risk.title}</strong>
+            <span>{risk.detail}</span>
+          </div>
+          <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
+        </section>
+      {/if}
+      <section class="providers" aria-label="Providers">
+        {#each displayProviders(overview, connectors) as provider (provider.id)}
+          {@const logoPath = providerLogoPath(provider.id)}
+          <article class="provider-card">
+            <div class="provider-heading">
+              <div>
+                {#if logoPath}
+                  <img
+                    class="provider-logo"
+                    data-provider-logo={provider.id}
+                    src={logoPath}
+                    alt=""
+                  />
+                {/if}
+                <div>
+                  <h2 data-provider-logo={logoPath ? undefined : provider.id}>
+                    {provider.displayName}
+                  </h2>
+                  <p class="freshness" data-status={provider.freshness.status}>
+                    <span></span>
+                    {provider.freshness.status === 'fresh'
+                      ? t('updatedNow')
+                      : provider.freshness.status === 'stale'
+                        ? t('stale')
+                        : t('unavailable')}
+                    {provider.freshness.lastSuccessAt
+                      ? ` · ${formatReset(provider.freshness.lastSuccessAt)}`
+                      : ''}
                   </p>
+                </div>
+              </div>
+              <div class="coverage">{coverageLevelLabel(provider.coverage.quota)}</div>
+            </div>
+
+            {#if provider.health.status === 'degraded'}
+              <div class="degraded" role="status">
+                <strong>{providerHealthMessage(provider)}</strong>
+                <code>{providerHealthRecovery(provider)}</code>
+                <button
+                  on:click={() =>
+                    openSettings(diagnosticTargetForProvider(diagnostics, provider.id))}
+                  >{t('reviewInSettings')}</button
+                >
+              </div>
+            {/if}
+
+            {#if (provider.billingDomains?.length ?? 0) > 1}
+              <div
+                class="domain-tabs"
+                role="tablist"
+                aria-label={`${provider.displayName} billing`}
+              >
+                {#each provider.billingDomains as domain (domain.id)}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeBillingDomain(
+                      provider,
+                      selectedBillingDomains[provider.id]
+                    ).id === domain.id}
+                    on:click={() => selectBillingDomain(provider.id, domain.id)}
+                    >{domain.displayName}</button
+                  >
                 {/each}
               </div>
             {/if}
 
-            <div class="section-label">{t('tokens')}</div>
-            {#if tokenAuthority}
-              <p class="token-scope">
-                {t('source')}: {authorityLabel(tokenAuthority)}
-                · {formatReset(history.lastObservedAt ?? null)}
-                <br />
-                {t('scope')}:
-                {(history.tokenEvidence?.usageScopes ?? []).map(usageScopeLabel).join(' + ') ||
-                  t('unknown')}
-                · {t('timePrecision')}:
-                {(history.tokenEvidence?.timePrecisions ?? [])
-                  .map(timePrecisionLabel)
-                  .join(' + ') || t('unknown')}
-                · {t('unclassified')}:
-                {formatNumber(history.tokenEvidence?.unclassifiedTokens ?? 0)}
-                · {t('aggregationTemporality')}:
-                {(history.tokenEvidence?.aggregationTemporalities ?? [])
-                  .map(aggregationTemporalityLabel)
-                  .join(' + ') || t('unknown')}
-              </p>
-              <dl class="tokens">
-                <div>
-                  <dt>{t('total')}</dt>
-                  <dd>{formatNumber(history.tokenTotals.total)}</dd>
-                </div>
-                <div>
-                  <dt>{t('input')}</dt>
-                  <dd>{formatNumber(history.tokenTotals.input)}</dd>
-                </div>
-                <div>
-                  <dt>{t('output')}</dt>
-                  <dd>{formatNumber(history.tokenTotals.output)}</dd>
-                </div>
-                <div>
-                  <dt>{t('reasoning')}</dt>
-                  <dd>{formatNumber(history.tokenTotals.reasoning ?? 0)}</dd>
-                </div>
-                <div>
-                  <dt>{t('cacheRead')}</dt>
-                  <dd>{formatNumber(history.tokenTotals.cacheRead)}</dd>
-                </div>
-                <div>
-                  <dt>{t('cacheWrite')}</dt>
-                  <dd>{formatNumber(history.tokenTotals.cacheWrite)}</dd>
-                </div>
-              </dl>
-            {:else}
-              {@const telemetryCommand = tokenTelemetryCommand(provider.id, domain.id)}
-              <div class="token-unavailable">
-                <strong>{t('tokenObservationsMissing')}</strong>
-                {#if telemetryCommand}
-                  <span>{t('tokenCollectionEnable')}</span>
-                  <code>{telemetryCommand}</code>
-                {/if}
-              </div>
-            {/if}
-
-            {#if history.costs.length > 0 || domain.balances.length > 0 || domain.invoices.length > 0}
-              <div class="section-label">{t('billing')}</div>
-              <dl class="billing-records">
-                {#each history.costs as cost (`${cost.kind}:${cost.currency}`)}
-                  <div>
-                    <dt>{costKindLabel(cost.kind)} · {t('nativeAmount')}</dt>
-                    <dd>{formatMoney(cost.amount, cost.currency)}</dd>
-                    <small>
-                      {#if cost.convertedAmount !== null}
-                        {t('comparison')}: {formatMoney(
-                          cost.convertedAmount,
-                          cost.comparisonCurrency
-                        )}
-                      {:else if cost.conversionUnavailableReason === 'unknown-native-amount'}
-                        {t('unknownAmount')}
-                      {:else}
-                        {t('rateUnavailable')}
+            {#each [activeBillingDomain(provider, selectedBillingDomains[provider.id])] as domain (domain.id)}
+              {@const history = activeHistory(domain)}
+              {@const tokenAuthority = historyTokenAuthority(history, domain.tokenAuthority)}
+              {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
+              {#if connector}
+                {#if connector.state === 'connected'}
+                  <div class="connected-summary" data-testid={`connector-${connector.id}`}>
+                    <span>
+                      <strong>{connectorStateLabel(connector.state)}</strong>
+                      <small>{connector.target.billingDomain.displayName}</small>
+                    </span>
+                    <button on:click={() => openSettings(`connector:${connector.id}`)}
+                      >{t('manageConnection')}</button
+                    >
+                  </div>
+                {:else}
+                  <details
+                    class:connection-pending={pendingConnectorId === connector.id}
+                    class="inline-connection"
+                    data-testid={`connector-${connector.id}`}
+                    aria-busy={pendingConnectorId === connector.id}
+                    open
+                  >
+                    <summary>
+                      <span>
+                        <strong>{connectorStateLabel(connector.state)}</strong>
+                        {#if connector.experimental}<small>{t('experimental')}</small>{/if}
+                      </span>
+                      {t('connectionSetup')}
+                    </summary>
+                    <div class="inline-connection-body">
+                      <p class="permission">{connectorPermission(connector)}</p>
+                      <div class="connection-meta">
+                        <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
+                        <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
+                      </div>
+                      <div class="coverage-list">
+                        <span>{t('coverageLabel')}</span>
+                        <strong
+                          >{connector.expectedCoverage
+                            .map(coverageDimensionLabel)
+                            .join(' · ')}</strong
+                        >
+                      </div>
+                      {#if connector.credentialOwner === 'agent-usage'}
+                        <label class="secret-field">
+                          <span>{t('managementKey')}</span>
+                          <input
+                            type="password"
+                            autocomplete="off"
+                            aria-label={`${connector.displayName} ${t('managementKey')}`}
+                            value={secretInputs[connector.id] ?? ''}
+                            on:input={(event) =>
+                              (secretInputs = {
+                                ...secretInputs,
+                                [connector.id]: event.currentTarget.value
+                              })}
+                          />
+                        </label>
                       {/if}
-                    </small>
-                    <small>
-                      {t('source')}:
-                      {cost.authorities && cost.authorities.length > 0
-                        ? cost.authorities.map(authorityLabel).join(' + ')
-                        : authorityLabel('unavailable')} ·
-                      {formatReset(cost.observedAt ?? null)}
-                    </small>
-                    {#if cost.pricingEvidence}
+                      <div class="connection-actions">
+                        {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                          <button
+                            class="primary-action"
+                            disabled={!connector.installed ||
+                              pendingConnectorId === connector.id ||
+                              (connector.credentialOwner === 'agent-usage' &&
+                                !secretInputs[connector.id])}
+                            on:click={() => configureConnector(connector.id, 'connect')}
+                            >{t('connect')}</button
+                          >
+                        {/if}
+                        {#if connector.state === 'error' || connector.state === 'not-installed'}
+                          <button
+                            disabled={pendingConnectorId === connector.id}
+                            on:click={() => configureConnector(connector.id, 'retry')}
+                            >{t('retry')}</button
+                          >
+                        {/if}
+                        {#if connector.state !== 'skipped'}
+                          <button
+                            disabled={pendingConnectorId === connector.id}
+                            on:click={() => configureConnector(connector.id, 'skip')}
+                            >{t('skip')}</button
+                          >
+                        {/if}
+                      </div>
+                    </div>
+                  </details>
+                {/if}
+              {/if}
+              <div class="section-label">{t('quota')}</div>
+              <div class="quotas">
+                {#each domain.quotaBuckets as bucket (bucket.id)}
+                  <div class="quota-row">
+                    <div class="quota-copy">
+                      <strong>{bucket.label}</strong>
+                      <span>{bucket.usedPercent ?? '—'}% {t('used')}</span>
+                    </div>
+                    <div
+                      class="progress"
+                      role="progressbar"
+                      aria-label={bucket.label}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow={bucket.usedPercent ?? 0}
+                    >
+                      <span style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
+                      ></span>
+                    </div>
+                    <div class="quota-meta">
+                      <span>
+                        {t('resets')}
+                        {formatReset(bucket.resetsAt)} · {formatRelativeReset(bucket.resetsAt)}
+                      </span>
+                      <span>{t('source')}: {authorityLabel(bucket.authority)}</span>
+                      <span
+                        >{formatReset(bucket.observedAt ?? provider.freshness.lastSuccessAt)}</span
+                      >
+                      {#if bucket.scope}
+                        <span
+                          >{t('scope')}: {bucket.scope === 'account-wide'
+                            ? t('accountWide')
+                            : t('localOnly')}</span
+                        >
+                      {/if}
+                      {#if bucket.status}
+                        <span>{t('plan')}: {bucket.status}</span>
+                      {/if}
+                      {#if bucket.limitAmount !== null && bucket.limitAmount !== undefined}
+                        <span>{t('limit')}: ${bucket.limitAmount} {bucket.limitCurrency ?? ''}</span
+                        >
+                      {/if}
+                      {#if bucket.fallbackStatus}
+                        <span
+                          >{t('fallback')}: {bucket.fallbackStatus === 'unknown'
+                            ? t('unknown')
+                            : bucket.fallbackStatus === 'enabled'
+                              ? t('enabled')
+                              : t('disabled')}</span
+                        >
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+              {#if (domain.forecasts?.length ?? 0) > 0}
+                <div class="forecast-list">
+                  {#each domain.forecasts as forecast (forecast.bucketId)}
+                    <p>
+                      <strong>{forecast.label}</strong>
+                      <span
+                        >{forecast.willLastUntilReset
+                          ? t('lastsUntilReset')
+                          : t('exhaustsBeforeReset')}</span
+                      >
                       <small>
-                        {t('pricingCoverage')}:
-                        {formatPercent(cost.pricingEvidence.pricingCoverage)} ·
-                        {formatNumber(cost.pricingEvidence.pricedTokens)} / {formatNumber(
-                          cost.pricingEvidence.recordedTokens
-                        )}
-                        {t('tokens')} · {formatNumber(cost.pricingEvidence.unpricedTokens)}
-                        {t('unpricedTokens')}
+                        {confidenceLabel(forecast.confidence)} · {forecast.evidence.samples}
+                        {t('samples')} ·
+                        {t('predictedExhaustion')}
+                        {formatReset(forecast.predictedExhaustionAt)}
+                        · {authorityLabel('estimate')} · {formatReset(forecast.evidence.windowEnd)}
                       </small>
-                    {/if}
-                    {#each cost.priceSnapshots as price (price.id)}
+                    </p>
+                  {/each}
+                </div>
+              {/if}
+
+              <div class="section-label">{t('tokens')}</div>
+              {#if tokenAuthority}
+                <p class="token-scope">
+                  {t('source')}: {authorityLabel(tokenAuthority)}
+                  · {formatReset(history.lastObservedAt ?? null)}
+                  <br />
+                  {t('scope')}:
+                  {(history.tokenEvidence?.usageScopes ?? []).map(usageScopeLabel).join(' + ') ||
+                    t('unknown')}
+                  · {t('timePrecision')}:
+                  {(history.tokenEvidence?.timePrecisions ?? [])
+                    .map(timePrecisionLabel)
+                    .join(' + ') || t('unknown')}
+                  · {t('unclassified')}:
+                  {formatNumber(history.tokenEvidence?.unclassifiedTokens ?? 0)}
+                  · {t('aggregationTemporality')}:
+                  {(history.tokenEvidence?.aggregationTemporalities ?? [])
+                    .map(aggregationTemporalityLabel)
+                    .join(' + ') || t('unknown')}
+                </p>
+                <dl class="tokens">
+                  <div>
+                    <dt>{t('total')}</dt>
+                    <dd>{formatNumber(history.tokenTotals.total)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('input')}</dt>
+                    <dd>{formatNumber(history.tokenTotals.input)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('output')}</dt>
+                    <dd>{formatNumber(history.tokenTotals.output)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('reasoning')}</dt>
+                    <dd>{formatNumber(history.tokenTotals.reasoning ?? 0)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('cacheRead')}</dt>
+                    <dd>{formatNumber(history.tokenTotals.cacheRead)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t('cacheWrite')}</dt>
+                    <dd>{formatNumber(history.tokenTotals.cacheWrite)}</dd>
+                  </div>
+                </dl>
+              {:else}
+                {@const telemetryCommand = tokenTelemetryCommand(provider.id, domain.id)}
+                <div class="token-unavailable">
+                  <strong>{t('tokenObservationsMissing')}</strong>
+                  {#if telemetryCommand}
+                    <span>{t('tokenCollectionEnable')}</span>
+                    <code>{telemetryCommand}</code>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if history.costs.length > 0 || domain.balances.length > 0 || domain.invoices.length > 0}
+                <div class="section-label">{t('billing')}</div>
+                <dl class="billing-records">
+                  {#each history.costs as cost (`${cost.kind}:${cost.currency}`)}
+                    <div>
+                      <dt>{costKindLabel(cost.kind)} · {t('nativeAmount')}</dt>
+                      <dd>{formatMoney(cost.amount, cost.currency)}</dd>
                       <small>
-                        {t('priceVersion')}: {price.version} · {price.source}{price.contextTier
-                          ? ` · ${price.contextTier}`
-                          : ''}
+                        {#if cost.convertedAmount !== null}
+                          {t('comparison')}: {formatMoney(
+                            cost.convertedAmount,
+                            cost.comparisonCurrency
+                          )}
+                        {:else if cost.conversionUnavailableReason === 'unknown-native-amount'}
+                          {t('unknownAmount')}
+                        {:else}
+                          {t('rateUnavailable')}
+                        {/if}
+                      </small>
+                      <small>
+                        {t('source')}:
+                        {cost.authorities && cost.authorities.length > 0
+                          ? cost.authorities.map(authorityLabel).join(' + ')
+                          : authorityLabel('unavailable')} ·
+                        {formatReset(cost.observedAt ?? null)}
+                      </small>
+                      {#if cost.pricingEvidence}
+                        <small>
+                          {t('pricingCoverage')}:
+                          {formatPercent(cost.pricingEvidence.pricingCoverage)} ·
+                          {formatNumber(cost.pricingEvidence.pricedTokens)} / {formatNumber(
+                            cost.pricingEvidence.recordedTokens
+                          )}
+                          {t('tokens')} · {formatNumber(cost.pricingEvidence.unpricedTokens)}
+                          {t('unpricedTokens')}
+                        </small>
+                      {/if}
+                      {#each cost.priceSnapshots as price (price.id)}
+                        <small>
+                          {t('priceVersion')}: {price.version} · {price.source}{price.contextTier
+                            ? ` · ${price.contextTier}`
+                            : ''}
+                        </small>
+                      {/each}
+                    </div>
+                  {/each}
+                  {#each domain.balances as balance (balance.id)}
+                    <div>
+                      <dt>
+                        {balance.kind === 'prepaid'
+                          ? t('prepaid')
+                          : balance.kind === 'spending-limit'
+                            ? t('spendingLimit')
+                            : t('currentInvoice')}
+                      </dt>
+                      <dd>{formatMoney(balance.amount, balance.currency)}</dd>
+                      <small>
+                        {t('source')}: {authorityLabel(balance.authority)} · {formatReset(
+                          balance.observedAt
+                        )}
+                      </small>
+                    </div>
+                  {/each}
+                  {#each domain.invoices as invoice (invoice.id)}
+                    <div>
+                      <dt>{invoice.number ?? t('invoices')}</dt>
+                      <dd>{formatMoney(invoice.amount, invoice.currency)}</dd>
+                      <small>
+                        {t('source')}: {authorityLabel(invoice.authority)} · {formatReset(
+                          invoice.createdAt
+                        )}
+                      </small>
+                    </div>
+                  {/each}
+                </dl>
+                {#if history.exchangeRates.length > 0}
+                  <div class="rate-evidence">
+                    {#each history.exchangeRates as rate (rate.id)}
+                      <small>
+                        {t('exchangeRate')}: 1 {rate.baseCurrency} = {rate.rate}
+                        {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
                       </small>
                     {/each}
                   </div>
-                {/each}
-                {#each domain.balances as balance (balance.id)}
+                {/if}
+              {/if}
+
+              {#if history.models.length > 0 || history.days.length > 0}
+                <div class="history-rankings">
                   <div>
-                    <dt>
-                      {balance.kind === 'prepaid'
-                        ? t('prepaid')
-                        : balance.kind === 'spending-limit'
-                          ? t('spendingLimit')
-                          : t('currentInvoice')}
-                    </dt>
-                    <dd>{formatMoney(balance.amount, balance.currency)}</dd>
-                    <small>
-                      {t('source')}: {authorityLabel(balance.authority)} · {formatReset(
-                        balance.observedAt
-                      )}
-                    </small>
+                    <strong>{t('topModels')}</strong>
+                    {#each history.models.slice(0, 3) as model (model.model)}
+                      <span>{model.model}<b>{formatNumber(model.tokenTotals.total)}</b></span>
+                    {/each}
                   </div>
-                {/each}
-                {#each domain.invoices as invoice (invoice.id)}
                   <div>
-                    <dt>{invoice.number ?? t('invoices')}</dt>
-                    <dd>{formatMoney(invoice.amount, invoice.currency)}</dd>
-                    <small>
-                      {t('source')}: {authorityLabel(invoice.authority)} · {formatReset(
-                        invoice.createdAt
-                      )}
-                    </small>
+                    <strong>{t('topDays')}</strong>
+                    {#each history.days.slice(-3).reverse() as day (day.day)}
+                      <span>{day.day}<b>{formatNumber(day.tokenTotals.total)}</b></span>
+                    {/each}
                   </div>
+                </div>
+              {/if}
+            {/each}
+          </article>
+        {/each}
+      </section>
+      {#if overview.workbench}
+        {@const workbench = overview.workbench}
+        <section
+          class="token-money-workbench"
+          data-testid="token-money-workbench"
+          aria-labelledby="token-money-workbench-heading"
+        >
+          <div class="workbench-heading">
+            <div>
+              <p class="eyebrow">{selectedWindow} · {workbench.timeZone}</p>
+              <h2 id="token-money-workbench-heading">{t('tokenMoneyWorkbench')}</h2>
+              <p>{t('workbenchSubtitle')}</p>
+            </div>
+            <div class="workbench-controls">
+              <div class="segmented-control" role="group" aria-label={t('displayCurrency')}>
+                {#each ['CNY', 'USD'] as currency (currency)}
+                  <button
+                    type="button"
+                    aria-pressed={selectedCurrency === currency}
+                    on:click={() => selectCurrency(currency as 'CNY' | 'USD')}>{currency}</button
+                  >
                 {/each}
-              </dl>
-              {#if history.exchangeRates.length > 0}
-                <div class="rate-evidence">
-                  {#each history.exchangeRates as rate (rate.id)}
+              </div>
+            </div>
+          </div>
+
+          <div class="workbench-metrics">
+            <article data-testid="workbench-recorded-tokens">
+              <span>{t('recordedTokens')}</span>
+              <strong>
+                {workbench.recordedTokens === null
+                  ? t('notAvailable')
+                  : formatNumber(workbench.recordedTokens)}
+              </strong>
+              <small
+                >{workbench.trend.granularity === 'hour'
+                  ? t('precisionHour')
+                  : t('precisionDay')}</small
+              >
+            </article>
+            {#each workbenchMetrics(workbench) as item (item.id)}
+              <article data-testid={`workbench-${item.id}`}>
+                <span>{t(item.label)}</span>
+                <strong>
+                  {item.metric.status === 'available'
+                    ? formatMoney(item.metric.amount, item.metric.comparisonCurrency)
+                    : t('notAvailable')}
+                </strong>
+                <small>{t('nativeAmount')}: {nativeAmountEvidence(item.metric)}</small>
+                <small>
+                  {t('source')}:
+                  {item.metric.authorities.length > 0
+                    ? item.metric.authorities.map(authorityLabel).join(' + ')
+                    : authorityLabel('unavailable')}
+                  · {formatReset(item.metric.observedAt)}
+                </small>
+                <small>{t('amountCoverage')}: {formatPercent(item.metric.amountCoverage)}</small>
+                {#if item.metric.purpose === 'retail-equivalent'}
+                  <small>{t('pricingCoverage')}: {formatPercent(item.metric.pricingCoverage)}</small
+                  >
+                {/if}
+                {#if item.metric.exchangeRates.length > 0}
+                  {#each item.metric.exchangeRates as rate (rate.id)}
                     <small>
-                      {t('exchangeRate')}: 1 {rate.baseCurrency} = {rate.rate}
+                      {t('conversionEvidence')}: 1 {rate.baseCurrency} = {rate.rate}
                       {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
                     </small>
                   {/each}
-                </div>
-              {/if}
-            {/if}
-
-            {#if history.models.length > 0 || history.days.length > 0}
-              <div class="history-rankings">
-                <div>
-                  <strong>{t('topModels')}</strong>
-                  {#each history.models.slice(0, 3) as model (model.model)}
-                    <span>{model.model}<b>{formatNumber(model.tokenTotals.total)}</b></span>
-                  {/each}
-                </div>
-                <div>
-                  <strong>{t('topDays')}</strong>
-                  {#each history.days.slice(-3).reverse() as day (day.day)}
-                    <span>{day.day}<b>{formatNumber(day.tokenTotals.total)}</b></span>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          {/each}
-        </article>
-      {/each}
-    </section>
-    {#if overview.workbench}
-      {@const workbench = overview.workbench}
-      <section
-        class="token-money-workbench"
-        data-testid="token-money-workbench"
-        aria-labelledby="token-money-workbench-heading"
-      >
-        <div class="workbench-heading">
-          <div>
-            <p class="eyebrow">{selectedWindow} · {workbench.timeZone}</p>
-            <h2 id="token-money-workbench-heading">{t('tokenMoneyWorkbench')}</h2>
-            <p>{t('workbenchSubtitle')}</p>
-          </div>
-          <div class="workbench-controls">
-            <div class="segmented-control" role="group" aria-label={t('displayCurrency')}>
-              {#each ['CNY', 'USD'] as currency (currency)}
-                <button
-                  type="button"
-                  aria-pressed={selectedCurrency === currency}
-                  on:click={() => selectCurrency(currency as 'CNY' | 'USD')}>{currency}</button
-                >
-              {/each}
-            </div>
-          </div>
-        </div>
-
-        <div class="workbench-metrics">
-          <article data-testid="workbench-recorded-tokens">
-            <span>{t('recordedTokens')}</span>
-            <strong>
-              {workbench.recordedTokens === null
-                ? t('notAvailable')
-                : formatNumber(workbench.recordedTokens)}
-            </strong>
-            <small
-              >{workbench.trend.granularity === 'hour'
-                ? t('precisionHour')
-                : t('precisionDay')}</small
-            >
-          </article>
-          {#each workbenchMetrics(workbench) as item (item.id)}
-            <article data-testid={`workbench-${item.id}`}>
-              <span>{t(item.label)}</span>
-              <strong>
-                {item.metric.status === 'available'
-                  ? formatMoney(item.metric.amount, item.metric.comparisonCurrency)
-                  : t('notAvailable')}
-              </strong>
-              <small>{t('nativeAmount')}: {nativeAmountEvidence(item.metric)}</small>
-              <small>
-                {t('source')}:
-                {item.metric.authorities.length > 0
-                  ? item.metric.authorities.map(authorityLabel).join(' + ')
-                  : authorityLabel('unavailable')}
-                · {formatReset(item.metric.observedAt)}
-              </small>
-              <small>{t('amountCoverage')}: {formatPercent(item.metric.amountCoverage)}</small>
-              {#if item.metric.purpose === 'retail-equivalent'}
-                <small>{t('pricingCoverage')}: {formatPercent(item.metric.pricingCoverage)}</small>
-              {/if}
-              {#if item.metric.exchangeRates.length > 0}
-                {#each item.metric.exchangeRates as rate (rate.id)}
-                  <small>
-                    {t('conversionEvidence')}: 1 {rate.baseCurrency} = {rate.rate}
-                    {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
-                  </small>
-                {/each}
-              {:else if item.metric.status === 'available' && selectedCurrency === 'USD'}
-                <small>{t('noConversionNeeded')}</small>
-              {:else if item.metric.conversionUnavailableReasons.length > 0}
-                <small>{t('rateUnavailable')}</small>
-              {/if}
-            </article>
-          {/each}
-        </div>
-
-        <article class="workbench-trend">
-          <div class="trend-heading">
-            <div>
-              <span>{t('trendMetric')}</span>
-              <strong data-testid="trend-mode">
-                {selectedTrendMetric === 'tokens' ? t('recordedTokens') : t('apiRetailEquivalent')}
-              </strong>
-            </div>
-            <div class="segmented-control" role="group" aria-label={t('trendMetric')}>
-              <button
-                type="button"
-                aria-pressed={selectedTrendMetric === 'tokens'}
-                on:click={() => (selectedTrendMetric = 'tokens')}>{t('recordedTokenTrend')}</button
-              >
-              <button
-                type="button"
-                aria-pressed={selectedTrendMetric === 'retail-equivalent'}
-                on:click={() => (selectedTrendMetric = 'retail-equivalent')}
-                >{t('retailEquivalentTrend')}</button
-              >
-            </div>
-          </div>
-          <div class="trend-chart" aria-hidden="true">
-            {#each workbench.trend.buckets as bucket (bucket.start)}
-              <div class="trend-column" title={bucket.label}>
-                <div class:trend-gap={bucket.gap} class="trend-stack">
-                  {#if bucket.gap}
-                    <span class="gap-marker">·</span>
-                  {:else}
-                    {#each bucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
-                      {#if (trendValue(segment) ?? 0) > 0}
-                        <span
-                          class="trend-segment"
-                          style={`height: ${Math.max(2, ((trendValue(segment) ?? 0) / trendMaximum(workbench)) * 100)}%; background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
-                          title={trendSegmentDescription(segment)}
-                        ></span>
-                      {/if}
-                    {/each}
-                  {/if}
-                </div>
-                <small>{bucket.label.slice(-5)}</small>
-              </div>
-            {/each}
-          </div>
-          <div class="trend-legend" aria-hidden="true">
-            {#each trendLegend(workbench) as segment (`${segment.providerId}:${segment.billingDomainId}`)}
-              <span>
-                <i
-                  style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
-                ></i>
-                {segment.providerDisplayName} · {segment.billingDomainDisplayName}
-              </span>
-            {/each}
-          </div>
-          <table class="trend-data" aria-label={t('trendData')}>
-            <thead>
-              <tr>
-                <th>{t('interval')}</th>
-                <th>{t('providerEvidence')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each workbench.trend.buckets as bucket (bucket.start)}
-                <tr>
-                  <td>{bucket.label}</td>
-                  <td>
-                    {bucket.gap
-                      ? t('gap')
-                      : bucket.segments.map(trendSegmentDescription).join('; ')}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </article>
-      </section>
-    {/if}
-  {/if}
-</div>
-
-{#if settingsOpen}
-  <div class="settings-backdrop" role="presentation">
-    <div
-      class="settings-drawer"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-heading"
-      tabindex="-1"
-      bind:this={settingsPanel}
-    >
-      <div class="settings-header">
-        <div>
-          <p class="eyebrow">{t('settings')}</p>
-          <h2 id="settings-heading">{t('settings')}</h2>
-          <p>{t('settingsSubtitle')}</p>
-        </div>
-        <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
-          >×</button
-        >
-      </div>
-
-      <div class="settings-content">
-        <section aria-labelledby="settings-connections-heading">
-          <div class="settings-section-heading">
-            <h2 id="settings-connections-heading">{t('connections')}</h2>
-            <p>{t('connectionsSubtitle')}</p>
-          </div>
-          {#if connectorsError}
-            <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
-          {/if}
-          <div class="settings-connections">
-            {#each connectors as connector (connector.id)}
-              <article
-                class:settings-target-active={settingsTarget === `connector:${connector.id}`}
-                data-settings-target={`connector:${connector.id}`}
-                data-testid={`settings-connector-${connector.id}`}
-                tabindex="-1"
-              >
-                <div class="settings-connector-title">
-                  <strong>{connector.displayName}</strong>
-                  <span>{connectorStateLabel(connector.state)}</span>
-                </div>
-                <p>{connectorPermission(connector)}</p>
-                <small
-                  >{credentialOwnerLabel(connector.credentialOwner)} · {connector.target
-                    .billingDomain.displayName}</small
-                >
-                {#if connector.credentialOwner === 'agent-usage'}
-                  <label class="secret-field">
-                    <span>{t('managementKey')}</span>
-                    <input
-                      type="password"
-                      autocomplete="off"
-                      aria-label={`${connector.displayName} ${t('managementKey')}`}
-                      value={secretInputs[connector.id] ?? ''}
-                      on:input={(event) =>
-                        (secretInputs = {
-                          ...secretInputs,
-                          [connector.id]: event.currentTarget.value
-                        })}
-                    />
-                  </label>
+                {:else if item.metric.status === 'available' && selectedCurrency === 'USD'}
+                  <small>{t('noConversionNeeded')}</small>
+                {:else if item.metric.conversionUnavailableReasons.length > 0}
+                  <small>{t('rateUnavailable')}</small>
                 {/if}
-                <div class="connection-actions">
-                  {#if connector.state === 'discovered' || connector.state === 'skipped'}
-                    <button
-                      class="primary-action"
-                      disabled={!connector.installed ||
-                        pendingConnectorId === connector.id ||
-                        (connector.credentialOwner === 'agent-usage' &&
-                          !secretInputs[connector.id])}
-                      on:click={() => configureConnector(connector.id, 'connect')}
-                      >{t('connect')}</button
-                    >
-                  {/if}
-                  {#if connector.state === 'error' || connector.state === 'not-installed' || connector.state === 'connected'}
-                    <button
-                      disabled={pendingConnectorId === connector.id}
-                      on:click={() => configureConnector(connector.id, 'retry')}
-                      >{t('retry')}</button
-                    >
-                  {/if}
-                  {#if connector.state !== 'skipped'}
-                    <button
-                      disabled={pendingConnectorId === connector.id}
-                      on:click={() => configureConnector(connector.id, 'skip')}>{t('skip')}</button
-                    >
-                  {/if}
-                </div>
               </article>
             {/each}
           </div>
-        </section>
 
-        <section class="monitoring-section" aria-labelledby="monitoring-heading">
-          <div class="settings-section-heading">
-            <h2 id="monitoring-heading">{t('monitoring')}</h2>
-            <p>{t('monitoringSubtitle')}</p>
-          </div>
-          {#if monitoringError}
-            <p class="settings-error" role="status">{t('monitoringUnavailable')}</p>
-          {/if}
-          {#if monitoring}
-            <div class="monitoring-controls">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={monitoring.backgroundCollectionEnabled}
-                  on:change={(event) =>
-                    updateMonitoring({ backgroundCollectionEnabled: event.currentTarget.checked })}
-                />
-                {t('backgroundCollection')}
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={monitoring.notificationsEnabled}
-                  on:change={(event) =>
-                    updateMonitoring({ notificationsEnabled: event.currentTarget.checked })}
-                />
-                {t('notifications')}
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={monitoring.startAtLogin}
-                  on:change={(event) =>
-                    updateMonitoring({ startAtLogin: event.currentTarget.checked })}
-                />
-                {t('startAtLogin')}
-              </label>
+          <article class="workbench-trend">
+            <div class="trend-heading">
+              <div>
+                <span>{t('trendMetric')}</span>
+                <strong data-testid="trend-mode">
+                  {selectedTrendMetric === 'tokens'
+                    ? t('recordedTokens')
+                    : t('apiRetailEquivalent')}
+                </strong>
+              </div>
+              <div class="segmented-control" role="group" aria-label={t('trendMetric')}>
+                <button
+                  type="button"
+                  aria-pressed={selectedTrendMetric === 'tokens'}
+                  on:click={() => (selectedTrendMetric = 'tokens')}
+                  >{t('recordedTokenTrend')}</button
+                >
+                <button
+                  type="button"
+                  aria-pressed={selectedTrendMetric === 'retail-equivalent'}
+                  on:click={() => (selectedTrendMetric = 'retail-equivalent')}
+                  >{t('retailEquivalentTrend')}</button
+                >
+              </div>
             </div>
-          {/if}
-        </section>
+            <div class="trend-chart" aria-hidden="true">
+              {#each workbench.trend.buckets as bucket (bucket.start)}
+                <div class="trend-column" title={bucket.label}>
+                  <div class:trend-gap={bucket.gap} class="trend-stack">
+                    {#if bucket.gap}
+                      <span class="gap-marker">·</span>
+                    {:else}
+                      {#each bucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
+                        {#if (trendValue(segment) ?? 0) > 0}
+                          <span
+                            class="trend-segment"
+                            style={`height: ${Math.max(2, ((trendValue(segment) ?? 0) / trendMaximum(workbench)) * 100)}%; background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+                            title={trendSegmentDescription(segment)}
+                          ></span>
+                        {/if}
+                      {/each}
+                    {/if}
+                  </div>
+                  <small>{bucket.label.slice(-5)}</small>
+                </div>
+              {/each}
+            </div>
+            <div class="trend-legend" aria-hidden="true">
+              {#each trendLegend(workbench) as segment (`${segment.providerId}:${segment.billingDomainId}`)}
+                <span>
+                  <i
+                    style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+                  ></i>
+                  {segment.providerDisplayName} · {segment.billingDomainDisplayName}
+                </span>
+              {/each}
+            </div>
+            <table class="trend-data" aria-label={t('trendData')}>
+              <thead>
+                <tr>
+                  <th>{t('interval')}</th>
+                  <th>{t('providerEvidence')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each workbench.trend.buckets as bucket (bucket.start)}
+                  <tr>
+                    <td>{bucket.label}</td>
+                    <td>
+                      {bucket.gap
+                        ? t('gap')
+                        : bucket.segments.map(trendSegmentDescription).join('; ')}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </article>
 
-        <section class="diagnostics-section" aria-labelledby="diagnostics-heading">
-          <div class="settings-section-heading">
-            <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
-            <p>{t('diagnosticsSubtitle')}</p>
+          <section
+            class="model-ranking"
+            data-testid="model-ranking"
+            aria-labelledby="model-ranking-heading"
+          >
+            <div class="ranking-heading">
+              <div>
+                <h3 id="model-ranking-heading">{t('topModels')}</h3>
+                <p>{t('modelRankingSubtitle')}</p>
+              </div>
+              <div class="segmented-control" role="group" aria-label={t('topModels')}>
+                <button
+                  type="button"
+                  aria-pressed={modelRankingSort === 'tokens'}
+                  on:click={() => (modelRankingSort = 'tokens')}>{t('sortByTokens')}</button
+                >
+                <button
+                  type="button"
+                  aria-pressed={modelRankingSort === 'retail-equivalent'}
+                  on:click={() => (modelRankingSort = 'retail-equivalent')}
+                  >{t('sortByRetailEquivalent')}</button
+                >
+              </div>
+            </div>
+            <ol class="ranking-list">
+              {#each rankedModels(workbench, modelRankingSort) as model (model.id)}
+                {@const modelLogo = providerLogoPath(model.providerId)}
+                <li>
+                  <button
+                    type="button"
+                    data-testid="model-ranking-row"
+                    on:click={(event) => openModelDetail(model.id, event.currentTarget)}
+                    on:keydown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        void openModelDetail(model.id, event.currentTarget);
+                      }
+                    }}
+                  >
+                    <span class="ranking-identity">
+                      {#if modelLogo}
+                        <img src={modelLogo} alt="" data-provider-logo={model.providerId} />
+                      {/if}
+                      <span>
+                        <strong>{model.model}</strong>
+                        <small>{model.providerDisplayName} · {model.billingDomainDisplayName}</small
+                        >
+                      </span>
+                    </span>
+                    <span class="ranking-value">
+                      <strong>{formatNumber(model.tokenTotals.total)} {t('tokens')}</strong>
+                      <small>{t('tokenShare')}: {formatPercent(model.tokenShare)}</small>
+                    </span>
+                    <span class="ranking-value">
+                      <strong>
+                        {model.retailEquivalent.status === 'available'
+                          ? formatMoney(
+                              model.retailEquivalent.amount,
+                              model.retailEquivalent.comparisonCurrency
+                            )
+                          : t('notAvailable')}
+                      </strong>
+                      <small>{t('retailShare')}: {formatPercent(model.retailShare)}</small>
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ol>
+            {#if workbench.modelRanking.unclassified.length > 0}
+              <div class="unclassified-usage">
+                <strong>{t('unclassifiedUsage')}</strong>
+                {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
+                  <span>
+                    {item.providerDisplayName} · {item.billingDomainDisplayName}
+                    <b>{formatNumber(item.tokenTotals.total)} {t('tokens')}</b>
+                    <small>{formatPercent(item.tokenShare)}</small>
+                  </span>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        </section>
+      {/if}
+    {/if}
+  </div>
+
+  {#if settingsOpen}
+    <div class="settings-backdrop" role="presentation">
+      <div
+        class="settings-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-heading"
+        tabindex="-1"
+        bind:this={settingsPanel}
+      >
+        <div class="settings-header">
+          <div>
+            <p class="eyebrow">{t('settings')}</p>
+            <h2 id="settings-heading">{t('settings')}</h2>
+            <p>{t('settingsSubtitle')}</p>
           </div>
-          {#if diagnosticsError}
-            <p class="settings-error" role="status">{t('diagnosticsUnavailable')}</p>
-          {/if}
-          {#if diagnostics}
-            <div class="diagnostics-grid">
-              {#each diagnostics.connectors as diagnostic (diagnostic.id)}
+          <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
+            >×</button
+          >
+        </div>
+
+        <div class="settings-content">
+          <section aria-labelledby="settings-connections-heading">
+            <div class="settings-section-heading">
+              <h2 id="settings-connections-heading">{t('connections')}</h2>
+              <p>{t('connectionsSubtitle')}</p>
+            </div>
+            {#if connectorsError}
+              <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
+            {/if}
+            <div class="settings-connections">
+              {#each connectors as connector (connector.id)}
                 <article
-                  class:diagnostic-degraded={diagnostic.status === 'degraded'}
-                  class:settings-target-active={settingsTarget === `diagnostic:${diagnostic.id}`}
-                  data-settings-target={`diagnostic:${diagnostic.id}`}
-                  data-testid={`settings-diagnostic-${diagnostic.id}`}
+                  class:settings-target-active={settingsTarget === `connector:${connector.id}`}
+                  data-settings-target={`connector:${connector.id}`}
+                  data-testid={`settings-connector-${connector.id}`}
                   tabindex="-1"
                 >
-                  <div>
-                    <strong>{diagnostic.id}</strong>
-                    <span>{diagnosticCategoryLabel(diagnostic)}</span>
+                  <div class="settings-connector-title">
+                    <strong>{connector.displayName}</strong>
+                    <span>{connectorStateLabel(connector.state)}</span>
                   </div>
-                  <small>{diagnostic.billingDomainId ?? t('unknown')}</small>
-                  {#if diagnostic.affectedCoverage.length > 0}
-                    <p>{diagnostic.affectedCoverage.map(coverageDimensionLabel).join(' · ')}</p>
+                  <p>{connectorPermission(connector)}</p>
+                  <small
+                    >{credentialOwnerLabel(connector.credentialOwner)} · {connector.target
+                      .billingDomain.displayName}</small
+                  >
+                  {#if connector.credentialOwner === 'agent-usage'}
+                    <label class="secret-field">
+                      <span>{t('managementKey')}</span>
+                      <input
+                        type="password"
+                        autocomplete="off"
+                        aria-label={`${connector.displayName} ${t('managementKey')}`}
+                        value={secretInputs[connector.id] ?? ''}
+                        on:input={(event) =>
+                          (secretInputs = {
+                            ...secretInputs,
+                            [connector.id]: event.currentTarget.value
+                          })}
+                      />
+                    </label>
                   {/if}
-                  {#if diagnosticRecovery(diagnostic)}
-                    <code>{diagnosticRecovery(diagnostic)}</code>
-                  {/if}
+                  <div class="connection-actions">
+                    {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                      <button
+                        class="primary-action"
+                        disabled={!connector.installed ||
+                          pendingConnectorId === connector.id ||
+                          (connector.credentialOwner === 'agent-usage' &&
+                            !secretInputs[connector.id])}
+                        on:click={() => configureConnector(connector.id, 'connect')}
+                        >{t('connect')}</button
+                      >
+                    {/if}
+                    {#if connector.state === 'error' || connector.state === 'not-installed' || connector.state === 'connected'}
+                      <button
+                        disabled={pendingConnectorId === connector.id}
+                        on:click={() => configureConnector(connector.id, 'retry')}
+                        >{t('retry')}</button
+                      >
+                    {/if}
+                    {#if connector.state !== 'skipped'}
+                      <button
+                        disabled={pendingConnectorId === connector.id}
+                        on:click={() => configureConnector(connector.id, 'skip')}
+                        >{t('skip')}</button
+                      >
+                    {/if}
+                  </div>
                 </article>
               {/each}
             </div>
-          {/if}
-        </section>
+          </section>
 
-        <section class="privacy-section" aria-labelledby="privacy-heading">
-          <div class="settings-section-heading">
-            <h2 id="privacy-heading">{t('privacy')}</h2>
-            <p>{t('privacySubtitle')}</p>
-          </div>
-          {#if retentionError}
-            <p class="settings-error" role="status">{t('retentionUnavailable')}</p>
-          {:else if retention}
-            <small>
-              {retention.rawRetentionDays}
-              {t('retentionDays')} · {retention.rawObservations}
-              {t('rawObservations')} · {retention.dailyAggregates}
-              {t('dailyAggregates')}
-            </small>
-          {/if}
-          {#if privacyActionError}
-            <p class="settings-error" role="status">{t('privacyActionUnavailable')}</p>
-          {/if}
-          <div class="privacy-actions">
-            <button on:click={() => downloadExport('json')}>{t('exportJson')}</button>
-            <button on:click={() => downloadExport('csv')}>{t('exportCsv')}</button>
-            <label>
-              <input type="checkbox" bind:checked={includeAccountIdentifiers} />
-              {t('includeAccountIdentifiers')}
-            </label>
-            <label>
-              <input type="checkbox" bind:checked={deleteProductSecrets} />
-              {t('deleteProductSecrets')}
-            </label>
-            <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
-              {clearingData ? t('clearing') : t('clearData')}
-            </button>
-          </div>
-        </section>
+          <section class="monitoring-section" aria-labelledby="monitoring-heading">
+            <div class="settings-section-heading">
+              <h2 id="monitoring-heading">{t('monitoring')}</h2>
+              <p>{t('monitoringSubtitle')}</p>
+            </div>
+            {#if monitoringError}
+              <p class="settings-error" role="status">{t('monitoringUnavailable')}</p>
+            {/if}
+            {#if monitoring}
+              <div class="monitoring-controls">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={monitoring.backgroundCollectionEnabled}
+                    on:change={(event) =>
+                      updateMonitoring({
+                        backgroundCollectionEnabled: event.currentTarget.checked
+                      })}
+                  />
+                  {t('backgroundCollection')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={monitoring.notificationsEnabled}
+                    on:change={(event) =>
+                      updateMonitoring({ notificationsEnabled: event.currentTarget.checked })}
+                  />
+                  {t('notifications')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={monitoring.startAtLogin}
+                    on:change={(event) =>
+                      updateMonitoring({ startAtLogin: event.currentTarget.checked })}
+                  />
+                  {t('startAtLogin')}
+                </label>
+              </div>
+            {/if}
+          </section>
+
+          <section class="diagnostics-section" aria-labelledby="diagnostics-heading">
+            <div class="settings-section-heading">
+              <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
+              <p>{t('diagnosticsSubtitle')}</p>
+            </div>
+            {#if diagnosticsError}
+              <p class="settings-error" role="status">{t('diagnosticsUnavailable')}</p>
+            {/if}
+            {#if diagnostics}
+              <div class="diagnostics-grid">
+                {#each diagnostics.connectors as diagnostic (diagnostic.id)}
+                  <article
+                    class:diagnostic-degraded={diagnostic.status === 'degraded'}
+                    class:settings-target-active={settingsTarget === `diagnostic:${diagnostic.id}`}
+                    data-settings-target={`diagnostic:${diagnostic.id}`}
+                    data-testid={`settings-diagnostic-${diagnostic.id}`}
+                    tabindex="-1"
+                  >
+                    <div>
+                      <strong>{diagnostic.id}</strong>
+                      <span>{diagnosticCategoryLabel(diagnostic)}</span>
+                    </div>
+                    <small>{diagnostic.billingDomainId ?? t('unknown')}</small>
+                    {#if diagnostic.affectedCoverage.length > 0}
+                      <p>{diagnostic.affectedCoverage.map(coverageDimensionLabel).join(' · ')}</p>
+                    {/if}
+                    {#if diagnosticRecovery(diagnostic)}
+                      <code>{diagnosticRecovery(diagnostic)}</code>
+                    {/if}
+                  </article>
+                {/each}
+              </div>
+            {/if}
+          </section>
+
+          <section class="privacy-section" aria-labelledby="privacy-heading">
+            <div class="settings-section-heading">
+              <h2 id="privacy-heading">{t('privacy')}</h2>
+              <p>{t('privacySubtitle')}</p>
+            </div>
+            {#if retentionError}
+              <p class="settings-error" role="status">{t('retentionUnavailable')}</p>
+            {:else if retention}
+              <small>
+                {retention.rawRetentionDays}
+                {t('retentionDays')} · {retention.rawObservations}
+                {t('rawObservations')} · {retention.dailyAggregates}
+                {t('dailyAggregates')}
+              </small>
+            {/if}
+            {#if privacyActionError}
+              <p class="settings-error" role="status">{t('privacyActionUnavailable')}</p>
+            {/if}
+            <div class="privacy-actions">
+              <button on:click={() => downloadExport('json')}>{t('exportJson')}</button>
+              <button on:click={() => downloadExport('csv')}>{t('exportCsv')}</button>
+              <label>
+                <input type="checkbox" bind:checked={includeAccountIdentifiers} />
+                {t('includeAccountIdentifiers')}
+              </label>
+              <label>
+                <input type="checkbox" bind:checked={deleteProductSecrets} />
+                {t('deleteProductSecrets')}
+              </label>
+              <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
+                {clearingData ? t('clearing') : t('clearData')}
+              </button>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
-  </div>
-{/if}
+  {/if}
+
+  {#if selectedModelEntry}
+    {@const model = selectedModelEntry}
+    <div class="model-detail-backdrop" role="presentation">
+      <div
+        class="model-detail-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${t('modelDetail')}: ${model.model}`}
+        tabindex="-1"
+        bind:this={modelDetailPanel}
+      >
+        <div class="model-detail-header">
+          <div>
+            <p class="eyebrow">{model.providerDisplayName} · {model.billingDomainDisplayName}</p>
+            <h2>{t('modelDetail')}: {model.model}</h2>
+          </div>
+          <button aria-label={t('closeModelDetail')} on:click={closeModelDetail}>×</button>
+        </div>
+
+        <div class="model-detail-content">
+          <div class="model-detail-summary">
+            <span>{t('recordedTotal')} <b>{formatNumber(model.tokenTotals.total)}</b></span>
+            <span
+              >{t('sourceReportedTotal')}
+              <b>{formatNumber(model.tokenEvidence.sourceReportedTokens)}</b></span
+            >
+            <span
+              >{t('totalDerivation')}
+              <b>{model.tokenEvidence.totalDerivations.join(' + ') || t('unknown')}</b></span
+            >
+            <span
+              >{t('pricingCoverage')}
+              <b>{formatPercent(model.retailEquivalent.pricingCoverage)}</b></span
+            >
+          </div>
+
+          <dl class="model-token-breakdown">
+            <div>
+              <dt>{t('input')}</dt>
+              <dd>{formatNumber(model.tokenTotals.input)}</dd>
+            </div>
+            <div>
+              <dt>{t('output')}</dt>
+              <dd>{formatNumber(model.tokenTotals.output)}</dd>
+            </div>
+            <div>
+              <dt>{t('reasoning')}</dt>
+              <dd>{formatNumber(model.tokenTotals.reasoning)}</dd>
+            </div>
+            <div>
+              <dt>{t('cacheRead')}</dt>
+              <dd>{formatNumber(model.tokenTotals.cacheRead)}</dd>
+            </div>
+            <div>
+              <dt>{t('cacheWrite')}</dt>
+              <dd>{formatNumber(model.tokenTotals.cacheWrite)}</dd>
+            </div>
+          </dl>
+
+          <section aria-labelledby="model-observations-heading">
+            <h3 id="model-observations-heading">{t('providerEvidence')}</h3>
+            <div class="model-observations">
+              {#each model.observations as observation (observation.id)}
+                <article>
+                  <strong>
+                    {authorityLabel(observation.authority)} ·
+                    {timePrecisionLabel(observation.timePrecision)}
+                  </strong>
+                  <span>{formatReset(observation.observedAt)}</span>
+                  <small>{t('recordedTotal')} {formatNumber(observation.recordedTokens)}</small>
+                  <small>
+                    {t('sourceReportedTotal')}
+                    {observation.sourceReportedTotalTokens === null
+                      ? t('notAvailable')
+                      : formatNumber(observation.sourceReportedTotalTokens)}
+                  </small>
+                </article>
+              {/each}
+            </div>
+          </section>
+
+          <section aria-labelledby="model-pricing-heading">
+            <h3 id="model-pricing-heading">{t('priceLineItems')}</h3>
+            {#if model.priceEvidence.length === 0}
+              <p class="model-evidence-empty">{t('noPriceEvidence')}</p>
+            {:else}
+              {#each model.priceEvidence as price (price.id)}
+                <article class="model-price-evidence">
+                  <div>
+                    <strong>{formatMoney(price.amount, price.currency)}</strong>
+                    <span
+                      >{authorityLabel(price.authority)} · {formatReset(
+                        price.observedAt ?? null
+                      )}</span
+                    >
+                  </div>
+                  {#each price.lineItems as line (`${price.id}:${line.tokenKind}`)}
+                    <p>
+                      {tokenKindLabel(line.tokenKind)} · {formatNumber(line.tokens)} ·
+                      {formatMoney(line.amount, price.currency)}
+                      <small>{formatMoney(line.ratePerMillion, price.currency)} / 1M</small>
+                    </p>
+                  {/each}
+                  {#if price.priceSnapshot}
+                    <small>
+                      {price.priceSnapshot.version} · {price.priceSnapshot.source} ·
+                      {t('priceEffective')}
+                      {formatReset(price.priceSnapshot.effectiveAt)}
+                    </small>
+                  {/if}
+                  {#if price.calculatedAt}
+                    <small>{t('calculatedAt')}: {formatReset(price.calculatedAt)}</small>
+                  {/if}
+                </article>
+              {/each}
+            {/if}
+          </section>
+
+          <section aria-labelledby="model-trend-heading">
+            <h3 id="model-trend-heading">{t('modelTrend')}</h3>
+            <table class="model-trend-table" aria-label={t('modelTrend')}>
+              <thead>
+                <tr
+                  ><th>{t('interval')}</th><th>{t('tokens')}</th><th>{t('apiRetailEquivalent')}</th
+                  ></tr
+                >
+              </thead>
+              <tbody>
+                {#each model.trend as bucket (bucket.start)}
+                  <tr>
+                    <td>{bucket.label}</td>
+                    {#if bucket.gap}
+                      <td colspan="2">{t('gap')}</td>
+                    {:else}
+                      <td>{formatNumber(bucket.tokenTotals.total)}</td>
+                      <td>
+                        {bucket.retailEquivalent.status === 'available'
+                          ? formatMoney(
+                              bucket.retailEquivalent.amount,
+                              bucket.retailEquivalent.comparisonCurrency
+                            )
+                          : t('notAvailable')}
+                      </td>
+                    {/if}
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      </div>
+    </div>
+  {/if}
+{/key}
 
 <style>
   :global(*) {
@@ -2054,6 +2369,144 @@
     clip: rect(0 0 0 0);
     border: 0;
     white-space: nowrap;
+  }
+
+  .model-ranking {
+    margin-top: 12px;
+    padding: 14px;
+    border: 1px solid rgba(122, 136, 164, 0.14);
+    border-radius: 14px;
+    background: rgba(8, 10, 15, 0.32);
+  }
+
+  .ranking-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 12px;
+  }
+
+  .ranking-heading h3,
+  .ranking-heading p {
+    margin: 0;
+  }
+
+  .ranking-heading h3 {
+    color: #e6eaf2;
+    font-size: 0.9rem;
+  }
+
+  .ranking-heading p {
+    max-width: 660px;
+    margin-top: 5px;
+    color: #8993a3;
+    font-size: 0.68rem;
+  }
+
+  .ranking-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ranking-list button {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.6fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr);
+    align-items: center;
+    width: 100%;
+    min-height: 64px;
+    padding: 10px 12px;
+    border: 1px solid rgba(122, 136, 164, 0.12);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.018);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .ranking-list button:hover,
+  .ranking-list button:focus-visible {
+    border-color: rgba(112, 137, 239, 0.52);
+    outline: none;
+    background: rgba(81, 104, 186, 0.1);
+  }
+
+  .ranking-identity,
+  .ranking-identity > span,
+  .ranking-value {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .ranking-identity {
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .ranking-identity img {
+    width: 30px;
+    height: 30px;
+    padding: 4px;
+    object-fit: contain;
+  }
+
+  .ranking-identity strong {
+    overflow: hidden;
+    color: #edf0f6;
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ranking-identity small,
+  .ranking-value small {
+    color: #8993a3;
+    font-size: 0.64rem;
+  }
+
+  .ranking-value {
+    justify-items: end;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ranking-value strong {
+    color: #dce2ec;
+    font-size: 0.76rem;
+  }
+
+  .unclassified-usage {
+    display: grid;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed rgba(122, 136, 164, 0.18);
+  }
+
+  .unclassified-usage > strong {
+    color: #aab2c0;
+    font-size: 0.68rem;
+  }
+
+  .unclassified-usage > span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #8993a3;
+    font-size: 0.66rem;
+  }
+
+  .unclassified-usage b {
+    margin-left: auto;
+    color: #dce2ec;
+  }
+
+  .unclassified-usage small {
+    width: 52px;
+    text-align: right;
   }
 
   .global-summary {
@@ -2860,6 +3313,185 @@
     backdrop-filter: blur(8px);
   }
 
+  .model-detail-backdrop {
+    position: fixed;
+    z-index: 50;
+    inset: 0;
+    display: flex;
+    justify-content: flex-end;
+    background: rgba(3, 5, 9, 0.7);
+    backdrop-filter: blur(8px);
+  }
+
+  .model-detail-drawer {
+    width: min(620px, 100%);
+    height: 100%;
+    overflow-y: auto;
+    border-left: 1px solid rgba(122, 136, 164, 0.22);
+    outline: none;
+    background: #0b0e14;
+    box-shadow: -30px 0 80px rgba(0, 0, 0, 0.42);
+  }
+
+  .model-detail-header {
+    position: sticky;
+    z-index: 2;
+    top: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 26px 28px 20px;
+    border-bottom: 1px solid rgba(122, 136, 164, 0.16);
+    background: rgba(11, 14, 20, 0.95);
+    backdrop-filter: blur(18px);
+  }
+
+  .model-detail-header h2,
+  .model-detail-header p {
+    margin: 0;
+  }
+
+  .model-detail-header h2 {
+    margin-top: 5px;
+    overflow-wrap: anywhere;
+    font-size: 1.08rem;
+  }
+
+  .model-detail-header button {
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(122, 136, 164, 0.2);
+    border-radius: 9px;
+    background: transparent;
+    color: #d8dde7;
+    cursor: pointer;
+    font-size: 1.15rem;
+  }
+
+  .model-detail-content {
+    display: grid;
+    gap: 22px;
+    padding: 22px 28px 48px;
+  }
+
+  .model-detail-content section h3 {
+    margin: 0 0 10px;
+    color: #dfe4ed;
+    font-size: 0.8rem;
+  }
+
+  .model-detail-summary,
+  .model-token-breakdown {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .model-detail-summary span,
+  .model-token-breakdown div,
+  .model-observations article,
+  .model-price-evidence {
+    padding: 11px;
+    border: 1px solid rgba(122, 136, 164, 0.13);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.018);
+  }
+
+  .model-detail-summary span {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    color: #8e98a8;
+    font-size: 0.68rem;
+  }
+
+  .model-detail-summary b {
+    color: #e0e5ed;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .model-token-breakdown {
+    margin: 0;
+  }
+
+  .model-observations {
+    display: grid;
+    gap: 7px;
+  }
+
+  .model-observations article {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 5px 10px;
+    color: #dce2eb;
+    font-size: 0.7rem;
+  }
+
+  .model-observations span,
+  .model-observations small,
+  .model-price-evidence span,
+  .model-price-evidence small {
+    color: #8791a1;
+    font-size: 0.64rem;
+  }
+
+  .model-price-evidence + .model-price-evidence {
+    margin-top: 7px;
+  }
+
+  .model-price-evidence > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+  }
+
+  .model-price-evidence p {
+    display: flex;
+    gap: 6px;
+    margin: 5px 0;
+    color: #d6dce6;
+    font-size: 0.68rem;
+  }
+
+  .model-price-evidence p small {
+    margin-left: auto;
+  }
+
+  .model-price-evidence > small {
+    display: block;
+    margin-top: 6px;
+  }
+
+  .model-evidence-empty {
+    margin: 0;
+    padding: 12px;
+    border: 1px dashed rgba(122, 136, 164, 0.18);
+    border-radius: 10px;
+    color: #8791a1;
+    font-size: 0.7rem;
+  }
+
+  .model-trend-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.66rem;
+  }
+
+  .model-trend-table th,
+  .model-trend-table td {
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(122, 136, 164, 0.12);
+    color: #9aa4b3;
+    text-align: left;
+  }
+
+  .model-trend-table th {
+    color: #d2d8e2;
+    font-weight: 600;
+  }
+
   .settings-drawer {
     width: min(680px, 100%);
     height: 100%;
@@ -3044,6 +3676,27 @@
 
     .workbench-metrics {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ranking-heading {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .ranking-list button {
+      grid-template-columns: 1fr;
+      gap: 9px;
+    }
+
+    .ranking-value {
+      grid-template-columns: 1fr auto;
+      justify-items: stretch;
+    }
+
+    .model-detail-header,
+    .model-detail-content {
+      padding-right: 18px;
+      padding-left: 18px;
     }
 
     .quota-meta {

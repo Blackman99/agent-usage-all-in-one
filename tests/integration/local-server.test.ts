@@ -302,6 +302,13 @@ describe('local HTTP server', () => {
         timeZone: string;
         comparisonCurrency: string;
         trend: { granularity: string; buckets: unknown[] };
+        modelRanking: {
+          byTokens: string[];
+          entries: Array<{
+            id: string;
+            retailEquivalent: { status: string; amount: number | null };
+          }>;
+        };
       };
       providers: Array<{ billingDomains: Array<{ history: unknown }> }>;
     };
@@ -312,6 +319,15 @@ describe('local HTTP server', () => {
       trend: { granularity: 'day' }
     });
     expect(body.workbench.trend.buckets).toHaveLength(7);
+    expect(body.workbench.modelRanking).toMatchObject({
+      byTokens: ['history-api::api::model'],
+      entries: [
+        {
+          id: 'history-api::api::model',
+          retailEquivalent: { status: 'unavailable', amount: null }
+        }
+      ]
+    });
     expect(body.providers[0].billingDomains[0].history).toMatchObject({
       window: '7d',
       timeZone: 'Asia/Shanghai',

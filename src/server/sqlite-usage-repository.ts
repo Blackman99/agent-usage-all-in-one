@@ -5,6 +5,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 
 import type {
   BalanceRecord,
+  BillingHistory,
   BillingDomainOverview,
   ConnectorDiagnostic,
   ConnectorRuntimeState,
@@ -120,6 +121,7 @@ interface CostRow {
 }
 
 interface UsageHistoryRow {
+  id: string;
   model: string;
   observed_at: string;
   authority: DataAuthority;
@@ -1288,7 +1290,7 @@ export class SqliteUsageRepository implements UsageRepository {
     const end = normalized.end.toISOString();
     const usage = this.#database
       .prepare(
-        `SELECT model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
+        `SELECT id, model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
                 cache_read_tokens, cache_write_tokens, source_reported_total_tokens,
                 unclassified_tokens, total_derivation, model_attribution, time_precision,
                 usage_scope, aggregation_temporality
@@ -1331,8 +1333,18 @@ export class SqliteUsageRepository implements UsageRepository {
     const tokenEvidence = emptyTokenEvidence();
     const byModel = new Map<
       string,
-      { tokens: ReturnType<typeof zeroTokenTotals>; evidence: MutableTokenEvidence }
+      {
+        tokens: ReturnType<typeof zeroTokenTotals>;
+        evidence: MutableTokenEvidence;
+        observations: UsageHistoryRow[];
+      }
     >();
+    const unclassified = {
+      tokens: zeroTokenTotals(),
+      evidence: emptyTokenEvidence(),
+      authorities: new Set<DataAuthority>(),
+      lastObservedAt: null as string | null
+    };
     const authorities = new Set<DataAuthority>();
     const byDay = new Map<
       string,
@@ -1355,11 +1367,20 @@ export class SqliteUsageRepository implements UsageRepository {
       if (row.model_attribution === 'known') {
         const model = byModel.get(row.model) ?? {
           tokens: zeroTokenTotals(),
-          evidence: emptyTokenEvidence()
+          evidence: emptyTokenEvidence(),
+          observations: []
         };
         addUsageRow(model.tokens, row);
         addTokenEvidence(model.evidence, row);
+        model.observations.push(row);
         byModel.set(row.model, model);
+      } else {
+        addUsageRow(unclassified.tokens, row);
+        addTokenEvidence(unclassified.evidence, row);
+        unclassified.authorities.add(row.authority);
+        if (!unclassified.lastObservedAt || row.observed_at > unclassified.lastObservedAt) {
+          unclassified.lastObservedAt = row.observed_at;
+        }
       }
       const day = localDay(row.observed_at, normalized.timeZone);
       const daily = byDay.get(day) ?? {
@@ -1409,16 +1430,41 @@ export class SqliteUsageRepository implements UsageRepository {
       tokenTotals,
       tokenEvidence: finishTokenEvidence(tokenEvidence),
       models: [...byModel.entries()]
-        .map(([model, value]) => ({
-          model,
-          tokenTotals: value.tokens,
-          tokenEvidence: finishTokenEvidence(value.evidence)
-        }))
+        .map(([model, value]) => {
+          const priceEvidence = costs
+            .filter((cost) => cost.kind === 'retail-equivalent' && cost.model === model)
+            .map((cost) => {
+              const summarized = summarizeCosts([cost], Number(cost.priced_tokens ?? 0))[0];
+              return {
+                ...summarized,
+                id: cost.id,
+                usageObservationId: cost.usage_observation_id,
+                pricedTokens: Number(cost.priced_tokens ?? 0),
+                lineItems: parseLineItems(cost.line_items_json),
+                priceSnapshot: priceSnapshotFromRow(cost),
+                authority: cost.authority,
+                calculatedAt: cost.calculated_at
+              };
+            });
+          return {
+            model,
+            tokenTotals: value.tokens,
+            tokenEvidence: finishTokenEvidence(value.evidence),
+            observations: value.observations.map(mapHistoryModelObservation),
+            priceEvidence
+          };
+        })
         .sort(
           (left, right) =>
             right.tokenTotals.total - left.tokenTotals.total ||
             left.model.localeCompare(right.model)
         ),
+      unclassified: {
+        tokenTotals: unclassified.tokens,
+        tokenEvidence: finishTokenEvidence(unclassified.evidence),
+        authorities: [...unclassified.authorities].sort(),
+        lastObservedAt: unclassified.lastObservedAt
+      },
       days: [...byDay.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([day, daily]) => ({
@@ -2053,6 +2099,9 @@ function buildTokenMoneyWorkbench(
   const comparisonCurrency = normalized.comparisonCurrency;
   const metric = (purpose: UsageOverview['workbench']['costs']['actual']['purpose']) =>
     buildWorkbenchMetric(costs, purpose, comparisonCurrency, recordedTokens, rates);
+  const actual = metric('actual');
+  const reportedEstimate = metric('reported-estimate');
+  const retailEquivalent = metric('retail-equivalent');
   const emptyIntervals = buildHistoryIntervals(normalized);
   const buckets = emptyIntervals.map((emptyInterval, index) => {
     const segments = histories.flatMap(({ provider, domain, history }) => {
@@ -2100,14 +2149,21 @@ function buildTokenMoneyWorkbench(
     comparisonCurrency,
     recordedTokens: observationCount > 0 ? recordedTokens : null,
     costs: {
-      actual: metric('actual'),
-      reportedEstimate: metric('reported-estimate'),
-      retailEquivalent: metric('retail-equivalent')
+      actual,
+      reportedEstimate,
+      retailEquivalent
     },
     trend: {
       granularity: normalized.window === '24h' ? 'hour' : 'day',
       buckets
-    }
+    },
+    modelRanking: buildWorkbenchModelRanking(
+      histories,
+      buckets,
+      comparisonCurrency,
+      observationCount > 0 ? recordedTokens : null,
+      retailEquivalent
+    )
   };
 }
 
@@ -2208,6 +2264,162 @@ function uniqueExchangeRates(rates: ExchangeRateSnapshot[]): ExchangeRateSnapsho
   return [...new Map(rates.map((rate) => [rate.id, rate])).values()];
 }
 
+function buildWorkbenchModelRanking(
+  histories: Array<{
+    provider: ProviderOverview;
+    domain: BillingDomainOverview;
+    history: BillingHistory;
+  }>,
+  buckets: UsageOverview['workbench']['trend']['buckets'],
+  comparisonCurrency: string,
+  recordedTokens: number | null,
+  totalRetailEquivalent: UsageOverview['workbench']['costs']['retailEquivalent']
+): UsageOverview['workbench']['modelRanking'] {
+  const entries = histories.flatMap(({ provider, domain, history }) =>
+    history.models.map((model) => {
+      const retailEquivalent = buildWorkbenchMetric(
+        model.priceEvidence,
+        'retail-equivalent',
+        comparisonCurrency,
+        model.tokenEvidence.recordedTokens,
+        history.exchangeRates
+      );
+      const authorities = [
+        ...new Set(model.observations.map((observation) => observation.authority))
+      ].sort();
+      const lastObservedAt =
+        [...model.observations].sort((left, right) =>
+          right.observedAt.localeCompare(left.observedAt)
+        )[0]?.observedAt ?? null;
+      return {
+        id: modelRankingId(provider.id, domain.id, model.model),
+        providerId: provider.id,
+        providerDisplayName: provider.displayName,
+        billingDomainId: domain.id,
+        billingDomainDisplayName: domain.displayName,
+        model: model.model,
+        tokenTotals: model.tokenTotals,
+        tokenEvidence: model.tokenEvidence,
+        tokenShare:
+          recordedTokens === null || recordedTokens === 0
+            ? null
+            : model.tokenTotals.total / recordedTokens,
+        retailEquivalent,
+        retailShare:
+          retailEquivalent.status === 'available' &&
+          retailEquivalent.amount !== null &&
+          totalRetailEquivalent.status === 'available' &&
+          totalRetailEquivalent.amount !== null &&
+          totalRetailEquivalent.amount !== 0
+            ? retailEquivalent.amount / totalRetailEquivalent.amount
+            : null,
+        authorities,
+        lastObservedAt,
+        observations: model.observations,
+        priceEvidence: model.priceEvidence,
+        trend: buckets.map((bucket) => {
+          const observations = model.observations.filter(
+            (observation) =>
+              observation.observedAt >= bucket.start && observation.observedAt < bucket.end
+          );
+          const priceEvidence = model.priceEvidence.filter(
+            (cost) =>
+              (cost.observedAt ?? '') >= bucket.start && (cost.observedAt ?? '') < bucket.end
+          );
+          const tokenTotals = observations.reduce(
+            (total, observation) => addTokenTotals(total, observation.tokenTotals),
+            zeroTokenTotals()
+          );
+          const intervalRetail = buildWorkbenchMetric(
+            priceEvidence,
+            'retail-equivalent',
+            comparisonCurrency,
+            tokenTotals.total,
+            history.exchangeRates
+          );
+          return {
+            start: bucket.start,
+            end: bucket.end,
+            label: bucket.label,
+            gap: observations.length === 0,
+            tokenTotals,
+            retailEquivalent: {
+              status: intervalRetail.status,
+              amount: intervalRetail.amount,
+              comparisonCurrency,
+              pricingCoverage: intervalRetail.pricingCoverage
+            }
+          };
+        })
+      };
+    })
+  );
+  const byTokens = [...entries].sort(
+    (left, right) =>
+      right.tokenTotals.total - left.tokenTotals.total || left.id.localeCompare(right.id)
+  );
+  const byRetailEquivalent = [...entries].sort((left, right) => {
+    const leftAvailable = left.retailEquivalent.status === 'available';
+    const rightAvailable = right.retailEquivalent.status === 'available';
+    if (leftAvailable !== rightAvailable) return leftAvailable ? -1 : 1;
+    if (leftAvailable && rightAvailable) {
+      const amountDifference =
+        (right.retailEquivalent.amount ?? 0) - (left.retailEquivalent.amount ?? 0);
+      if (amountDifference !== 0) return amountDifference;
+    } else {
+      const tokenDifference = right.tokenTotals.total - left.tokenTotals.total;
+      if (tokenDifference !== 0) return tokenDifference;
+    }
+    return left.id.localeCompare(right.id);
+  });
+  const unclassified = histories
+    .filter(({ history }) => history.unclassified.tokenEvidence.observationCount > 0)
+    .map(({ provider, domain, history }) => ({
+      providerId: provider.id,
+      providerDisplayName: provider.displayName,
+      billingDomainId: domain.id,
+      billingDomainDisplayName: domain.displayName,
+      tokenTotals: history.unclassified.tokenTotals,
+      tokenEvidence: history.unclassified.tokenEvidence,
+      tokenShare:
+        recordedTokens === null || recordedTokens === 0
+          ? null
+          : history.unclassified.tokenTotals.total / recordedTokens,
+      authorities: history.unclassified.authorities,
+      lastObservedAt: history.unclassified.lastObservedAt
+    }))
+    .sort(
+      (left, right) =>
+        right.tokenTotals.total - left.tokenTotals.total ||
+        modelRankingId(left.providerId, left.billingDomainId, '').localeCompare(
+          modelRankingId(right.providerId, right.billingDomainId, '')
+        )
+    );
+  return {
+    byTokens: byTokens.slice(0, 5).map((entry) => entry.id),
+    byRetailEquivalent: byRetailEquivalent.slice(0, 5).map((entry) => entry.id),
+    entries: byTokens,
+    unclassified
+  };
+}
+
+function modelRankingId(providerId: string, billingDomainId: string, model: string): string {
+  return `${providerId}::${billingDomainId}::${model}`;
+}
+
+function addTokenTotals(
+  target: ProviderOverview['tokenTotals'],
+  value: ProviderOverview['tokenTotals']
+) {
+  target.total += value.total;
+  target.input += value.input;
+  target.output += value.output;
+  target.reasoning += value.reasoning;
+  target.cacheRead += value.cacheRead;
+  target.cacheWrite += value.cacheWrite;
+  return target;
+}
+
 function addAggregatedTokenEvidence(target: MutableTokenEvidence, source: TokenEvidence): void {
   target.recordedTokens += source.recordedTokens;
   target.sourceReportedTokens += source.sourceReportedTokens;
@@ -2296,6 +2508,28 @@ function addUsageRow(target: ProviderOverview['tokenTotals'], row: UsageHistoryR
   target.reasoning += Number(row.reasoning_tokens);
   target.cacheRead += Number(row.cache_read_tokens);
   target.cacheWrite += Number(row.cache_write_tokens);
+}
+
+function mapHistoryModelObservation(
+  row: UsageHistoryRow
+): BillingDomainOverview['history']['models'][number]['observations'][number] {
+  return {
+    id: row.id,
+    observedAt: row.observed_at,
+    authority: row.authority,
+    timePrecision: row.time_precision,
+    sourceReportedTotalTokens: row.source_reported_total_tokens,
+    recordedTokens: Number(row.total_tokens),
+    totalDerivation: row.total_derivation,
+    tokenTotals: {
+      total: Number(row.total_tokens),
+      input: Number(row.input_tokens),
+      output: Number(row.output_tokens),
+      reasoning: Number(row.reasoning_tokens),
+      cacheRead: Number(row.cache_read_tokens),
+      cacheWrite: Number(row.cache_write_tokens)
+    }
+  };
 }
 
 function localDay(observedAt: string, timeZone: string): string {
