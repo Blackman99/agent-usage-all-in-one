@@ -36,7 +36,12 @@ import { SqliteUsageRepository } from './sqlite-usage-repository.js';
 export async function runDaemon(home: string): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const repository = new SqliteUsageRepository(join(home, 'usage.sqlite'));
-  const secretStore = new MacOsKeychainSecretStore();
+  const keychainService = process.env.AGENT_USAGE_KEYCHAIN_SERVICE;
+  const launchAgentLabel = process.env.AGENT_USAGE_LAUNCH_AGENT_LABEL;
+  const nodeImport = process.env.AGENT_USAGE_NODE_IMPORT;
+  const secretStore = new MacOsKeychainSecretStore(undefined, {
+    service: keychainService
+  });
   const application = new UsageApplication({
     repository,
     connectors: [
@@ -61,7 +66,16 @@ export async function runDaemon(home: string): Promise<void> {
       userHome: homedir(),
       executable: process.execPath,
       cliPath: process.argv[1],
-      applicationHome: home
+      applicationHome: home,
+      label: launchAgentLabel,
+      nodeImport,
+      environmentVariables: {
+        AGENT_USAGE_DAEMON: '1',
+        ...(keychainService ? { AGENT_USAGE_KEYCHAIN_SERVICE: keychainService } : {}),
+        ...(launchAgentLabel ? { AGENT_USAGE_LAUNCH_AGENT_LABEL: launchAgentLabel } : {}),
+        ...(nodeImport ? { AGENT_USAGE_NODE_IMPORT: nodeImport } : {}),
+        ...(process.env.AGENT_USAGE_DEMO === '1' ? { AGENT_USAGE_DEMO: '1' } : {})
+      }
     }),
     connectorPolicies: Object.fromEntries(
       ['codex', 'claude-code', 'opencode-go', 'grok', 'xai-api'].map((id) => [

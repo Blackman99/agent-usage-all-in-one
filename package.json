@@ -16,7 +16,7 @@
   },
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "node scripts/dev.mjs",
     "build": "svelte-kit sync && vite build && tsup",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "pnpm check",

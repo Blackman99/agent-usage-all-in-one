@@ -4,6 +4,19 @@ Agent Usage 是一个 macOS 优先、完全本地运行的 coding-agent 用量�
 
 界面支持简体中文和 English。Grok 在一张 provider 卡片内明确分隔 `Build / SuperGrok` 与 `xAI API` 两个 billing domain，二者不会合并计数。
 
+## 开发调试
+
+在仓库根目录执行：
+
+```bash
+pnpm install
+pnpm dev
+```
+
+这一个命令会启动源码 daemon、Vite 热更新、认证代理并自动打开 Dashboard。开发数据库保存在仓库内已忽略的 `.agent-usage-dev/`，Keychain 与登录启动项也使用独立的开发命名空间；按 `Ctrl+C` 会同时关闭前后端，不会改动正式运行状态。
+
+需要演示数据时执行 `AGENT_USAGE_DEMO=1 pnpm dev`。不希望自动打开浏览器时执行 `pnpm dev -- --no-open`。Svelte 修改会热更新；后端 TypeScript 修改后重新运行 `pnpm dev` 即可。
+
 ## 安装与启动
 
 要求 macOS 与 Node.js 24 或更高版本。P0 tarball 可按以下方式安装：
