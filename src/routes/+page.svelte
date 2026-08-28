@@ -791,6 +791,11 @@
       (candidate) => candidate.providerId === providerId
     );
     const diagnostic =
+      candidates?.find(
+        (candidate) =>
+          candidate.billingDomainId === billingDomainId && candidate.status === 'degraded'
+      ) ??
+      candidates?.find((candidate) => candidate.status === 'degraded') ??
       candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ??
       candidates?.[0];
     return diagnostic ? `diagnostic:${diagnostic.id}` : null;
@@ -833,7 +838,7 @@
     ) {
       return {
         title: `${constrained.displayName} · ${constrained.label}`,
-        detail: `${formatNumber(constrained.remainingPercent)}% ${translate(currentLocale, 'remaining')}`,
+        detail: `${formatNumber(constrained.remainingPercent)}% ${translate(currentLocale, 'remaining')} · ${authorityLabel(constrained.authority ?? 'unavailable')} · ${formatReset(constrained.observedAt ?? null)}`,
         target: diagnosticTargetForProvider(
           report,
           constrained.providerId,

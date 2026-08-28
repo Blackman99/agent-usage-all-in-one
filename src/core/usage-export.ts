@@ -66,52 +66,70 @@ export function buildUsageExport(
         priceCurrencies: null,
         priceRatesPerMillion: null,
         priceSourceUrls: null,
-        priceContextTiers: null
+        priceContextTiers: null,
+        priceLineItems: null,
+        calculatedAt: null
       };
-      const tokenObservationRows = [
-        ...history.models.flatMap((model) =>
-          model.observations.map((observation) => ({
-            model: model.model,
-            observation,
-            classified: true
-          }))
-        ),
-        ...(history.unclassified.observations ?? []).map((observation) => ({
-          model: observation.model,
+      const modelObservations = history.models.flatMap((model) =>
+        model.observations.map((observation) => ({
+          model: model.model,
           observation,
-          classified: false
+          classified: true
         }))
-      ].map(({ model, observation, classified }) => ({
-        ...tokenRow,
-        recordType: 'token-observation',
-        recordId: observation.id,
-        model,
-        usageObservationId: observation.id,
-        observedAt: observation.observedAt,
-        timePrecision: observation.timePrecision,
-        authority: observation.authority,
-        totalTokens: observation.tokenTotals.total,
-        recordedTokens: observation.recordedTokens,
-        sourceReportedTokens: observation.sourceReportedTotalTokens,
-        sourceReportedObservationCount: observation.sourceReportedTotalTokens === null ? 0 : 1,
-        observationCount: 1,
-        unclassifiedTokens: observation.unclassifiedTokens,
-        classifiedTokens: classified ? observation.recordedTokens : 0,
-        classificationCoverage:
-          observation.recordedTokens + (classified ? observation.unclassifiedTokens : 0) === 0
-            ? null
-            : (classified ? observation.recordedTokens : 0) /
-              (observation.recordedTokens + (classified ? observation.unclassifiedTokens : 0)),
-        totalDerivations: [observation.totalDerivation],
-        timePrecisions: [observation.timePrecision],
-        usageScopes: null,
-        aggregationTemporalities: null,
-        inputTokens: observation.tokenTotals.input,
-        outputTokens: observation.tokenTotals.output,
-        reasoningTokens: observation.tokenTotals.reasoning,
-        cacheReadTokens: observation.tokenTotals.cacheRead,
-        cacheWriteTokens: observation.tokenTotals.cacheWrite
-      }));
+      );
+      const modelObservationIds = new Set(
+        modelObservations.map(({ observation }) => observation.id)
+      );
+      const tokenObservationRows = [
+        ...modelObservations,
+        ...(history.unclassified.observations ?? [])
+          .filter((observation) => !modelObservationIds.has(observation.id))
+          .map((observation) => ({
+            model: observation.model,
+            observation,
+            classified: false
+          }))
+      ].map(({ model, observation, classified }) => {
+        const classifiedTokens = classified ? observation.recordedTokens : 0;
+        const recordedTokens = classified
+          ? observation.recordedTokens + observation.unclassifiedTokens
+          : observation.recordedTokens;
+        return {
+          ...tokenRow,
+          recordType: 'token-observation',
+          recordId: observation.id,
+          model,
+          usageObservationId: observation.id,
+          observedAt: observation.observedAt,
+          timePrecision: observation.timePrecision,
+          authority: observation.authority,
+          totalTokens: recordedTokens,
+          recordedTokens,
+          sourceReportedTokens: observation.sourceReportedTotalTokens,
+          sourceReportedObservationCount: observation.sourceReportedTotalTokens === null ? 0 : 1,
+          observationCount: 1,
+          unclassifiedTokens: observation.unclassifiedTokens,
+          classifiedTokens,
+          classificationCoverage: recordedTokens === 0 ? null : classifiedTokens / recordedTokens,
+          totalDerivations: [observation.totalDerivation],
+          timePrecisions: [observation.timePrecision],
+          usageScopes: null,
+          aggregationTemporalities: null,
+          inputTokens: observation.tokenTotals.input,
+          outputTokens: observation.tokenTotals.output,
+          reasoningTokens: observation.tokenTotals.reasoning,
+          cacheReadTokens: observation.tokenTotals.cacheRead,
+          cacheWriteTokens: observation.tokenTotals.cacheWrite
+        };
+      });
+      const observationsById = new Map([
+        ...history.models.flatMap((model) =>
+          model.observations.map((observation) => [observation.id, observation] as const)
+        ),
+        ...(history.unclassified.observations ?? []).map(
+          (observation) => [observation.id, observation] as const
+        )
+      ]);
       const costRows = history.costs.map((cost) => {
         const authorities = domain.costs
           .filter(
@@ -125,6 +143,7 @@ export function buildUsageExport(
         return {
           ...tokenRow,
           recordType: 'cost',
+          observedAt: cost.observedAt ?? null,
           authority: exportAuthority(authorities),
           totalTokens: null,
           recordedTokens: cost.pricingEvidence?.recordedTokens ?? null,
@@ -164,22 +183,26 @@ export function buildUsageExport(
           ),
           priceContextTiers: cost.priceSnapshots.flatMap((snapshot) =>
             snapshot.contextTier ? [snapshot.contextTier] : []
-          )
+          ),
+          priceLineItems: null,
+          calculatedAt: null
         };
       });
-      const costObservationRows = history.models.flatMap((model) =>
-        model.priceEvidence.map((cost) => {
-          const snapshot = cost.priceSnapshot;
+      const costObservationRows = domain.costs
+        .filter((cost) => cost.observedAt >= history.start && cost.observedAt < history.end)
+        .map((cost) => {
+          const snapshot = cost.priceSnapshot ?? null;
+          const observation = cost.usageObservationId
+            ? observationsById.get(cost.usageObservationId)
+            : null;
           return {
             ...tokenRow,
             recordType: 'cost-observation',
             recordId: cost.id,
-            model: model.model,
+            model: cost.model ?? null,
             usageObservationId: cost.usageObservationId,
             observedAt: cost.observedAt ?? null,
-            timePrecision:
-              model.observations.find((observation) => observation.id === cost.usageObservationId)
-                ?.timePrecision ?? null,
+            timePrecision: observation?.timePrecision ?? null,
             authority: cost.authority,
             totalTokens: null,
             recordedTokens: null,
@@ -199,8 +222,8 @@ export function buildUsageExport(
             cacheReadTokens: null,
             cacheWriteTokens: null,
             costKind: cost.kind,
-            costPurpose: cost.kind,
-            legacyPurposeUnknown: false,
+            costPurpose: cost.kind === 'legacy-unknown' ? null : cost.kind,
+            legacyPurposeUnknown: cost.kind === 'legacy-unknown',
             amount: cost.amount,
             currency: cost.currency,
             pricedTokens: cost.pricedTokens,
@@ -213,10 +236,11 @@ export function buildUsageExport(
             priceCurrencies: snapshot ? [snapshot.currency] : [],
             priceRatesPerMillion: snapshot ? [JSON.stringify(snapshot.ratesPerMillion)] : [],
             priceSourceUrls: snapshot?.sourceUrl ? [snapshot.sourceUrl] : [],
-            priceContextTiers: snapshot?.contextTier ? [snapshot.contextTier] : []
+            priceContextTiers: snapshot?.contextTier ? [snapshot.contextTier] : [],
+            priceLineItems: cost.lineItems ? JSON.stringify(cost.lineItems) : null,
+            calculatedAt: cost.calculatedAt ?? null
           };
-        })
-      );
+        });
       return [tokenRow, ...tokenObservationRows, ...costRows, ...costObservationRows];
     })
   );
@@ -307,7 +331,9 @@ const CSV_COLUMNS = [
   'priceCurrencies',
   'priceRatesPerMillion',
   'priceSourceUrls',
-  'priceContextTiers'
+  'priceContextTiers',
+  'priceLineItems',
+  'calculatedAt'
 ] as const;
 
 function rowsToCsv(rows: Array<Record<string, unknown>>): string {

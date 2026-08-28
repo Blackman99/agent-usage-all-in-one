@@ -423,7 +423,10 @@ function formatGlobalSummary(overview: UsageOverview): string {
         )})`
       : 'unavailable';
   const constrained = summary.mostConstrained
-    ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label} (${summary.mostConstrained.remainingPercent}% remaining)`
+    ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label} (${summary.mostConstrained.remainingPercent}% remaining; ${formatEvidence(
+        summary.mostConstrained.authority ?? 'unavailable',
+        summary.mostConstrained.observedAt
+      )})`
     : 'unavailable';
   return `Summary (${summary.window}): ${tokens}; API retail equivalent ${retail}; ${summary.tokenEvidence.classifiedTokens}/${summary.tokenEvidence.recordedTokens} classified; precision ${summary.tokenEvidence.timePrecisions.join('+') || 'unavailable'}; most constrained ${constrained}; latest observed ${summary.latestObservedAt ?? 'unavailable'}; generated ${summary.generatedAt}\n`;
 }

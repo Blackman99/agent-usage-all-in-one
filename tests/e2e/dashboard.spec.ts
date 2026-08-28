@@ -476,11 +476,11 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
             id: 'grok',
             providerId: 'grok',
             billingDomainId: 'grok-build-subscription',
-            status: 'degraded',
-            category: 'unsupported',
-            message: 'Build usage unavailable.',
-            recovery: 'Open Grok Build and run /usage.',
-            affectedCoverage: ['quota'],
+            status: 'healthy',
+            category: null,
+            message: null,
+            recovery: null,
+            affectedCoverage: [],
             lastAttemptAt: '2026-08-28T02:00:00.000Z',
             lastSuccessAt: null
           },
@@ -575,6 +575,9 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expect(
     provider.getByText('Open Grok Build and run /usage, then retry refresh.')
   ).toBeVisible();
+  await provider.getByRole('button', { name: 'Review in settings' }).click();
+  await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
+  await page.getByRole('button', { name: 'Close settings' }).click();
   await provider.getByRole('tab', { name: 'xAI API' }).click();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
@@ -700,6 +703,18 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   const requestedWindows: string[] = [];
   const requestedCurrencies: string[] = [];
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-28T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [],
+        providers: []
+      })
+    });
+  });
   await page.route('**/api/overview**', async (route) => {
     const url = new URL(route.request().url());
     const window = url.searchParams.get('window') ?? '24h';
@@ -709,7 +724,7 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
     const total = window === '24h' ? 100 : window === '7d' ? 700 : 3000;
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(historyOverviewFixture(window, total, currency))
+      body: JSON.stringify(historyOverviewFixture(window, total, currency, 20))
     });
   });
 
@@ -725,6 +740,10 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(summary.getByText('Classification coverage: 100%')).toBeVisible();
   await expect(summary.getByText('Pricing coverage: 85.7%')).toBeVisible();
   await expect(summary.getByText('Precision: Day + Billing period')).toBeVisible();
+  const risk = page.getByRole('region', { name: 'Capacity outlook' });
+  await expect(risk).toContainText('20% remaining');
+  await expect(risk).toContainText('Official account');
+  await expect(risk).toContainText('Aug 28');
   await expect(
     summary.getByText('History Agent · API').locator('..').getByText('700')
   ).toBeVisible();
@@ -1147,7 +1166,12 @@ function tokenEvidenceFixture(
   };
 }
 
-function historyOverviewFixture(window: string, total: number, currency = 'CNY'): unknown {
+function historyOverviewFixture(
+  window: string,
+  total: number,
+  currency = 'CNY',
+  remainingPercent = 40
+): unknown {
   const pricedTokens = Math.max(0, total - 100);
   const tokenTotals = {
     total,
@@ -1171,9 +1195,11 @@ function historyOverviewFixture(window: string, total: number, currency = 'CNY')
     billingDomainId: 'api',
     bucketId: 'daily',
     label: 'Daily limit',
-    remainingPercent: 40,
+    remainingPercent,
     resetsAt: '2026-08-28T06:00:00.000Z',
-    forecast: null
+    forecast: null,
+    authority: 'official-account',
+    observedAt: '2026-08-28T01:57:00.000Z'
   };
   return {
     generatedAt: '2026-08-28T02:00:00.000Z',
@@ -1208,11 +1234,11 @@ function historyOverviewFixture(window: string, total: number, currency = 'CNY')
         providerId: 'history-agent',
         displayName: 'History Agent',
         billingDomainId: 'api',
-        score: 40,
+        score: remainingPercent,
         readOnly: true,
         reasonKeys: ['highest-safe-capacity'],
         evidence: {
-          remainingPercent: 40,
+          remainingPercent,
           freshness: 'fresh',
           forecastCoverage: 'insufficient'
         }

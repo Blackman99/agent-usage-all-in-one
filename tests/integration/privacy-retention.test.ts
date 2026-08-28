@@ -49,7 +49,7 @@ describe('privacy, export, and retention', () => {
           provider: 'Privacy Agent',
           billingDomain: 'Subscription',
           authority: 'local-observation',
-          totalTokens: 125
+          totalTokens: 150
         }),
         expect.objectContaining({
           recordType: 'token-observation',
@@ -58,14 +58,17 @@ describe('privacy, export, and retention', () => {
           observedAt: '2026-08-27T00:00:00.000Z',
           timePrecision: 'unknown',
           authority: 'local-observation',
-          recordedTokens: 125
+          recordedTokens: 150,
+          classifiedTokens: 125,
+          unclassifiedTokens: 25
         }),
         expect.objectContaining({
           recordType: 'cost',
           costKind: 'actual',
           authority: 'official-account',
           amount: 1.25,
-          currency: 'USD'
+          currency: 'USD',
+          observedAt: '2026-08-27T01:00:00.000Z'
         }),
         expect.objectContaining({
           recordType: 'cost',
@@ -75,9 +78,29 @@ describe('privacy, export, and retention', () => {
           authority: 'estimate',
           amount: 2.5,
           currency: 'USD'
+        }),
+        expect.objectContaining({
+          recordType: 'cost-observation',
+          costKind: 'actual',
+          model: 'recent-model',
+          usageObservationId: 'recent-observation',
+          observedAt: '2026-08-27T01:00:00.000Z'
+        }),
+        expect.objectContaining({
+          recordType: 'cost-observation',
+          costKind: 'reported-estimate',
+          model: 'recent-model',
+          usageObservationId: 'recent-observation',
+          observedAt: '2026-08-27T01:30:00.000Z'
         })
       ])
     );
+    expect(
+      exported.rows.filter(
+        (row) =>
+          row.recordType === 'token-observation' && row.usageObservationId === 'recent-observation'
+      )
+    ).toHaveLength(1);
     const serialized = JSON.stringify(exported);
     for (const forbidden of [
       'account-private-123',
@@ -273,6 +296,7 @@ function snapshot(): ConnectorSnapshot {
         model: 'recent-model',
         sessionId: 'account-private-123',
         observedAt: '2026-08-27T00:00:00.000Z',
+        sourceReportedTotalTokens: 150,
         inputTokens: 100,
         outputTokens: 25,
         cacheReadTokens: 0,
@@ -285,21 +309,25 @@ function snapshot(): ConnectorSnapshot {
         id: 'actual',
         sourceId: 'cookie-fake-secret',
         billingDomainId: 'subscription',
-        observedAt: '2026-08-27T00:00:00.000Z',
+        observedAt: '2026-08-27T01:00:00.000Z',
         kind: 'actual',
         amount: 1.25,
         currency: 'USD',
-        authority: 'official-account'
+        authority: 'official-account',
+        model: 'recent-model',
+        usageObservationId: 'recent-observation'
       },
       {
         id: 'estimate',
         sourceId: 'oauth-fake-secret',
         billingDomainId: 'subscription',
-        observedAt: '2026-08-27T00:00:00.000Z',
+        observedAt: '2026-08-27T01:30:00.000Z',
         kind: 'reported-estimate',
         amount: 2.5,
         currency: 'USD',
-        authority: 'estimate'
+        authority: 'estimate',
+        model: 'recent-model',
+        usageObservationId: 'recent-observation'
       }
     ],
     observedAt: '2026-08-28T01:00:00.000Z'

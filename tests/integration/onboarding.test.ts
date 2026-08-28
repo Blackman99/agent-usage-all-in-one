@@ -207,12 +207,39 @@ describe('provider discovery and onboarding', () => {
       action: 'connect',
       secret: 'replacement-managed-secret'
     });
+    repository.saveConnectorDiagnostic({
+      id: 'managed-test',
+      providerId: 'managed-test',
+      billingDomainId: 'api',
+      status: 'degraded',
+      category: 'unauthorized',
+      message: 'Old credential failed.',
+      recovery: 'Replace it.',
+      affectedCoverage: ['actual-cost'],
+      lastAttemptAt: '2026-08-28T01:00:00.000Z',
+      lastSuccessAt: null
+    });
     expect(await application.configureConnector('managed-test', { action: 'retry' })).toMatchObject(
       {
         state: 'connected'
       }
     );
+    expect(await application.getDiagnostics()).toMatchObject({
+      connectors: expect.arrayContaining([
+        expect.objectContaining({ id: 'managed-test', status: 'healthy', category: null })
+      ])
+    });
     await application.configureConnector('managed-test', { action: 'skip' });
+    expect(await application.getDiagnostics()).toMatchObject({
+      connectors: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'managed-test',
+          status: 'degraded',
+          category: 'not-configured',
+          lastAttemptAt: '2026-08-28T02:00:00.000Z'
+        })
+      ])
+    });
 
     expect(collections).toBe(4);
     expect(secretStore.values.get('connector:managed-test')).toBe('replacement-managed-secret');

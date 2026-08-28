@@ -678,6 +678,7 @@ export interface UsageRepository {
   getNotificationState(key: string): string | null;
   saveNotificationState(key: string, value: string): void;
   saveConnectorDiagnostic(diagnostic: ConnectorDiagnostic): void;
+  deleteConnectorDiagnostic(id: string): void;
   getConnectorDiagnostics(): ConnectorDiagnostic[];
   getProviderAccountIdentifiers(): Record<string, string>;
   compactUsageHistory(now: Date): RetentionStatus;

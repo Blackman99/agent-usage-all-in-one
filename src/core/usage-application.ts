@@ -656,7 +656,7 @@ export class UsageApplication {
         binaryPath: prior?.binaryPath ?? null,
         officialCredentialPresent: prior?.officialCredentialPresent ?? false,
         errorCode: null,
-        lastDiscoveredAt: prior?.lastDiscoveredAt ?? null,
+        lastDiscoveredAt: this.#clock().toISOString(),
         secretReference:
           input.action === 'connect' && definition.credentialOwner === 'agent-usage'
             ? secretReference
@@ -664,6 +664,7 @@ export class UsageApplication {
       });
     }
 
+    this.#repository.deleteConnectorDiagnostic(id);
     await this.refresh({ userInitiated: true });
 
     const status = (await this.getConnectorStatuses()).find((candidate) => candidate.id === id);

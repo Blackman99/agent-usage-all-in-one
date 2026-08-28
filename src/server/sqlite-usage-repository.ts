@@ -860,6 +860,10 @@ export class SqliteUsageRepository implements UsageRepository {
       );
   }
 
+  deleteConnectorDiagnostic(id: string): void {
+    this.#database.prepare('DELETE FROM connector_diagnostics WHERE id = ?').run(id);
+  }
+
   getConnectorDiagnostics(): ConnectorDiagnostic[] {
     const rows = this.#database
       .prepare(

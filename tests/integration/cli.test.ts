@@ -156,6 +156,9 @@ describe('agent-usage CLI', () => {
     expect(textStatus.stdout).toContain(
       'Summary (24h): 100 recorded tokens (source official-account at 2026-08-28T00:00:00.000Z); API retail equivalent 4 USD (source estimate at 2026-08-28T00:00:00.000Z); 0/100 classified'
     );
+    expect(textStatus.stdout).toContain(
+      'most constrained Demo Agent · 5 hour (58% remaining; source official-account at 2026-08-28T02:00:00.000Z)'
+    );
     expect(textStatus.stdout).toContain('actual 1 USD');
     expect(textStatus.stdout).toContain('actual unknown');
     expect(textStatus.stdout).toContain('subscription 2 USD');
