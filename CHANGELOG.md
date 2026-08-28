@@ -1,5 +1,12 @@
 # agent-usage-all-in-one
 
+## 0.2.2
+
+### Patch Changes
+
+- 503a17d: Show local skeleton loading states when switching usage ranges and add hover, zoom, pan, and reset interactions to token and cost trends.
+- 33d727e: Show OpenCode Go quota windows in short-to-long order, with the 5-hour window first.
+
 ## 0.2.1
 
 ### Patch Changes
