@@ -1,5 +1,11 @@
 # agent-usage-all-in-one
 
+## 0.2.1
+
+### Patch Changes
+
+- dac16dc: Add the official Grok mark, redesign the README banner with supported-agent icons and future expansion, and replace the dashboard banner with the compact Agent Usage logo.
+
 ## 0.2.0
 
 ### Minor Changes
