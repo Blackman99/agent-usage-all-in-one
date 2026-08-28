@@ -2,7 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const bundledPackages = ['@sveltejs/kit', 'cookie', 'devalue', 'esm-env', 'svelte'];
+const bundledManifest = JSON.parse(readFileSync('BUNDLED_DEPENDENCIES.json', 'utf8'));
+const bundledPackages = bundledManifest.packages;
+if (!Array.isArray(bundledPackages) || bundledPackages.length === 0) {
+  throw new Error('BUNDLED_DEPENDENCIES.json must contain at least one browser dependency.');
+}
 
 const report = JSON.parse(
   execFileSync('pnpm', ['licenses', 'list', '--json'], { encoding: 'utf8' })

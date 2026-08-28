@@ -968,7 +968,7 @@
                     segment.reportedEstimate.currency
                   )}`
                 ])
-          ].join(' + ') || t('notAvailable');
+          ].join('; ') || t('notAvailable');
     const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
     const authorities =
       segment.authorities && segment.authorities.length > 0
@@ -1548,7 +1548,7 @@
                       <line x1="0" y1="226" x2="1000" y2="226"></line>
                       {#each chartSeries as series (series.key)}
                         {#each series.runs as run, runIndex (`${series.key}:${runIndex}`)}
-                          {#if trendAreaPath(run)}
+                          {#if trendAreaPath(run) && series.costPurpose !== 'reported-estimate'}
                             <path
                               class="trend-area"
                               data-cost-purpose={series.costPurpose ?? undefined}
@@ -1561,7 +1561,7 @@
                               class="trend-line"
                               data-cost-purpose={series.costPurpose ?? undefined}
                               d={trendLinePath(run)}
-                              style={`stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
+                              style={`stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; ${series.costPurpose === 'reported-estimate' ? 'stroke-dasharray: 10 7' : ''}`}
                             ></path>
                           {:else if run[0]}
                             <circle
@@ -1570,7 +1570,9 @@
                               cx={run[0].x}
                               cy={run[0].y}
                               r="4"
-                              style={`fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
+                              style={series.costPurpose === 'reported-estimate'
+                                ? `fill: transparent; stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; stroke-width: 2`
+                                : `fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
                             ></circle>
                           {/if}
                         {/each}
@@ -1589,7 +1591,9 @@
                     {#each chartSeries as segment (segment.key)}
                       <span>
                         <i
-                          style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+                          style={segment.costPurpose === 'reported-estimate'
+                            ? `background: repeating-linear-gradient(90deg, ${trendSegmentColor(segment.providerId, segment.billingDomainId)} 0 5px, transparent 5px 9px)`
+                            : `background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
                         ></i>
                         {segment.providerDisplayName} · {segment.billingDomainDisplayName}
                         {#if segment.costPurpose}
@@ -2793,9 +2797,9 @@
   }
 
   .trend-legend i {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
+    width: 18px;
+    height: 3px;
+    border-radius: 999px;
   }
 
   .trend-data {

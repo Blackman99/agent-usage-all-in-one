@@ -51,8 +51,8 @@ agent-usage
 ```bash
 pnpm install
 pnpm build
-pnpm pack
-npm install --global ./agent-usage-all-in-one-0.1.0.tgz
+archive=$(pnpm pack)
+npm install --global "./$archive"
 agent-usage
 ```
 

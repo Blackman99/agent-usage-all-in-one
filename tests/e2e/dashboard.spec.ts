@@ -892,12 +892,22 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.getByTestId('usage-headline')).toContainText('CN¥9.00');
   await expect(workbench.getByTestId('usage-headline')).toContainText('API retail equivalent');
   await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
+  const retailTrend = workbench
+    .getByTestId('usage-trend-chart')
+    .locator('[data-cost-purpose="retail-equivalent"]');
+  const reportedTrend = workbench
+    .getByTestId('usage-trend-chart')
+    .locator('[data-cost-purpose="reported-estimate"]');
+  await expect(retailTrend).toHaveCount(1);
+  await expect(reportedTrend).toHaveCount(1);
+  await expect(retailTrend).not.toHaveAttribute('style', /transparent/);
+  await expect(reportedTrend).toHaveAttribute('style', /fill: transparent/);
   await expect(
-    workbench.getByTestId('usage-trend-chart').locator('[data-cost-purpose="retail-equivalent"]')
-  ).toHaveCount(1);
-  await expect(
-    workbench.getByTestId('usage-trend-chart').locator('[data-cost-purpose="reported-estimate"]')
-  ).toHaveCount(1);
+    workbench
+      .locator('.trend-legend span')
+      .filter({ hasText: 'Provider-reported estimate' })
+      .locator('i')
+  ).toHaveAttribute('style', /repeating-linear-gradient/);
   await expect(workbench.getByTestId('usage-provider-summary')).toContainText('History Agent');
   const unknownProvider = workbench
     .getByTestId('usage-provider-summary')

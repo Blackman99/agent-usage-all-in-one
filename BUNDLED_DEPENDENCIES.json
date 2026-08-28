@@ -1,0 +1,3 @@
+{
+  "packages": ["@sveltejs/kit", "clsx", "devalue", "esm-env", "svelte"]
+}

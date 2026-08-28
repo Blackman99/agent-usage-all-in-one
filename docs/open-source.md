@@ -17,7 +17,10 @@ every production and development dependency, version, declared license, and
 project link. `BUNDLED_LICENSES.md` carries the complete license and copyright
 texts for dependency code bundled into the browser distribution. Dependencies
 installed separately retain their license texts in their own packages. Both
-generated reports are checked by CI whenever dependencies change.
+generated reports are checked by CI whenever dependencies change. The reviewed
+bundle set is generated as `BUNDLED_DEPENDENCIES.json` directly from Vite's
+client module graph, so a newly bundled npm package cannot bypass the full-text
+license check by being omitted from a hand-maintained list.
 
 ## Provider marks
 
