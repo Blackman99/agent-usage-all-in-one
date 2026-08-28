@@ -66,11 +66,11 @@ describe('OpenCode Go application path', () => {
               model: 'opencode-go/deepseek-v4-flash',
               cost: 0.42,
               inputTokens: 700,
-              outputTokens: 300,
-              reasoningTokens: 0,
+              outputTokens: 250,
+              reasoningTokens: 50,
               cacheReadTokens: 200,
               cacheWriteTokens: 0,
-              observedAtMs: Date.parse('2026-08-28T01:00:00.000Z')
+              observedAtMs: Date.parse('2026-08-28T00:00:00.000Z')
             }
           ];
         }
@@ -110,7 +110,21 @@ describe('OpenCode Go application path', () => {
             expect.objectContaining({ id: 'rolling', label: '5 hour' }),
             expect.objectContaining({ id: 'weekly', label: 'Week' })
           ],
-          tokenTotals: { total: 1200, input: 700, output: 300, cacheRead: 200 },
+          tokenTotals: {
+            total: 1200,
+            input: 700,
+            output: 250,
+            reasoning: 50,
+            cacheRead: 200
+          },
+          tokenEvidence: {
+            recordedTokens: 1200,
+            unclassifiedTokens: 0,
+            classificationCoverage: 1,
+            totalDerivations: ['categorized'],
+            timePrecisions: ['day'],
+            usageScopes: ['this-mac']
+          },
           tokenAuthority: 'local-observation'
         }
       ]

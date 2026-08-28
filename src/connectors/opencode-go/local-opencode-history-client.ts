@@ -85,7 +85,7 @@ export class CliOpenCodeLocalHistoryClient implements OpenCodeGoLocalHistoryClie
       SUM(tokens_reasoning) AS reasoningTokens,
       SUM(tokens_cache_read) AS cacheReadTokens,
       SUM(tokens_cache_write) AS cacheWriteTokens,
-      MAX(time_updated) AS observedAtMs
+      CAST(strftime('%s', day) AS INTEGER) * 1000 AS observedAtMs
     FROM normalized
     WHERE day >= date('now', '-90 days')
     GROUP BY day, model

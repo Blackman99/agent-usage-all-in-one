@@ -25,6 +25,7 @@ import type {
   TokenModelAttribution,
   TokenTimePrecision,
   TokenTotalDerivation,
+  TokenUsageScope,
   UsageOverview,
   UsageQuery,
   UsageRepository
@@ -83,6 +84,7 @@ interface TokenRow {
   unclassified_tokens: number | null;
   total_derivations: string | null;
   time_precisions: string | null;
+  usage_scopes: string | null;
   authorities: string | null;
 }
 
@@ -121,6 +123,7 @@ interface UsageHistoryRow {
   total_derivation: TokenTotalDerivation;
   model_attribution: TokenModelAttribution;
   time_precision: TokenTimePrecision;
+  usage_scope: TokenUsageScope;
 }
 
 interface MutableTokenEvidence {
@@ -131,6 +134,7 @@ interface MutableTokenEvidence {
   unclassifiedTokens: number;
   totalDerivations: Set<TokenTotalDerivation>;
   timePrecisions: Set<TokenTimePrecision>;
+  usageScopes: Set<TokenUsageScope>;
 }
 
 interface ExchangeRateRow {
@@ -317,8 +321,8 @@ export class SqliteUsageRepository implements UsageRepository {
            cache_read_tokens, cache_write_tokens, authority,
            source_reported_total_tokens, unclassified_tokens, total_derivation,
            reasoning_semantics, cache_read_semantics, cache_write_semantics,
-           model_attribution, time_precision
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           model_attribution, time_precision, usage_scope
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            billing_domain_id = excluded.billing_domain_id,
            model = excluded.model,
@@ -338,7 +342,8 @@ export class SqliteUsageRepository implements UsageRepository {
            cache_read_semantics = excluded.cache_read_semantics,
            cache_write_semantics = excluded.cache_write_semantics,
            model_attribution = excluded.model_attribution,
-           time_precision = excluded.time_precision`
+           time_precision = excluded.time_precision,
+           usage_scope = excluded.usage_scope`
       );
       for (const observation of snapshot.usage) {
         const normalized = normalizeTokenObservation(observation);
@@ -363,7 +368,8 @@ export class SqliteUsageRepository implements UsageRepository {
           normalized.tokenSemantics.cacheRead,
           normalized.tokenSemantics.cacheWrite,
           normalized.modelAttribution,
-          normalized.timePrecision
+          normalized.timePrecision,
+          normalized.usageScope
         );
       }
 
@@ -855,6 +861,7 @@ export class SqliteUsageRepository implements UsageRepository {
            COALESCE(SUM(unclassified_tokens), 0) AS unclassified_tokens,
            GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
            GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
+           GROUP_CONCAT(DISTINCT usage_scope) AS usage_scopes,
            GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations WHERE provider_id = ?`
       )
@@ -940,6 +947,7 @@ export class SqliteUsageRepository implements UsageRepository {
                 COALESCE(SUM(unclassified_tokens), 0) AS unclassified_tokens,
                 GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
                 GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
+                GROUP_CONCAT(DISTINCT usage_scope) AS usage_scopes,
                 GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations WHERE provider_id = ? AND billing_domain_id = ?`
       )
@@ -1112,7 +1120,8 @@ export class SqliteUsageRepository implements UsageRepository {
       .prepare(
         `SELECT model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
                 cache_read_tokens, cache_write_tokens, source_reported_total_tokens,
-                unclassified_tokens, total_derivation, model_attribution, time_precision
+                unclassified_tokens, total_derivation, model_attribution, time_precision,
+                usage_scope
          FROM usage_observations
          WHERE provider_id = ? AND billing_domain_id = ?
            AND observed_at >= ? AND observed_at < ?
@@ -1296,6 +1305,7 @@ export class SqliteUsageRepository implements UsageRepository {
         cache_write_semantics TEXT NOT NULL DEFAULT 'separate',
         model_attribution TEXT NOT NULL DEFAULT 'known',
         time_precision TEXT NOT NULL DEFAULT 'unknown',
+        usage_scope TEXT NOT NULL DEFAULT 'unknown',
         PRIMARY KEY (provider_id, id),
         FOREIGN KEY (provider_id, billing_domain_id)
           REFERENCES billing_domains(provider_id, id) ON DELETE CASCADE
@@ -1449,12 +1459,13 @@ export class SqliteUsageRepository implements UsageRepository {
     for (const [name, definition] of [
       ['source_reported_total_tokens', 'INTEGER'],
       ['unclassified_tokens', 'INTEGER NOT NULL DEFAULT 0'],
-      ["total_derivation", "TEXT NOT NULL DEFAULT 'legacy-total'"],
-      ["reasoning_semantics", "TEXT NOT NULL DEFAULT 'included-in-output'"],
-      ["cache_read_semantics", "TEXT NOT NULL DEFAULT 'separate'"],
-      ["cache_write_semantics", "TEXT NOT NULL DEFAULT 'separate'"],
-      ["model_attribution", "TEXT NOT NULL DEFAULT 'known'"],
-      ["time_precision", "TEXT NOT NULL DEFAULT 'unknown'"]
+      ['total_derivation', "TEXT NOT NULL DEFAULT 'legacy-total'"],
+      ['reasoning_semantics', "TEXT NOT NULL DEFAULT 'included-in-output'"],
+      ['cache_read_semantics', "TEXT NOT NULL DEFAULT 'separate'"],
+      ['cache_write_semantics', "TEXT NOT NULL DEFAULT 'separate'"],
+      ['model_attribution', "TEXT NOT NULL DEFAULT 'known'"],
+      ['time_precision', "TEXT NOT NULL DEFAULT 'unknown'"],
+      ['usage_scope', "TEXT NOT NULL DEFAULT 'unknown'"]
     ] as const) {
       if (!usageColumns.some((column) => column.name === name)) {
         this.#database.exec(`ALTER TABLE usage_observations ADD COLUMN ${name} ${definition}`);
@@ -1569,7 +1580,8 @@ function mapTokenEvidence(tokens: TokenRow): TokenEvidence {
     classifiedTokens,
     classificationCoverage: recordedTokens === 0 ? null : classifiedTokens / recordedTokens,
     totalDerivations: commaSeparatedValues<TokenTotalDerivation>(tokens.total_derivations),
-    timePrecisions: commaSeparatedValues<TokenTimePrecision>(tokens.time_precisions)
+    timePrecisions: commaSeparatedValues<TokenTimePrecision>(tokens.time_precisions),
+    usageScopes: commaSeparatedValues<TokenUsageScope>(tokens.usage_scopes)
   };
 }
 
@@ -1581,7 +1593,8 @@ function emptyTokenEvidence(): MutableTokenEvidence {
     observationCount: 0,
     unclassifiedTokens: 0,
     totalDerivations: new Set(),
-    timePrecisions: new Set()
+    timePrecisions: new Set(),
+    usageScopes: new Set()
   };
 }
 
@@ -1595,13 +1608,11 @@ function addTokenEvidence(target: MutableTokenEvidence, row: UsageHistoryRow): v
   }
   target.totalDerivations.add(row.total_derivation);
   target.timePrecisions.add(row.time_precision);
+  target.usageScopes.add(row.usage_scope);
 }
 
 function finishTokenEvidence(evidence: MutableTokenEvidence): TokenEvidence {
-  const classifiedTokens = Math.max(
-    0,
-    evidence.recordedTokens - evidence.unclassifiedTokens
-  );
+  const classifiedTokens = Math.max(0, evidence.recordedTokens - evidence.unclassifiedTokens);
   return {
     recordedTokens: evidence.recordedTokens,
     sourceReportedTokens: evidence.sourceReportedTokens,
@@ -1612,14 +1623,13 @@ function finishTokenEvidence(evidence: MutableTokenEvidence): TokenEvidence {
     classificationCoverage:
       evidence.recordedTokens === 0 ? null : classifiedTokens / evidence.recordedTokens,
     totalDerivations: [...evidence.totalDerivations].sort(),
-    timePrecisions: [...evidence.timePrecisions].sort()
+    timePrecisions: [...evidence.timePrecisions].sort(),
+    usageScopes: [...evidence.usageScopes].sort()
   };
 }
 
 function commaSeparatedValues<T extends string>(value: string | null): T[] {
-  return value
-    ? ([...new Set(value.split(',').filter(Boolean))].sort() as T[])
-    : [];
+  return value ? ([...new Set(value.split(',').filter(Boolean))].sort() as T[]) : [];
 }
 
 function priceSnapshotFromRow(row: CostRow): PriceSnapshotReference | null {

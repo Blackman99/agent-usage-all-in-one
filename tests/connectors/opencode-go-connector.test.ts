@@ -42,7 +42,8 @@ describe('OpenCodeGoConnector', () => {
       clock: () => new Date('2026-08-28T02:00:00.000Z')
     });
 
-    expect(await connector.collect()).toMatchObject({
+    const snapshot = await connector.collect();
+    expect(snapshot).toMatchObject({
       provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
       billingDomains: [{ id: 'go-subscription', displayName: 'OpenCode Go subscription' }],
       quotaBuckets: [
@@ -64,10 +65,18 @@ describe('OpenCodeGoConnector', () => {
         {
           id: 'opencode-session:2026-08-28:opencode-go/deepseek-v4-flash',
           model: 'opencode-go/deepseek-v4-flash',
-          totalTokens: 1200,
           inputTokens: 700,
-          outputTokens: 300,
+          outputTokens: 250,
+          reasoningTokens: 50,
           cacheReadTokens: 200,
+          tokenSemantics: {
+            reasoning: 'separate',
+            cacheRead: 'separate',
+            cacheWrite: 'separate'
+          },
+          modelAttribution: 'known',
+          timePrecision: 'day',
+          usageScope: 'this-mac',
           authority: 'local-observation'
         }
       ],
@@ -87,6 +96,7 @@ describe('OpenCodeGoConnector', () => {
         })
       ])
     });
+    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
   });
 
   it('returns local history with an actionable warning when account quota is unavailable', async () => {
@@ -213,9 +223,9 @@ const localSessionFixture = {
   model: 'opencode-go/deepseek-v4-flash',
   cost: 0.42,
   inputTokens: 700,
-  outputTokens: 300,
-  reasoningTokens: 0,
+  outputTokens: 250,
+  reasoningTokens: 50,
   cacheReadTokens: 200,
   cacheWriteTokens: 0,
-  observedAtMs: Date.parse('2026-08-28T01:00:00.000Z')
+  observedAtMs: Date.parse('2026-08-28T00:00:00.000Z')
 };

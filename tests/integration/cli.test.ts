@@ -51,7 +51,23 @@ describe('agent-usage CLI', () => {
               authority: 'official-account' as const
             }
           ],
-          usage: [],
+          usage: [
+            {
+              id: 'demo-day',
+              billingDomainId: 'subscription',
+              model: null,
+              observedAt: '2026-08-28T00:00:00.000Z',
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              sourceReportedTotalTokens: 100,
+              modelAttribution: 'unclassified',
+              timePrecision: 'day',
+              usageScope: 'account-wide',
+              authority: 'official-account' as const
+            }
+          ],
           costs: [],
           observedAt: '2026-08-28T02:00:00.000Z'
         };
@@ -99,6 +115,9 @@ describe('agent-usage CLI', () => {
       '5 hour: 42% used (source official-account at 2026-08-28T02:00:00.000Z)'
     );
     expect(textStatus.stdout).toContain('source official-account at 2026-08-28T02:00:00.000Z');
+    expect(textStatus.stdout).toContain(
+      '0/100 classified; 100 unclassified; precision day; scope account-wide'
+    );
 
     const sevenDay = await runCli(['--home', home, 'status', '--json', '--window', '7d']);
     expect(sevenDay.exitCode).toBe(0);

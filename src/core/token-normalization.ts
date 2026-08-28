@@ -59,6 +59,7 @@ export function normalizeTokenObservation(
     tokenSemantics,
     modelAttribution,
     timePrecision: observation.timePrecision ?? 'unknown',
+    usageScope: observation.usageScope ?? 'unknown',
     recordedTokens,
     unclassifiedTokens,
     totalDerivation

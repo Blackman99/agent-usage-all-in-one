@@ -391,6 +391,29 @@
     return t(keys[coverage]);
   }
 
+  function timePrecisionLabel(
+    precision: ProviderOverview['tokenEvidence']['timePrecisions'][number]
+  ): string {
+    const keys: Record<ProviderOverview['tokenEvidence']['timePrecisions'][number], MessageKey> = {
+      event: 'precisionEvent',
+      hour: 'precisionHour',
+      day: 'precisionDay',
+      'billing-period': 'precisionBillingPeriod',
+      unknown: 'precisionUnknown'
+    };
+    return t(keys[precision]);
+  }
+
+  function usageScopeLabel(
+    scope: ProviderOverview['tokenEvidence']['usageScopes'][number]
+  ): string {
+    return scope === 'account-wide'
+      ? t('accountWide')
+      : scope === 'this-mac'
+        ? t('localOnly')
+        : t('unknown');
+  }
+
   function coverageDimensionLabel(coverage: CoverageDimension): string {
     const keys: Record<CoverageDimension, MessageKey> = {
       quota: 'quota',
@@ -453,12 +476,7 @@
   function activeHistory(domain: BillingDomainOverview): BillingHistory {
     return (
       domain.history ??
-      fallbackHistory(
-        domain.tokenTotals,
-        domain.costs,
-        domain.tokenAuthority,
-        domain.tokenEvidence
-      )
+      fallbackHistory(domain.tokenTotals, domain.costs, domain.tokenAuthority, domain.tokenEvidence)
     );
   }
 
@@ -623,7 +641,8 @@
       classifiedTokens: 0,
       classificationCoverage: null,
       totalDerivations: [],
-      timePrecisions: []
+      timePrecisions: [],
+      usageScopes: []
     };
   }
 
@@ -981,8 +1000,17 @@
             {#if tokenAuthority}
               <p class="token-scope">
                 {t('source')}: {authorityLabel(tokenAuthority)}
-                {tokenAuthority === 'local-observation' ? ` · ${t('localOnly')}` : ''}
                 · {formatReset(history.lastObservedAt ?? null)}
+                <br />
+                {t('scope')}:
+                {(history.tokenEvidence?.usageScopes ?? []).map(usageScopeLabel).join(' + ') ||
+                  t('unknown')}
+                · {t('timePrecision')}:
+                {(history.tokenEvidence?.timePrecisions ?? [])
+                  .map(timePrecisionLabel)
+                  .join(' + ') || t('unknown')}
+                · {t('unclassified')}:
+                {formatNumber(history.tokenEvidence?.unclassifiedTokens ?? 0)}
               </p>
               <dl class="tokens">
                 <div>

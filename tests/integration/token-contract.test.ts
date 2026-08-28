@@ -51,9 +51,7 @@ describe('expanded token contract', () => {
 
     const application = new UsageApplication({ repository, connectors: [] });
     const exported = JSON.parse(
-      (
-        await application.exportUsage({ format: 'json', window: '7d', timeZone: 'UTC' })
-      ).body
+      (await application.exportUsage({ format: 'json', window: '7d', timeZone: 'UTC' })).body
     ) as { version: number; rows: Array<Record<string, unknown>> };
     expect(exported.version).toBe(2);
     expect(exported.rows[0]).toMatchObject({
@@ -79,7 +77,8 @@ describe('expanded token contract', () => {
     const row = database
       .prepare(
         `SELECT id, authority, observed_at, total_tokens, source_reported_total_tokens,
-                unclassified_tokens, total_derivation, model_attribution, time_precision
+                unclassified_tokens, total_derivation, model_attribution, time_precision,
+                usage_scope
          FROM usage_observations WHERE provider_id = 'legacy' AND id = 'legacy-observation'`
       )
       .get() as Record<string, unknown>;
@@ -92,7 +91,8 @@ describe('expanded token contract', () => {
       unclassified_tokens: 125,
       total_derivation: 'legacy-total',
       model_attribution: 'unclassified',
-      time_precision: 'unknown'
+      time_precision: 'unknown',
+      usage_scope: 'unknown'
     });
     const knownRemainder = database
       .prepare(

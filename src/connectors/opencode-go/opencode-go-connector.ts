@@ -122,16 +122,19 @@ function mapLocalUsage(session: OpenCodeLocalSession): UsageObservation {
     billingDomainId: 'go-subscription',
     model: session.model,
     observedAt: new Date(session.observedAtMs).toISOString(),
-    totalTokens:
-      session.inputTokens +
-      session.outputTokens +
-      session.reasoningTokens +
-      session.cacheReadTokens +
-      session.cacheWriteTokens,
     inputTokens: session.inputTokens,
-    outputTokens: session.outputTokens + session.reasoningTokens,
+    outputTokens: session.outputTokens,
+    reasoningTokens: session.reasoningTokens,
     cacheReadTokens: session.cacheReadTokens,
     cacheWriteTokens: session.cacheWriteTokens,
+    tokenSemantics: {
+      reasoning: 'separate',
+      cacheRead: 'separate',
+      cacheWrite: 'separate'
+    },
+    modelAttribution: 'known',
+    timePrecision: 'day',
+    usageScope: 'this-mac',
     authority: 'local-observation'
   };
 }

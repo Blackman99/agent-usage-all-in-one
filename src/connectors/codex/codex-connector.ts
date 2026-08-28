@@ -127,13 +127,16 @@ function mapTokenUsage(response: CodexTokenUsageResponse | null): UsageObservati
   return (response?.dailyUsageBuckets ?? []).map((bucket) => ({
     id: `codex:daily:${bucket.startDate}`,
     billingDomainId: 'subscription',
-    model: 'all-models',
+    model: null,
     observedAt: `${bucket.startDate}T00:00:00.000Z`,
-    totalTokens: bucket.tokens,
+    sourceReportedTotalTokens: bucket.tokens,
     inputTokens: 0,
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    modelAttribution: 'unclassified',
+    timePrecision: 'day',
+    usageScope: 'account-wide',
     authority: 'official-account'
   }));
 }

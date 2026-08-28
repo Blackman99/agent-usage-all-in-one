@@ -219,6 +219,18 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
                 }
               ],
               tokenTotals: { total: 1250, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              tokenEvidence: tokenEvidenceFixture(
+                { total: 1250 },
+                {
+                  sourceReportedTokens: 1250,
+                  unclassifiedTokens: 1250,
+                  classifiedTokens: 0,
+                  classificationCoverage: 0,
+                  totalDerivations: ['source-reported'],
+                  timePrecisions: ['day'],
+                  usageScopes: ['account-wide']
+                }
+              ),
               tokenAuthority: 'official-account'
             },
             'subscription',
@@ -235,7 +247,10 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   await expect(provider.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible();
   await expect(provider.getByText('5 hour', { exact: true })).toBeVisible();
   await expect(provider.getByText('Week', { exact: true })).toBeVisible();
-  await expect(provider.getByText('1,250')).toBeVisible();
+  await expect(provider.getByText('1,250', { exact: true })).toBeVisible();
+  await expect(provider).toContainText(/Scope:\s*Account-wide/);
+  await expect(provider).toContainText(/Precision:\s*Day/);
+  await expect(provider).toContainText(/Unclassified:\s*1,250/);
   await expect(provider.getByText('Codex account usage is unavailable.')).toBeVisible();
   await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toBeVisible();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
@@ -305,10 +320,19 @@ test('labels OpenCode Go account quota separately from this-Mac token history', 
               tokenTotals: {
                 total: 1200,
                 input: 700,
-                output: 300,
+                output: 250,
+                reasoning: 50,
                 cacheRead: 200,
                 cacheWrite: 0
               },
+              tokenEvidence: tokenEvidenceFixture(
+                { total: 1200 },
+                {
+                  totalDerivations: ['categorized'],
+                  timePrecisions: ['day'],
+                  usageScopes: ['this-mac']
+                }
+              ),
               tokenAuthority: 'local-observation'
             },
             'go-subscription',
@@ -325,7 +349,9 @@ test('labels OpenCode Go account quota separately from this-Mac token history', 
   await expect(provider.getByText('Scope: Account-wide')).toBeVisible();
   await expect(provider.getByText('Limit: $12 USD')).toBeVisible();
   await expect(provider.getByText('Use balance: Unknown')).toBeVisible();
-  await expect(provider.getByText('Source: Local Observation · This Mac only')).toBeVisible();
+  await expect(provider).toContainText('Source: Local observation');
+  await expect(provider).toContainText(/Scope:\s*This Mac only/);
+  await expect(provider).toContainText(/Precision:\s*Day/);
   await expect(provider.getByText('1,200')).toBeVisible();
 });
 
@@ -408,7 +434,8 @@ test('keeps Claude All models and Fable-only quota separate from local OTLP toke
   await expect(provider.getByText('Week · All models')).toBeVisible();
   await expect(provider.getByText('Week · Fable only')).toBeVisible();
   await expect(provider.getByText('Source: Official Client')).toHaveCount(3);
-  await expect(provider.getByText('Source: Local Observation · This Mac only')).toBeVisible();
+  await expect(provider).toContainText('Source: Local observation');
+  await expect(provider).toContainText(/Scope:\s*Unknown/);
   await expect(provider.getByText('575')).toBeVisible();
 });
 
@@ -471,7 +498,8 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expect(provider.getByText('Weekly limit')).toBeVisible();
   await expect(provider.getByText('Plan: SuperGrok Heavy')).toBeVisible();
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
-  await expect(provider.getByText('Source: Local Observation · This Mac only')).toBeVisible();
+  await expect(provider).toContainText('Source: Local observation');
+  await expect(provider).toContainText(/Scope:\s*Unknown/);
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
   await expect(
     provider.getByText('Open Grok Build and run /usage, then retry refresh.')
@@ -681,6 +709,7 @@ function withTokenDomain<
   T extends {
     quotaBuckets: unknown[];
     tokenTotals: Record<string, number>;
+    tokenEvidence?: Record<string, unknown>;
     tokenAuthority: string;
   }
 >(
@@ -689,19 +718,29 @@ function withTokenDomain<
   displayName: string,
   observedAt: string
 ): T & { billingDomains: unknown[] } {
+  const tokenEvidence =
+    provider.tokenEvidence ?? tokenEvidenceFixture({ total: provider.tokenTotals.total });
   return {
     ...provider,
+    tokenEvidence,
     billingDomains: [
       {
         id,
         displayName,
         quotaBuckets: provider.quotaBuckets,
         tokenTotals: provider.tokenTotals,
+        tokenEvidence,
         tokenAuthority: provider.tokenAuthority,
         costs: [],
         balances: [],
         invoices: [],
-        history: tokenHistoryFixture(provider.tokenTotals, [provider.tokenAuthority], observedAt)
+        history: tokenHistoryFixture(
+          provider.tokenTotals,
+          [provider.tokenAuthority],
+          observedAt,
+          [],
+          tokenEvidence
+        )
       }
     ]
   };
@@ -711,7 +750,8 @@ function tokenHistoryFixture(
   tokenTotals: Record<string, number>,
   authorities: string[],
   lastObservedAt: string | null,
-  costs: unknown[] = []
+  costs: unknown[] = [],
+  tokenEvidence: Record<string, unknown> = tokenEvidenceFixture({ total: tokenTotals.total })
 ): unknown {
   return {
     window: '24h',
@@ -719,12 +759,32 @@ function tokenHistoryFixture(
     end: '2026-08-28T02:00:00.000Z',
     timeZone: 'Asia/Shanghai',
     tokenTotals,
+    tokenEvidence,
     models: [],
     days: [],
     costs,
     exchangeRates: [],
     authorities,
     lastObservedAt
+  };
+}
+
+function tokenEvidenceFixture(
+  tokenTotals: { total: number },
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    recordedTokens: tokenTotals.total,
+    sourceReportedTokens: 0,
+    sourceReportedObservationCount: 0,
+    observationCount: tokenTotals.total > 0 ? 1 : 0,
+    unclassifiedTokens: 0,
+    classifiedTokens: tokenTotals.total,
+    classificationCoverage: tokenTotals.total > 0 ? 1 : null,
+    totalDerivations: tokenTotals.total > 0 ? ['legacy-total'] : [],
+    timePrecisions: tokenTotals.total > 0 ? ['unknown'] : [],
+    usageScopes: tokenTotals.total > 0 ? ['unknown'] : [],
+    ...overrides
   };
 }
 

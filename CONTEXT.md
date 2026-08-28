@@ -43,6 +43,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Time precision**: The smallest time unit supported by an observation:
   event, hour, day, billing period, or unknown. A precise timestamp does not
   upgrade a source's actual precision.
+- **Usage scope**: The population represented by a Token observation:
+  account-wide, this Mac, or unknown. Local authority does not by itself prove
+  that a value is limited to one machine.
 - **Cost record**: An actual billed amount, a fixed subscription cost, or an API
   retail-price estimate. These cost kinds remain separate.
 - **Data authority**: The provenance level of a value: official account,
@@ -76,3 +79,5 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     summaries but never to per-model rankings.
 11. Migration preserves observation identity, authority, and observed time and
     does not invent source totals, model attribution, or time precision.
+12. Account-wide and this-Mac observations retain their scope through history,
+    CLI output, and export; unlike scopes are never presented as interchangeable.

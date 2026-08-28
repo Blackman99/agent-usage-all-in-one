@@ -21,8 +21,9 @@ describe('CodexConnector', () => {
       }
     };
     const connector = new CodexConnector(client, () => new Date('2026-08-28T02:00:00.000Z'));
+    const snapshot = await connector.collect();
 
-    expect(await connector.collect()).toMatchObject({
+    expect(snapshot).toMatchObject({
       provider: { id: 'codex', displayName: 'Codex' },
       billingDomains: [{ id: 'subscription', displayName: 'Codex subscription' }],
       quotaBuckets: [
@@ -45,13 +46,18 @@ describe('CodexConnector', () => {
         {
           id: 'codex:daily:2026-08-27',
           observedAt: '2026-08-27T00:00:00.000Z',
-          totalTokens: 1250,
+          sourceReportedTotalTokens: 1250,
           inputTokens: 0,
           outputTokens: 0,
+          model: null,
+          modelAttribution: 'unclassified',
+          timePrecision: 'day',
+          usageScope: 'account-wide',
           authority: 'official-account'
         }
       ]
     });
+    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
   });
 
   it('keeps quota available when account token activity is unsupported', async () => {

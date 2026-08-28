@@ -33,7 +33,9 @@ The contract records event, hour, day, billing-period, or unknown time
 precision independently of its storage timestamp. Legacy observations default
 to unknown precision, known model attribution unless their stored model is a
 recognized aggregate placeholder, and the historical semantics of reasoning
-included in output with cache reads and writes separate.
+included in output with cache reads and writes separate. Usage scope is also
+independent evidence: account-wide, this Mac, or unknown. Legacy rows default
+to unknown rather than inferring scope from authority.
 
 SQLite migration is additive and idempotent. It adds evidence columns with
 honest defaults, backfills only recognized aggregate model placeholders, and

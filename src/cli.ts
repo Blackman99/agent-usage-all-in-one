@@ -377,12 +377,21 @@ function formatOverview(overview: UsageOverview): string {
           return `${domain.displayName}: ${domain.history.window} ${domain.history.tokenTotals.total} tokens (${formatEvidence(
             domain.history.authorities?.join('+') ?? domain.tokenAuthority ?? 'unavailable',
             domain.history.lastObservedAt ?? provider.freshness.lastSuccessAt
-          )})${costs ? `; ${costs}` : ''}`;
+          )}; ${formatTokenEvidence(domain.history.tokenEvidence)})${costs ? `; ${costs}` : ''}`;
         })
         .join(' | ');
       return `${provider.displayName} — ${quota || 'quota unavailable'}${domains ? ` — ${domains}` : ''}${diagnostic}`;
     })
     .join('\n')}\n`;
+}
+
+function formatTokenEvidence(
+  evidence: UsageOverview['providers'][number]['tokenEvidence']
+): string {
+  const precisions =
+    evidence.timePrecisions.length > 0 ? evidence.timePrecisions.join('+') : 'unknown';
+  const scopes = evidence.usageScopes.length > 0 ? evidence.usageScopes.join('+') : 'unknown';
+  return `${evidence.classifiedTokens}/${evidence.recordedTokens} classified; ${evidence.unclassifiedTokens} unclassified; precision ${precisions}; scope ${scopes}`;
 }
 
 function formatEvidence(authority: string, observedAt: string | null | undefined): string {
