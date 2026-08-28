@@ -354,6 +354,19 @@
     return new Intl.NumberFormat(locale).format(value);
   }
 
+  function formatCompactNumber(value: number): string {
+    if (Math.abs(value) < 10_000) return formatNumber(value);
+    return new Intl.NumberFormat(locale, {
+      compactDisplay: 'short',
+      maximumFractionDigits: 1,
+      notation: 'compact'
+    }).format(value);
+  }
+
+  function tokenValueLabel(value: number): string {
+    return `${formatNumber(value)} ${t('tokens')}`;
+  }
+
   function formatPercent(value: number | null): string {
     if (value === null) return t('notAvailable');
     return new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }).format(
@@ -605,12 +618,15 @@
     );
   }
 
-  function providerLogoPath(providerId: string): string | null {
-    const paths: Record<string, string> = {
-      codex: '/brands/openai.svg',
-      'claude-code': '/brands/claude.svg',
-      'opencode-go': '/brands/opencode.svg',
-      grok: '/brands/xai-dark.svg'
+  function providerLogoSources(providerId: string): { dark: string; light: string } | null {
+    const paths: Record<string, { dark: string; light: string }> = {
+      codex: { dark: '/brands/openai.svg', light: '/brands/openai.svg' },
+      'claude-code': { dark: '/brands/claude.svg', light: '/brands/claude.svg' },
+      'opencode-go': {
+        dark: '/brands/opencode-dark.svg',
+        light: '/brands/opencode-light.svg'
+      },
+      grok: { dark: '/brands/xai-dark.svg', light: '/brands/xai-light.svg' }
     };
     return paths[providerId] ?? null;
   }
@@ -955,10 +971,15 @@
           <div class="summary-metrics">
             <article>
               <span>{t('recordedTokens')}</span>
-              <strong data-testid="summary-recorded-tokens">
+              <strong
+                data-testid="summary-recorded-tokens"
+                aria-label={summary.recordedTokens === null
+                  ? t('notAvailable')
+                  : tokenValueLabel(summary.recordedTokens)}
+              >
                 {summary.recordedTokens === null
                   ? t('notAvailable')
-                  : formatNumber(summary.recordedTokens)}
+                  : formatCompactNumber(summary.recordedTokens)}
               </strong>
               <small>
                 {#if summary.recordedTokens === null}
@@ -1019,7 +1040,9 @@
               {#each summary.contributions as contribution (`${contribution.providerId}:${contribution.billingDomainId}`)}
                 <span>
                   {contribution.providerDisplayName} · {contribution.billingDomainDisplayName}
-                  <b>{formatNumber(contribution.recordedTokens)}</b>
+                  <b aria-label={tokenValueLabel(contribution.recordedTokens)}
+                    >{formatCompactNumber(contribution.recordedTokens)}</b
+                  >
                 </span>
               {/each}
             </div>
@@ -1037,20 +1060,19 @@
       {/if}
       <section class="providers" aria-label="Providers">
         {#each displayProviders(overview, connectors) as provider (provider.id)}
-          {@const logoPath = providerLogoPath(provider.id)}
+          {@const logo = providerLogoSources(provider.id)}
           <article class="provider-card">
             <div class="provider-heading">
               <div>
-                {#if logoPath}
-                  <img
-                    class="provider-logo"
-                    data-provider-logo={provider.id}
-                    src={logoPath}
-                    alt=""
-                  />
+                {#if logo}
+                  <picture class="provider-logo" data-provider-logo={provider.id}>
+                    <source media="(prefers-color-scheme: light)" srcset={logo.light} />
+                    <source media="(prefers-color-scheme: dark)" srcset={logo.dark} />
+                    <img src={logo.dark} alt="" />
+                  </picture>
                 {/if}
                 <div>
-                  <h2 data-provider-logo={logoPath ? undefined : provider.id}>
+                  <h2 data-provider-logo={logo ? undefined : provider.id}>
                     {provider.displayName}
                   </h2>
                   <p class="freshness" data-status={provider.freshness.status}>
@@ -1203,6 +1225,9 @@
                     </div>
                     <div
                       class="progress"
+                      class:progress-warning={(bucket.usedPercent ?? 0) >= 70 &&
+                        (bucket.usedPercent ?? 0) < 90}
+                      class:progress-critical={(bucket.usedPercent ?? 0) >= 90}
                       role="progressbar"
                       aria-label={bucket.label}
                       aria-valuemin="0"
@@ -1293,27 +1318,39 @@
                 <dl class="tokens">
                   <div>
                     <dt>{t('total')}</dt>
-                    <dd>{formatNumber(history.tokenTotals.total)}</dd>
+                    <dd aria-label={tokenValueLabel(history.tokenTotals.total)}>
+                      {formatCompactNumber(history.tokenTotals.total)}
+                    </dd>
                   </div>
                   <div>
                     <dt>{t('input')}</dt>
-                    <dd>{formatNumber(history.tokenTotals.input)}</dd>
+                    <dd aria-label={tokenValueLabel(history.tokenTotals.input)}>
+                      {formatCompactNumber(history.tokenTotals.input)}
+                    </dd>
                   </div>
                   <div>
                     <dt>{t('output')}</dt>
-                    <dd>{formatNumber(history.tokenTotals.output)}</dd>
+                    <dd aria-label={tokenValueLabel(history.tokenTotals.output)}>
+                      {formatCompactNumber(history.tokenTotals.output)}
+                    </dd>
                   </div>
                   <div>
                     <dt>{t('reasoning')}</dt>
-                    <dd>{formatNumber(history.tokenTotals.reasoning ?? 0)}</dd>
+                    <dd aria-label={tokenValueLabel(history.tokenTotals.reasoning ?? 0)}>
+                      {formatCompactNumber(history.tokenTotals.reasoning ?? 0)}
+                    </dd>
                   </div>
                   <div>
                     <dt>{t('cacheRead')}</dt>
-                    <dd>{formatNumber(history.tokenTotals.cacheRead)}</dd>
+                    <dd aria-label={tokenValueLabel(history.tokenTotals.cacheRead)}>
+                      {formatCompactNumber(history.tokenTotals.cacheRead)}
+                    </dd>
                   </div>
                   <div>
                     <dt>{t('cacheWrite')}</dt>
-                    <dd>{formatNumber(history.tokenTotals.cacheWrite)}</dd>
+                    <dd aria-label={tokenValueLabel(history.tokenTotals.cacheWrite)}>
+                      {formatCompactNumber(history.tokenTotals.cacheWrite)}
+                    </dd>
                   </div>
                 </dl>
               {:else}
@@ -1419,13 +1456,21 @@
                   <div>
                     <strong>{t('topModels')}</strong>
                     {#each history.models.slice(0, 3) as model (model.model)}
-                      <span>{model.model}<b>{formatNumber(model.tokenTotals.total)}</b></span>
+                      <span
+                        >{model.model}<b aria-label={tokenValueLabel(model.tokenTotals.total)}
+                          >{formatCompactNumber(model.tokenTotals.total)}</b
+                        ></span
+                      >
                     {/each}
                   </div>
                   <div>
                     <strong>{t('topDays')}</strong>
                     {#each history.days.slice(-3).reverse() as day (day.day)}
-                      <span>{day.day}<b>{formatNumber(day.tokenTotals.total)}</b></span>
+                      <span
+                        >{day.day}<b aria-label={tokenValueLabel(day.tokenTotals.total)}
+                          >{formatCompactNumber(day.tokenTotals.total)}</b
+                        ></span
+                      >
                     {/each}
                   </div>
                 </div>
@@ -1463,10 +1508,14 @@
           <div class="workbench-metrics">
             <article data-testid="workbench-recorded-tokens">
               <span>{t('recordedTokens')}</span>
-              <strong>
+              <strong
+                aria-label={workbench.recordedTokens === null
+                  ? t('notAvailable')
+                  : tokenValueLabel(workbench.recordedTokens)}
+              >
                 {workbench.recordedTokens === null
                   ? t('notAvailable')
-                  : formatNumber(workbench.recordedTokens)}
+                  : formatCompactNumber(workbench.recordedTokens)}
               </strong>
               <small
                 >{workbench.trend.granularity === 'hour'
@@ -1568,26 +1617,28 @@
                 </span>
               {/each}
             </div>
-            <table class="trend-data" aria-label={t('trendData')}>
-              <thead>
-                <tr>
-                  <th>{t('interval')}</th>
-                  <th>{t('providerEvidence')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each workbench.trend.buckets as bucket (bucket.start)}
+            <div class="trend-data">
+              <table aria-label={t('trendData')}>
+                <thead>
                   <tr>
-                    <td>{bucket.label}</td>
-                    <td>
-                      {bucket.gap
-                        ? t('gap')
-                        : bucket.segments.map(trendSegmentDescription).join('; ')}
-                    </td>
+                    <th>{t('interval')}</th>
+                    <th>{t('providerEvidence')}</th>
                   </tr>
-                {/each}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {#each workbench.trend.buckets as bucket (bucket.start)}
+                    <tr>
+                      <td>{bucket.label}</td>
+                      <td>
+                        {bucket.gap
+                          ? t('gap')
+                          : bucket.segments.map(trendSegmentDescription).join('; ')}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
           </article>
 
           <section
@@ -1616,7 +1667,7 @@
             </div>
             <ol class="ranking-list">
               {#each rankedModels(workbench, modelRankingSort) as model (model.id)}
-                {@const modelLogo = providerLogoPath(model.providerId)}
+                {@const modelLogo = providerLogoSources(model.providerId)}
                 <li>
                   <button
                     type="button"
@@ -1631,7 +1682,11 @@
                   >
                     <span class="ranking-identity">
                       {#if modelLogo}
-                        <img src={modelLogo} alt="" data-provider-logo={model.providerId} />
+                        <picture class="ranking-logo" data-provider-logo={model.providerId}>
+                          <source media="(prefers-color-scheme: light)" srcset={modelLogo.light} />
+                          <source media="(prefers-color-scheme: dark)" srcset={modelLogo.dark} />
+                          <img src={modelLogo.dark} alt="" />
+                        </picture>
                       {/if}
                       <span>
                         <strong>{model.model}</strong>
@@ -1640,7 +1695,9 @@
                       </span>
                     </span>
                     <span class="ranking-value">
-                      <strong>{formatNumber(model.tokenTotals.total)} {t('tokens')}</strong>
+                      <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
+                        >{formatCompactNumber(model.tokenTotals.total)} {t('tokens')}</strong
+                      >
                       <small>{t('tokenShare')}: {formatPercent(model.tokenShare)}</small>
                     </span>
                     <span class="ranking-value">
@@ -1664,7 +1721,9 @@
                 {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
                   <span>
                     {item.providerDisplayName} · {item.billingDomainDisplayName}
-                    <b>{formatNumber(item.tokenTotals.total)} {t('tokens')}</b>
+                    <b aria-label={tokenValueLabel(item.tokenTotals.total)}
+                      >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
+                    >
                     <small>{formatPercent(item.tokenShare)}</small>
                   </span>
                 {/each}
@@ -2049,8 +2108,29 @@
   }
 
   :global(html) {
-    color-scheme: dark;
-    background: #080a0f;
+    --page: #f5f5f2;
+    --surface: #ffffff;
+    --surface-subtle: #f7f7f4;
+    --surface-inset: #eeeeea;
+    --text: #171817;
+    --text-strong: #080908;
+    --muted: #60645f;
+    --border: #d7d8d2;
+    --border-soft: #e5e5df;
+    --button: #ffffff;
+    --selected: #e5e8f0;
+    --selected-text: #18213a;
+    --primary: #4f64c4;
+    --progress-track: #dedfd9;
+    --backdrop: rgba(18, 19, 18, 0.45);
+    --warning-bg: #fff8ed;
+    --warning-border: #d9b47d;
+    --warning-text: #74400f;
+    --danger-bg: #fff4f2;
+    --danger-border: #d8a29e;
+    --danger-text: #922f2b;
+    color-scheme: light dark;
+    background: var(--page);
     font-family:
       Inter,
       ui-sans-serif,
@@ -2064,16 +2144,15 @@
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background:
-      radial-gradient(circle at 15% 0%, rgba(89, 120, 255, 0.13), transparent 32rem),
-      radial-gradient(circle at 95% 12%, rgba(73, 218, 165, 0.08), transparent 30rem), #080a0f;
-    color: #f4f6fa;
+    overflow-x: hidden;
+    background: var(--page);
+    color: var(--text);
   }
 
   .shell {
-    width: min(1180px, calc(100% - 40px));
+    width: min(1600px, calc(100% - 40px));
     margin: 0 auto;
-    padding: 72px 0 96px;
+    padding: 48px 0 80px;
   }
 
   header {
@@ -2096,7 +2175,7 @@
 
   h1 {
     margin: 0;
-    font-size: clamp(2.6rem, 7vw, 5.8rem);
+    font-size: clamp(2.5rem, 4.6vw, 4.2rem);
     font-weight: 620;
     letter-spacing: -0.065em;
     line-height: 0.92;
@@ -2165,7 +2244,7 @@
 
   .providers {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 48px;
   }
@@ -2454,6 +2533,26 @@
     object-fit: contain;
   }
 
+  .ranking-logo {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+  }
+
+  .ranking-logo img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 3px;
+    object-fit: contain;
+  }
+
+  .ranking-logo[data-provider-logo='codex'] {
+    border-radius: 6px;
+    background: #fff;
+  }
+
   .ranking-identity strong {
     overflow: hidden;
     color: #edf0f6;
@@ -2625,9 +2724,10 @@
     gap: 18px;
     margin-bottom: 18px;
     padding: 12px 14px;
-    border: 1px solid rgba(242, 164, 89, 0.2);
+    border: 1px solid var(--warning-border);
     border-radius: 13px;
-    background: rgba(33, 25, 20, 0.72);
+    background: var(--warning-bg);
+    color: var(--warning-text);
   }
 
   .risk-banner > div {
@@ -2636,7 +2736,7 @@
   }
 
   .risk-banner span {
-    color: #929baa;
+    color: var(--warning-text);
     font-size: 0.74rem;
   }
 
@@ -2644,10 +2744,10 @@
   .degraded button {
     min-height: 32px;
     padding: 0 11px;
-    border: 1px solid rgba(242, 164, 89, 0.35);
+    border: 1px solid var(--warning-border);
     border-radius: 9px;
     background: transparent;
-    color: #f2bd89;
+    color: var(--warning-text);
     cursor: pointer;
     font-size: 0.7rem;
   }
@@ -2656,10 +2756,10 @@
   .settings-error {
     margin: 0 0 14px;
     padding: 10px 12px;
-    border: 1px solid rgba(235, 106, 106, 0.28);
+    border: 1px solid var(--danger-border);
     border-radius: 10px;
-    background: rgba(120, 35, 35, 0.1);
-    color: #ffabab;
+    background: var(--danger-bg);
+    color: var(--danger-text);
     font-size: 0.74rem;
   }
 
@@ -2950,10 +3050,10 @@
 
   .provider-card,
   .state {
-    border: 1px solid rgba(122, 136, 164, 0.2);
-    border-radius: 24px;
-    background: linear-gradient(145deg, rgba(19, 23, 31, 0.96), rgba(12, 15, 21, 0.96));
-    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(15, 18, 16, 0.06);
   }
 
   .provider-card {
@@ -2972,10 +3072,10 @@
     gap: 7px;
     margin: 18px 0;
     padding: 12px 14px;
-    border: 1px solid rgba(242, 164, 89, 0.28);
+    border: 1px solid var(--warning-border);
     border-radius: 12px;
-    background: rgba(190, 104, 40, 0.09);
-    color: #f2bd89;
+    background: var(--warning-bg);
+    color: var(--warning-text);
     font-size: 0.75rem;
   }
 
@@ -3049,12 +3149,26 @@
   }
 
   .provider-logo {
+    display: grid;
+    place-items: center;
     width: 46px;
     height: 46px;
-    padding: 6px;
-    border-radius: 11px;
-    background: #f1ecec;
+    flex: 0 0 46px;
+    padding: 5px;
+    border-radius: 9px;
+    background: transparent;
+  }
+
+  .provider-logo img {
+    display: block;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
+  }
+
+  .provider-logo[data-provider-logo='codex'] {
+    padding: 8px;
+    background: #fff;
   }
 
   h2 {
@@ -3156,14 +3270,22 @@
     margin: 10px 0 9px;
     overflow: hidden;
     border-radius: 999px;
-    background: #242a36;
+    background: var(--progress-track);
   }
 
   .progress span {
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #6282ff, #7b9bff);
+    background: var(--primary);
+  }
+
+  .progress.progress-warning span {
+    background: #b06a16;
+  }
+
+  .progress.progress-critical span {
+    background: #c2413b;
   }
 
   .tokens {
@@ -3309,7 +3431,7 @@
     inset: 0;
     display: flex;
     justify-content: flex-end;
-    background: rgba(3, 5, 9, 0.7);
+    background: var(--backdrop);
     backdrop-filter: blur(8px);
   }
 
@@ -3319,7 +3441,7 @@
     inset: 0;
     display: flex;
     justify-content: flex-end;
-    background: rgba(3, 5, 9, 0.7);
+    background: var(--backdrop);
     backdrop-filter: blur(8px);
   }
 
@@ -3329,8 +3451,8 @@
     overflow-y: auto;
     border-left: 1px solid rgba(122, 136, 164, 0.22);
     outline: none;
-    background: #0b0e14;
-    box-shadow: -30px 0 80px rgba(0, 0, 0, 0.42);
+    background: var(--surface);
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.16);
   }
 
   .model-detail-header {
@@ -3498,8 +3620,8 @@
     overflow-y: auto;
     border-left: 1px solid rgba(122, 136, 164, 0.22);
     outline: none;
-    background: #0b0e14;
-    box-shadow: -30px 0 80px rgba(0, 0, 0, 0.42);
+    background: var(--surface);
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.16);
   }
 
   .settings-header {
@@ -3626,6 +3748,214 @@
   [data-settings-target]:focus-visible {
     border-color: #6f89ef !important;
     box-shadow: 0 0 0 3px rgba(98, 126, 239, 0.17);
+  }
+
+  /* Theme surfaces stay neutral so Provider identity comes from official artwork and data. */
+  .global-summary,
+  .token-money-workbench,
+  .privacy-section,
+  .monitoring-section,
+  .settings-content > section {
+    border-color: var(--border);
+    background: var(--surface);
+  }
+
+  .summary-metrics article,
+  .workbench-metrics article,
+  .workbench-trend,
+  .model-ranking,
+  .ranking-list button,
+  .billing-records div,
+  .history-rankings > div,
+  .tokens div,
+  .inline-connection,
+  .token-unavailable,
+  .settings-connections article,
+  .model-detail-summary span,
+  .model-token-breakdown div,
+  .model-observations article,
+  .model-price-evidence {
+    border-color: var(--border-soft);
+    background: var(--surface-subtle);
+  }
+
+  .segmented-control,
+  .history-toolbar,
+  .domain-tabs,
+  .trend-stack {
+    border-color: var(--border-soft);
+    background: var(--surface-inset);
+  }
+
+  .refresh,
+  .locale-toggle,
+  .settings-toggle {
+    border-color: var(--border);
+    background: var(--button);
+    color: var(--text);
+  }
+
+  .risk-banner span,
+  .degraded code {
+    color: var(--warning-text);
+  }
+
+  .refresh:hover:not(:disabled) {
+    border-color: var(--primary);
+    background: var(--surface-subtle);
+  }
+
+  .segmented-control button,
+  .history-toolbar button,
+  .domain-tabs button,
+  .eyebrow,
+  .section-label,
+  .subtitle,
+  .workbench-heading > div > p:not(.eyebrow),
+  .workbench-metrics span,
+  .workbench-metrics small,
+  .trend-heading span,
+  .gap-marker,
+  .trend-column small,
+  .trend-legend span,
+  .ranking-heading p,
+  .ranking-identity small,
+  .ranking-value small,
+  .unclassified-usage > strong,
+  .unclassified-usage > span,
+  .summary-metrics span,
+  .summary-metrics small,
+  .summary-contributions span,
+  .risk-banner span,
+  .privacy-section > div > p:not(.eyebrow),
+  .privacy-section small,
+  .diagnostics-grid span,
+  .diagnostics-grid small,
+  .diagnostics-grid p,
+  .monitoring-section > div > p:last-child,
+  .connection-meta,
+  .coverage-list,
+  .inline-connection summary,
+  .permission,
+  .secret-field,
+  .connection-actions button,
+  .token-scope,
+  .token-unavailable,
+  .freshness,
+  .quota-copy span,
+  .quota-meta,
+  dt,
+  .billing-records small,
+  .rate-evidence,
+  .history-rankings strong,
+  .history-rankings span,
+  .model-detail-summary span,
+  .model-observations span,
+  .model-observations small,
+  .model-price-evidence span,
+  .model-price-evidence small,
+  .model-evidence-empty,
+  .model-trend-table th,
+  .model-trend-table td,
+  .settings-header > div > p:last-child,
+  .settings-section-heading p,
+  .settings-connector-title span,
+  .settings-connections small,
+  .settings-connections article > p,
+  .settings-drawer .privacy-section > small {
+    color: var(--muted);
+  }
+
+  .workbench-metrics strong,
+  .trend-heading strong,
+  .ranking-heading h3,
+  .ranking-identity strong,
+  .ranking-value strong,
+  .unclassified-usage b,
+  .summary-metrics strong,
+  .summary-contributions b,
+  .inline-connection summary strong,
+  .coverage-list strong,
+  .token-unavailable strong,
+  .history-rankings b,
+  .model-detail-header button,
+  .model-detail-content section h3,
+  .model-detail-summary b,
+  .model-observations article,
+  .model-price-evidence p,
+  .model-trend-table th,
+  .settings-close {
+    color: var(--text-strong);
+  }
+
+  .segmented-control button[aria-pressed='true'],
+  .history-toolbar button[aria-pressed='true'],
+  .domain-tabs button[aria-selected='true'] {
+    background: var(--selected);
+    color: var(--selected-text);
+  }
+
+  .secret-field input {
+    border-color: var(--border);
+    background: var(--surface-inset);
+    color: var(--text);
+  }
+
+  .model-detail-header,
+  .settings-header {
+    border-color: var(--border);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :global(html) {
+      --page: #0d0f11;
+      --surface: #15181b;
+      --surface-subtle: #1b1f23;
+      --surface-inset: #101316;
+      --text: #eef0f2;
+      --text-strong: #ffffff;
+      --muted: #a1a8b1;
+      --border: #353b42;
+      --border-soft: #292e34;
+      --button: #171a1e;
+      --selected: #293249;
+      --selected-text: #f2f5ff;
+      --primary: #7d93ef;
+      --progress-track: #2a3036;
+      --backdrop: rgba(3, 5, 7, 0.7);
+      --warning-bg: #211912;
+      --warning-border: #684722;
+      --warning-text: #f0bd83;
+      --danger-bg: #241416;
+      --danger-border: #71363a;
+      --danger-text: #ffaaa5;
+    }
+
+    .provider-card,
+    .state {
+      box-shadow: none;
+    }
+  }
+
+  @media (min-width: 1440px) {
+    .providers {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .provider-card {
+      padding: 20px;
+    }
+
+    .tokens {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 759px) {
+    .providers {
+      grid-template-columns: 1fr;
+    }
   }
 
   @keyframes spin {

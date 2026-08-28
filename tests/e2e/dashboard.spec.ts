@@ -40,9 +40,10 @@ test('shows persisted provider usage and refreshes from the dashboard', async ({
 
   await expect(page).toHaveTitle('Agent Usage');
   await expect(page.getByRole('heading', { name: 'Agent Usage' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Demo Agent' })).toBeVisible();
+  const demoProvider = page.locator('.provider-card').filter({ hasText: 'Demo Agent' });
+  await expect(demoProvider.getByRole('heading', { name: 'Demo Agent' })).toBeVisible();
   await expect(page.getByText('42% used')).toBeVisible();
-  await expect(page.getByText('12,400')).toBeVisible();
+  await expect(demoProvider.getByLabel('12,400 Tokens')).toHaveText('12.4K');
   await expect(page.locator('.quota-meta')).toContainText(/in 3 hours/);
   expect(refreshRequests).toBe(1);
 
@@ -796,6 +797,122 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await page.keyboard.press('Escape');
   await expect(detail).toBeHidden();
   await expect(fableRow).toBeFocused();
+});
+
+test('follows system theme and keeps the usage dashboard responsive with local official artwork', async ({
+  page
+}) => {
+  const externalRequests: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (!['127.0.0.1', 'localhost'].includes(url.hostname) && url.protocol !== 'data:') {
+      externalRequests.push(request.url());
+    }
+  });
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 12_400, 'CNY'))
+    });
+  });
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(freshLaunch.stdout.trim());
+
+  const gridColumnCount = () =>
+    page.locator('.providers').evaluate((element) => {
+      return getComputedStyle(element).gridTemplateColumns.split(' ').length;
+    });
+  await expect.poll(gridColumnCount).toBe(2);
+  const lightBackground = await page.locator('body').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { color: style.color, image: style.backgroundImage, value: style.backgroundColor };
+  });
+  expect(lightBackground.image).toBe('none');
+  await expect
+    .poll(() =>
+      page
+        .locator('.provider-card')
+        .first()
+        .evaluate((element) => getComputedStyle(element).backgroundImage)
+    )
+    .toBe('none');
+  await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('12.4K');
+  await expect(page.getByTestId('summary-recorded-tokens')).toHaveAttribute(
+    'aria-label',
+    '12,400 Tokens'
+  );
+
+  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
+    const logo = page.locator(`picture[data-provider-logo="${providerId}"]`).first();
+    await expect(logo).toBeVisible();
+    await expect(logo.locator('img')).toHaveAttribute('src', /^\/brands\//);
+  }
+  await expect(
+    page.locator('picture[data-provider-logo="opencode-go"] source').first()
+  ).toHaveAttribute('srcset', '/brands/opencode-light.svg');
+  await expect(page.locator('picture[data-provider-logo="grok"] source').first()).toHaveAttribute(
+    'srcset',
+    '/brands/xai-light.svg'
+  );
+  expect(
+    await page
+      .locator('picture[data-provider-logo="opencode-go"] img')
+      .first()
+      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+  ).toBe('/brands/opencode-light.svg');
+  expect(
+    await page
+      .locator('picture[data-provider-logo="grok"] img')
+      .first()
+      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+  ).toBe('/brands/xai-light.svg');
+
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  await expect.poll(gridColumnCount).toBe(4);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(gridColumnCount).toBe(1);
+  const overflowingElements = await page.locator('body *').evaluateAll((elements) =>
+    elements
+      .filter(
+        (element) =>
+          !element.closest('.trend-data') &&
+          element.getBoundingClientRect().right > window.innerWidth + 1
+      )
+      .map((element) => ({
+        className: element.getAttribute('class'),
+        right: Math.round(element.getBoundingClientRect().right),
+        tagName: element.tagName
+      }))
+  );
+  expect(overflowingElements).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true
+  );
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const darkBackground = await page.locator('body').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { color: style.color, image: style.backgroundImage, value: style.backgroundColor };
+  });
+  expect(darkBackground.image).toBe('none');
+  expect(darkBackground.value).not.toBe(lightBackground.value);
+  expect(darkBackground.color).not.toBe(lightBackground.color);
+  expect(
+    await page
+      .locator('picture[data-provider-logo="opencode-go"] img')
+      .first()
+      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+  ).toBe('/brands/opencode-dark.svg');
+  expect(
+    await page
+      .locator('picture[data-provider-logo="grok"] img')
+      .first()
+      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+  ).toBe('/brands/xai-dark.svg');
+  expect(externalRequests).toEqual([]);
 });
 
 test('switches the complete catalog to Simplified Chinese without translating provider labels', async ({
