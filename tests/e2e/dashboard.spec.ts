@@ -877,6 +877,10 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   const requestedWindows: string[] = [];
   const requestedCurrencies: string[] = [];
+  let releaseDelayedWindowRequest = () => {};
+  const delayedWindowRequest = new Promise<void>((resolve) => {
+    releaseDelayedWindowRequest = resolve;
+  });
   await page.route('**/api/doctor', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -896,6 +900,7 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
     requestedWindows.push(window);
     requestedCurrencies.push(currency);
     const total = window === '24h' ? 100 : window === '7d' ? 700 : 3000;
+    if (window === '24h') await delayedWindowRequest;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(historyOverviewFixture(window, total, currency, 20))
@@ -946,6 +951,14 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(unknownProvider).toContainText('Unavailable');
   await expect(unknownProvider).not.toContainText('0 Tokens');
   await workbench.getByRole('button', { name: '24h' }).click();
+  await expect(workbench.getByTestId('workbench-skeleton')).toBeVisible();
+  await expect(workbench.getByRole('button', { name: '24h' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(workbench.getByTestId('usage-headline')).not.toBeVisible();
+  releaseDelayedWindowRequest();
+  await expect(workbench.getByTestId('workbench-skeleton')).toHaveCount(0);
   await expect(workbench.getByTestId('usage-headline')).toContainText('100');
   await workbench.getByRole('button', { name: '7d' }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
@@ -972,6 +985,72 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
     'true'
   );
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
+});
+
+test('supports hover, time-axis zoom, drag panning, and reset on the cost trend', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-28T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [],
+        providers: []
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    const url = new URL(route.request().url());
+    const window = url.searchParams.get('window') ?? '7d';
+    const currency = url.searchParams.get('currency') ?? 'CNY';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture(window, 700, currency, 20))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  const plot = workbench.getByTestId('trend-plot');
+  await expect(plot).toHaveAttribute('data-total-buckets', '7');
+  await expect(plot).toHaveAttribute('data-visible-buckets', '7');
+
+  const plotBox = await plot.boundingBox();
+  if (!plotBox) throw new Error('Trend plot has no visible bounds.');
+  await page.mouse.move(plotBox.x + 4, plotBox.y + plotBox.height / 2);
+  const tooltip = workbench.getByTestId('trend-tooltip');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText('Bucket 1');
+  await expect(tooltip).toContainText('History Agent');
+  await expect(tooltip).toContainText('CN¥9.00');
+
+  await page.mouse.move(plotBox.x + plotBox.width / 2, plotBox.y + plotBox.height / 2);
+  await plot.dispatchEvent('wheel', {
+    deltaY: -500,
+    clientX: plotBox.x + plotBox.width / 2
+  });
+  await expect
+    .poll(async () => Number(await plot.getAttribute('data-visible-buckets')))
+    .toBeLessThan(7);
+  const startBeforePan = Number(await plot.getAttribute('data-viewport-start'));
+  await page.mouse.move(plotBox.x + plotBox.width * 0.75, plotBox.y + plotBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(plotBox.x + plotBox.width * 0.25, plotBox.y + plotBox.height / 2);
+  await page.mouse.up();
+  await expect
+    .poll(async () => Number(await plot.getAttribute('data-viewport-start')))
+    .toBeGreaterThan(startBeforePan);
+
+  const resetTimeAxis = workbench.getByRole('button', { name: 'Reset time axis' });
+  await expect(resetTimeAxis).toBeEnabled();
+  await resetTimeAxis.click();
+  await expect(plot).toHaveAttribute('data-visible-buckets', '7');
+  await expect(plot).toHaveAttribute('data-viewport-start', '0');
 });
 
 test('downloads a redacted export and clears only the selected local scope', async ({ page }) => {

@@ -61,6 +61,11 @@
   let clearingData = false;
   let hardRebuilding = false;
   let workbenchLoading = false;
+  let trendViewportStart = 0;
+  let trendViewportSize: number | null = null;
+  let trendHoverIndex: number | null = null;
+  let trendPanOrigin: { clientX: number; viewportStart: number } | null = null;
+  let trendPanning = false;
   let processing: ProcessingStatus | null = null;
   let processingTimer: ReturnType<typeof setInterval> | null = null;
   let settingsOpen = false;
@@ -70,6 +75,9 @@
   let settingsPanel: HTMLElement | null = null;
   let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
   let destroyed = false;
+  let overviewRequestSequence = 0;
+  let workbenchRequestSequence = 0;
+  const minimumTrendBuckets = 4;
   const automaticRecoveryController = createAutomaticRecoveryController(() => automaticRefresh());
 
   $: metaDescription = translate(locale, 'metaDescription');
@@ -112,23 +120,26 @@
   }
 
   async function loadOverview(): Promise<void> {
+    const requestSequence = ++overviewRequestSequence;
+    const requestedWindow = selectedWindow;
+    const requestedCurrency = selectedCurrency;
     try {
       const parameters = new URLSearchParams({
-        window: selectedWindow,
+        window: requestedWindow,
         timeZone,
-        currency: selectedCurrency
+        currency: requestedCurrency
       });
       const response = await fetch(`/api/overview?${parameters}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const nextOverview = (await response.json()) as UsageOverview;
-      if (destroyed) return;
+      if (destroyed || requestSequence !== overviewRequestSequence) return;
       overview = nextOverview;
       overviewError = false;
       scheduleAutomaticRecovery();
     } catch {
-      overviewError = true;
+      if (requestSequence === overviewRequestSequence) overviewError = true;
     } finally {
-      if (!destroyed) loading = false;
+      if (!destroyed && requestSequence === overviewRequestSequence) loading = false;
     }
   }
 
@@ -731,15 +742,21 @@
   }
 
   async function selectWindow(window: HistoryWindow): Promise<void> {
+    if (selectedWindow === window && !workbenchLoading) return;
     selectedWindow = window;
+    resetTrendViewport();
     try {
       localStorage.setItem('agent-usage:history-window', window);
     } catch {
       // A disabled local preference store must not block usage queries.
     }
+    const requestSequence = ++workbenchRequestSequence;
     workbenchLoading = true;
-    await loadOverview();
-    workbenchLoading = false;
+    try {
+      await loadOverview();
+    } finally {
+      if (requestSequence === workbenchRequestSequence) workbenchLoading = false;
+    }
   }
 
   async function selectCurrency(currency: 'CNY' | 'USD'): Promise<void> {
@@ -750,9 +767,13 @@
     } catch {
       // A disabled local preference store must not block usage queries.
     }
+    const requestSequence = ++workbenchRequestSequence;
     workbenchLoading = true;
-    await loadOverview();
-    workbenchLoading = false;
+    try {
+      await loadOverview();
+    } finally {
+      if (requestSequence === workbenchRequestSequence) workbenchLoading = false;
+    }
   }
 
   function storedWindow(): HistoryWindow {
@@ -948,11 +969,149 @@
     return `${formatter.format(new Date(workbench.start))} – ${formatter.format(new Date(workbench.end))}`;
   }
 
+  type TrendBucket = UsageOverview['workbench']['trend']['buckets'][number];
+
+  function trendViewportBounds(
+    totalBuckets: number,
+    viewportStart = trendViewportStart,
+    viewportSize = trendViewportSize
+  ): { start: number; size: number } {
+    if (totalBuckets <= 0) return { start: 0, size: 0 };
+    const minimumSize = Math.min(minimumTrendBuckets, totalBuckets);
+    const size = Math.max(minimumSize, Math.min(viewportSize ?? totalBuckets, totalBuckets));
+    const start = Math.max(0, Math.min(viewportStart, totalBuckets - size));
+    return { start, size };
+  }
+
+  function visibleTrendBuckets(
+    workbench: UsageOverview['workbench'],
+    viewportStart = trendViewportStart,
+    viewportSize = trendViewportSize
+  ): TrendBucket[] {
+    const { start, size } = trendViewportBounds(
+      workbench.trend.buckets.length,
+      viewportStart,
+      viewportSize
+    );
+    return workbench.trend.buckets.slice(start, start + size);
+  }
+
+  function resetTrendViewport(): void {
+    trendViewportStart = 0;
+    trendViewportSize = null;
+    trendHoverIndex = null;
+    trendPanOrigin = null;
+    trendPanning = false;
+  }
+
+  function zoomTrend(totalBuckets: number, direction: 'in' | 'out', anchorRatio = 0.5): void {
+    if (totalBuckets <= 1) return;
+    const current = trendViewportBounds(totalBuckets);
+    const minimumSize = Math.min(minimumTrendBuckets, totalBuckets);
+    const nextSize =
+      direction === 'in'
+        ? Math.max(minimumSize, Math.round(current.size * 0.7))
+        : Math.min(totalBuckets, Math.ceil(current.size / 0.7));
+    if (nextSize === current.size) return;
+    const boundedAnchor = Math.max(0, Math.min(1, anchorRatio));
+    const anchorBucket = current.start + boundedAnchor * Math.max(0, current.size - 1);
+    const nextStart = Math.max(
+      0,
+      Math.min(
+        totalBuckets - nextSize,
+        Math.round(anchorBucket - boundedAnchor * Math.max(0, nextSize - 1))
+      )
+    );
+    trendViewportStart = nextStart;
+    trendViewportSize = nextSize === totalBuckets ? null : nextSize;
+    trendHoverIndex = null;
+  }
+
+  function handleTrendWheel(event: WheelEvent, totalBuckets: number): void {
+    if (event.deltaY === 0) return;
+    const bounds =
+      event.currentTarget instanceof HTMLElement
+        ? event.currentTarget.getBoundingClientRect()
+        : null;
+    const anchorRatio = bounds?.width ? (event.clientX - bounds.left) / bounds.width : 0.5;
+    zoomTrend(totalBuckets, event.deltaY < 0 ? 'in' : 'out', anchorRatio);
+  }
+
+  function updateTrendHover(event: PointerEvent, visibleBuckets: number): void {
+    if (!(event.currentTarget instanceof HTMLElement) || visibleBuckets === 0) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    trendHoverIndex = Math.round(ratio * Math.max(0, visibleBuckets - 1));
+  }
+
+  function handleTrendPointerDown(event: PointerEvent, totalBuckets: number): void {
+    const viewport = trendViewportBounds(totalBuckets);
+    if (!(event.currentTarget instanceof HTMLElement) || viewport.size >= totalBuckets) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    trendPanOrigin = { clientX: event.clientX, viewportStart: viewport.start };
+    trendPanning = true;
+  }
+
+  function handleTrendPointerMove(
+    event: PointerEvent,
+    totalBuckets: number,
+    visibleBuckets: number
+  ): void {
+    updateTrendHover(event, visibleBuckets);
+    if (!trendPanOrigin || !(event.currentTarget instanceof HTMLElement)) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const viewport = trendViewportBounds(totalBuckets);
+    const bucketShift = Math.round(
+      ((trendPanOrigin.clientX - event.clientX) / bounds.width) * viewport.size
+    );
+    trendViewportStart = Math.max(
+      0,
+      Math.min(totalBuckets - viewport.size, trendPanOrigin.viewportStart + bucketShift)
+    );
+  }
+
+  function finishTrendPan(event: PointerEvent): void {
+    if (
+      event.currentTarget instanceof HTMLElement &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    trendPanOrigin = null;
+    trendPanning = false;
+  }
+
+  function panTrend(totalBuckets: number, bucketDelta: number): void {
+    const viewport = trendViewportBounds(totalBuckets);
+    trendViewportStart = Math.max(
+      0,
+      Math.min(totalBuckets - viewport.size, viewport.start + bucketDelta)
+    );
+    trendHoverIndex = null;
+  }
+
+  function handleTrendKeydown(event: KeyboardEvent, totalBuckets: number): void {
+    if (event.key === '+' || event.key === '=') zoomTrend(totalBuckets, 'in');
+    else if (event.key === '-') zoomTrend(totalBuckets, 'out');
+    else if (event.key === 'ArrowLeft') panTrend(totalBuckets, -1);
+    else if (event.key === 'ArrowRight') panTrend(totalBuckets, 1);
+    else if (event.key === 'Home') resetTrendViewport();
+    else return;
+    event.preventDefault();
+  }
+
+  function trendTooltipPosition(index: number, visibleBuckets: number): number {
+    if (visibleBuckets <= 1) return 50;
+    return Math.max(8, Math.min(92, (index / (visibleBuckets - 1)) * 100));
+  }
+
   function trendMaximum(
     workbench: UsageOverview['workbench'],
-    metric: 'tokens' | 'retail-equivalent'
+    metric: 'tokens' | 'retail-equivalent',
+    buckets: TrendBucket[] = workbench.trend.buckets
   ): number | null {
-    const values = workbench.trend.buckets.flatMap((bucket) =>
+    const values = buckets.flatMap((bucket) =>
       bucket.segments.flatMap((segment) =>
         metric === 'tokens'
           ? [segment.recordedTokens]
@@ -966,10 +1125,10 @@
 
   function trendSeries(
     workbench: UsageOverview['workbench'],
-    metric: 'tokens' | 'retail-equivalent'
+    metric: 'tokens' | 'retail-equivalent',
+    buckets: TrendBucket[] = workbench.trend.buckets
   ) {
-    const buckets = workbench.trend.buckets;
-    const maximum = Math.max(1, trendMaximum(workbench, metric) ?? 0);
+    const maximum = Math.max(1, trendMaximum(workbench, metric, buckets) ?? 0);
     const identities = trendLegend(workbench, metric);
     return identities.map((identity) => {
       const key = `${identity.providerId}:${identity.billingDomainId}:${identity.costPurpose ?? 'tokens'}`;
@@ -1464,13 +1623,24 @@
           role="tabpanel"
           aria-labelledby="token-model-costs-tab"
         >
-          {#if processing?.modules.pricing.state === 'running' || workbenchLoading}
+          {#if processing?.modules.pricing.state === 'running' && !workbenchLoading}
             <p class="module-progress" role="status">{t('updatingModelCosts')}</p>
           {/if}
           {#if overview.workbench}
             {@const workbench = overview.workbench}
-            {@const chartSeries = trendSeries(workbench, selectedTrendMetric)}
-            {@const chartMaximum = trendMaximum(workbench, selectedTrendMetric)}
+            {@const chartBuckets = visibleTrendBuckets(
+              workbench,
+              trendViewportStart,
+              trendViewportSize
+            )}
+            {@const chartViewport = trendViewportBounds(
+              workbench.trend.buckets.length,
+              trendViewportStart,
+              trendViewportSize
+            )}
+            {@const chartSeries = trendSeries(workbench, selectedTrendMetric, chartBuckets)}
+            {@const chartMaximum = trendMaximum(workbench, selectedTrendMetric, chartBuckets)}
+            {@const hoverBucket = trendHoverIndex === null ? null : chartBuckets[trendHoverIndex]}
             <section
               class="token-money-workbench"
               data-testid="token-money-workbench"
@@ -1518,7 +1688,41 @@
                 </div>
               </div>
 
-              <div class="usage-overview-grid">
+              {#if workbenchLoading}
+                <div
+                  class="workbench-skeleton"
+                  data-testid="workbench-skeleton"
+                  role="status"
+                  aria-label={t('updatingModelCosts')}
+                >
+                  <span class="visually-hidden">{t('updatingModelCosts')}</span>
+                  <div class="skeleton-overview">
+                    <div class="skeleton-summary">
+                      <i class="skeleton-block skeleton-headline"></i>
+                      <i class="skeleton-block skeleton-copy"></i>
+                      <i class="skeleton-block skeleton-copy skeleton-copy-short"></i>
+                      <i class="skeleton-block skeleton-provider"></i>
+                      <i class="skeleton-block skeleton-provider"></i>
+                    </div>
+                    <div class="skeleton-chart">
+                      <i class="skeleton-block skeleton-copy skeleton-copy-short"></i>
+                      <i class="skeleton-block skeleton-graph"></i>
+                    </div>
+                  </div>
+                  <div class="skeleton-totals">
+                    {#each [0, 1, 2, 3, 4, 5] as skeleton (skeleton)}
+                      <i class="skeleton-block"></i>
+                    {/each}
+                  </div>
+                  <div class="skeleton-ranking">
+                    <i class="skeleton-block skeleton-copy skeleton-copy-short"></i>
+                    {#each [0, 1, 2, 3] as skeleton (skeleton)}
+                      <i class="skeleton-block skeleton-row"></i>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              <div class:workbench-data-hidden={workbenchLoading} class="usage-overview-grid">
                 <section class="usage-summary" aria-label={t('usage')}>
                   <div class="usage-headline" data-testid="usage-headline">
                     <strong
@@ -1637,8 +1841,37 @@
                       >
                       <strong>{formatWorkbenchRange(workbench)}</strong>
                     </div>
+                    <div class="trend-interactions">
+                      <span>{t('trendInteractionHint')}</span>
+                      <div
+                        class="trend-zoom-controls"
+                        role="group"
+                        aria-label={t('timeAxisControls')}
+                      >
+                        <button
+                          type="button"
+                          aria-label={t('zoomOutTimeAxis')}
+                          disabled={trendViewportSize === null}
+                          on:click={() => zoomTrend(workbench.trend.buckets.length, 'out')}
+                          >−</button
+                        >
+                        <button
+                          type="button"
+                          aria-label={t('zoomInTimeAxis')}
+                          disabled={(trendViewportSize ?? workbench.trend.buckets.length) <=
+                            Math.min(minimumTrendBuckets, workbench.trend.buckets.length)}
+                          on:click={() => zoomTrend(workbench.trend.buckets.length, 'in')}>+</button
+                        >
+                        <button
+                          type="button"
+                          aria-label={t('resetTimeAxis')}
+                          disabled={trendViewportSize === null && trendViewportStart === 0}
+                          on:click={() => resetTrendViewport()}>↺</button
+                        >
+                      </div>
+                    </div>
                   </div>
-                  <div class="trend-chart" data-testid="usage-trend-chart" aria-hidden="true">
+                  <div class="trend-chart" data-testid="usage-trend-chart">
                     <div class="trend-y-axis">
                       <span
                         >{formatUsageMetric(
@@ -1662,49 +1895,117 @@
                         )}</span
                       >
                     </div>
-                    <svg viewBox="0 0 1000 250" preserveAspectRatio="none">
-                      <line x1="0" y1="30" x2="1000" y2="30"></line>
-                      <line x1="0" y1="128" x2="1000" y2="128"></line>
-                      <line x1="0" y1="226" x2="1000" y2="226"></line>
-                      {#each chartSeries as series (series.key)}
-                        {#each series.runs as run, runIndex (`${series.key}:${runIndex}`)}
-                          {#if trendAreaPath(run) && series.costPurpose !== 'reported-estimate'}
-                            <path
-                              class="trend-area"
-                              data-cost-purpose={series.costPurpose ?? undefined}
-                              d={trendAreaPath(run)}
-                              style={`fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
-                            ></path>
-                          {/if}
-                          {#if run.length > 1}
-                            <path
-                              class="trend-line"
-                              data-cost-purpose={series.costPurpose ?? undefined}
-                              d={trendLinePath(run)}
-                              style={`stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; ${series.costPurpose === 'reported-estimate' ? 'stroke-dasharray: 10 7' : ''}`}
-                            ></path>
-                          {:else if run[0]}
-                            <circle
-                              class="trend-point"
-                              data-cost-purpose={series.costPurpose ?? undefined}
-                              cx={run[0].x}
-                              cy={run[0].y}
-                              r="4"
-                              style={series.costPurpose === 'reported-estimate'
-                                ? `fill: transparent; stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; stroke-width: 2`
-                                : `fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
-                            ></circle>
-                          {/if}
+                    <div
+                      class:trend-panning={trendPanning}
+                      class="trend-plot"
+                      data-testid="trend-plot"
+                      data-total-buckets={workbench.trend.buckets.length}
+                      data-visible-buckets={chartViewport.size}
+                      data-viewport-start={chartViewport.start}
+                      role="slider"
+                      aria-label={t('interactiveTrend')}
+                      aria-valuemin="0"
+                      aria-valuemax={Math.max(
+                        0,
+                        workbench.trend.buckets.length - chartViewport.size
+                      )}
+                      aria-valuenow={chartViewport.start}
+                      aria-valuetext={`${chartBuckets[0]?.label ?? '—'} – ${chartBuckets.at(-1)?.label ?? '—'}`}
+                      tabindex="0"
+                      on:wheel|preventDefault={(event) =>
+                        handleTrendWheel(event, workbench.trend.buckets.length)}
+                      on:pointerdown={(event) =>
+                        handleTrendPointerDown(event, workbench.trend.buckets.length)}
+                      on:pointermove={(event) =>
+                        handleTrendPointerMove(
+                          event,
+                          workbench.trend.buckets.length,
+                          chartBuckets.length
+                        )}
+                      on:pointerup={finishTrendPan}
+                      on:pointercancel={finishTrendPan}
+                      on:pointerleave={() => {
+                        if (!trendPanOrigin) trendHoverIndex = null;
+                      }}
+                      on:keydown={(event) =>
+                        handleTrendKeydown(event, workbench.trend.buckets.length)}
+                    >
+                      <svg viewBox="0 0 1000 250" preserveAspectRatio="none" aria-hidden="true">
+                        <line x1="0" y1="30" x2="1000" y2="30"></line>
+                        <line x1="0" y1="128" x2="1000" y2="128"></line>
+                        <line x1="0" y1="226" x2="1000" y2="226"></line>
+                        {#if trendHoverIndex !== null && chartBuckets.length > 0}
+                          <line
+                            class="trend-hover-line"
+                            x1={chartBuckets.length <= 1
+                              ? 500
+                              : (trendHoverIndex / (chartBuckets.length - 1)) * 1000}
+                            y1="30"
+                            x2={chartBuckets.length <= 1
+                              ? 500
+                              : (trendHoverIndex / (chartBuckets.length - 1)) * 1000}
+                            y2="226"
+                          ></line>
+                        {/if}
+                        {#each chartSeries as series (series.key)}
+                          {#each series.runs as run, runIndex (`${series.key}:${runIndex}`)}
+                            {#if trendAreaPath(run) && series.costPurpose !== 'reported-estimate'}
+                              <path
+                                class="trend-area"
+                                data-cost-purpose={series.costPurpose ?? undefined}
+                                d={trendAreaPath(run)}
+                                style={`fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
+                              ></path>
+                            {/if}
+                            {#if run.length > 1}
+                              <path
+                                class="trend-line"
+                                data-cost-purpose={series.costPurpose ?? undefined}
+                                d={trendLinePath(run)}
+                                style={`stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; ${series.costPurpose === 'reported-estimate' ? 'stroke-dasharray: 10 7' : ''}`}
+                              ></path>
+                            {:else if run[0]}
+                              <circle
+                                class="trend-point"
+                                data-cost-purpose={series.costPurpose ?? undefined}
+                                cx={run[0].x}
+                                cy={run[0].y}
+                                r="4"
+                                style={series.costPurpose === 'reported-estimate'
+                                  ? `fill: transparent; stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}; stroke-width: 2`
+                                  : `fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
+                              ></circle>
+                            {/if}
+                          {/each}
                         {/each}
-                      {/each}
-                    </svg>
+                      </svg>
+                      {#if hoverBucket}
+                        <div
+                          class="trend-tooltip"
+                          data-testid="trend-tooltip"
+                          role="tooltip"
+                          style={`left: ${trendTooltipPosition(trendHoverIndex ?? 0, chartBuckets.length)}%`}
+                        >
+                          <strong>{hoverBucket.label}</strong>
+                          {#if hoverBucket.gap || hoverBucket.segments.length === 0}
+                            <span>{t('gap')}</span>
+                          {:else}
+                            {#each hoverBucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
+                              <span>
+                                <b>{segment.providerDisplayName}</b>
+                                <small
+                                  >{trendSegmentDescription(segment, selectedTrendMetric)}</small
+                                >
+                              </span>
+                            {/each}
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
                     <div class="trend-x-axis">
-                      <span>{workbench.trend.buckets[0]?.label ?? '—'}</span>
-                      <span
-                        >{workbench.trend.buckets[Math.floor(workbench.trend.buckets.length / 2)]
-                          ?.label ?? '—'}</span
-                      >
-                      <span>{workbench.trend.buckets.at(-1)?.label ?? '—'}</span>
+                      <span>{chartBuckets[0]?.label ?? '—'}</span>
+                      <span>{chartBuckets[Math.floor(chartBuckets.length / 2)]?.label ?? '—'}</span>
+                      <span>{chartBuckets.at(-1)?.label ?? '—'}</span>
                     </div>
                   </div>
                   <div class="trend-legend" aria-hidden="true">
@@ -1757,6 +2058,7 @@
               </div>
 
               <section
+                class:workbench-data-hidden={workbenchLoading}
                 class="usage-totals"
                 data-testid="usage-totals"
                 aria-labelledby="usage-totals-heading"
@@ -1821,6 +2123,7 @@
               </section>
 
               <section
+                class:workbench-data-hidden={workbenchLoading}
                 class="model-ranking"
                 data-testid="usage-breakdown"
                 aria-labelledby="model-ranking-heading"
@@ -2627,6 +2930,96 @@
     background: rgba(14, 17, 24, 0.88);
   }
 
+  .workbench-skeleton {
+    display: grid;
+    gap: 30px;
+  }
+
+  .workbench-data-hidden {
+    display: none !important;
+  }
+
+  .skeleton-overview {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.36fr) minmax(0, 1fr);
+    gap: 38px;
+    min-height: 310px;
+  }
+
+  .skeleton-summary,
+  .skeleton-chart,
+  .skeleton-ranking {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+  }
+
+  .skeleton-summary {
+    padding: 18px 0 16px 12px;
+  }
+
+  .skeleton-chart {
+    padding-top: 14px;
+  }
+
+  .skeleton-block {
+    display: block;
+    border-radius: 8px;
+    background: linear-gradient(
+      100deg,
+      rgba(122, 136, 164, 0.08) 20%,
+      rgba(122, 136, 164, 0.2) 42%,
+      rgba(122, 136, 164, 0.08) 64%
+    );
+    background-size: 220% 100%;
+    animation: skeleton-shimmer 1.25s ease-in-out infinite;
+  }
+
+  .skeleton-headline {
+    width: min(78%, 240px);
+    height: 54px;
+  }
+
+  .skeleton-copy {
+    width: 68%;
+    height: 12px;
+  }
+
+  .skeleton-copy-short {
+    width: 38%;
+  }
+
+  .skeleton-provider {
+    height: 42px;
+    margin-top: 12px;
+  }
+
+  .skeleton-graph {
+    height: 250px;
+    margin-top: 8px;
+  }
+
+  .skeleton-totals {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 18px;
+    padding: 24px 12px 26px;
+    border-top: 1px solid rgba(122, 136, 164, 0.14);
+    border-bottom: 1px solid rgba(122, 136, 164, 0.14);
+  }
+
+  .skeleton-totals .skeleton-block {
+    height: 48px;
+  }
+
+  .skeleton-ranking {
+    padding: 0 12px;
+  }
+
+  .skeleton-row {
+    height: 54px;
+  }
+
   .usage-toolbar,
   .trend-heading {
     display: flex;
@@ -2837,6 +3230,46 @@
     gap: 4px;
   }
 
+  .trend-interactions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .trend-interactions > span {
+    color: #747d8b;
+    font-size: 0.62rem;
+  }
+
+  .trend-zoom-controls {
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid rgba(122, 136, 164, 0.2);
+    border-radius: 8px;
+    background: rgba(8, 10, 15, 0.58);
+  }
+
+  .trend-zoom-controls button {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid rgba(122, 136, 164, 0.14);
+    background: transparent;
+    color: #c8ced8;
+    cursor: pointer;
+    font-size: 0.82rem;
+  }
+
+  .trend-zoom-controls button:first-child {
+    border-left: 0;
+  }
+
+  .trend-zoom-controls button:disabled {
+    color: #555d69;
+    cursor: default;
+  }
+
   .trend-heading strong {
     color: #e6eaf2;
     font-size: 0.84rem;
@@ -2873,10 +3306,24 @@
     align-self: end;
   }
 
-  .trend-chart svg {
+  .trend-plot {
+    position: relative;
+    min-width: 0;
+    height: 250px;
+    overflow: hidden;
+    cursor: crosshair;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .trend-plot.trend-panning {
+    cursor: grabbing;
+  }
+
+  .trend-plot svg {
     width: 100%;
     height: 250px;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .trend-chart line {
@@ -2899,6 +3346,49 @@
 
   .trend-point {
     vector-effect: non-scaling-stroke;
+  }
+
+  .trend-chart .trend-hover-line {
+    stroke: rgba(225, 231, 241, 0.52);
+    stroke-dasharray: 4 4;
+  }
+
+  .trend-tooltip {
+    position: absolute;
+    z-index: 2;
+    top: 12px;
+    display: grid;
+    width: min(240px, 72%);
+    gap: 7px;
+    padding: 10px 12px;
+    transform: translateX(-50%);
+    border: 1px solid rgba(148, 163, 190, 0.28);
+    border-radius: 10px;
+    background: rgba(12, 15, 21, 0.96);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+    color: #dce2ec;
+    pointer-events: none;
+  }
+
+  .trend-tooltip > strong {
+    color: #f2f5fa;
+    font-size: 0.7rem;
+  }
+
+  .trend-tooltip > span {
+    display: grid;
+    gap: 2px;
+    font-size: 0.66rem;
+  }
+
+  .trend-tooltip b {
+    font-weight: 600;
+  }
+
+  .trend-tooltip small {
+    color: #9aa4b3;
+    font-size: 0.6rem;
+    line-height: 1.35;
   }
 
   .trend-x-axis {
@@ -4289,6 +4779,15 @@
     }
   }
 
+  @keyframes skeleton-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+
   :global(button:focus-visible),
   :global(a[href]:focus-visible),
   :global(input:focus-visible),
@@ -4336,7 +4835,8 @@
       justify-content: flex-start;
     }
 
-    .usage-overview-grid {
+    .usage-overview-grid,
+    .skeleton-overview {
       grid-template-columns: 1fr;
       gap: 16px;
     }
@@ -4346,6 +4846,10 @@
     }
 
     .usage-totals dl {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .skeleton-totals {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
@@ -4398,6 +4902,10 @@
     }
 
     .spin {
+      animation: none !important;
+    }
+
+    .skeleton-block {
       animation: none !important;
     }
   }
