@@ -81,7 +81,8 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
   visibly discontinuous; cost evidence does not fabricate a Token observation.
 - **Data authority**: The provenance level of a value: official account,
   official client, local observation, estimate, or unavailable.
-- **Freshness**: The age and last-success state of a connector result.
+- **Freshness**: The age and last-success state of a connector result. Stale
+  freshness is an internal automatic-retry signal, not a user-action state.
 - **Coverage**: The independent availability state for quota/reset, tokens,
   actual cost, and history. Coverage is never compressed into one score.
 - **Recommendation**: A transparent, reasoned suggestion about which agent has
@@ -167,3 +168,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     explicit marker that it is not part of the headline total or its percentage
     denominator. Provider billing-domain tabs remain quota and connection views;
     they do not duplicate Token or cost detail.
+31. The dashboard never labels Provider data as stale or asks the user to refresh
+    stale data. Detecting stale freshness, health, or diagnostics triggers one
+    automatic refresh for that unchanged stale evidence. Repeated identical
+    evidence does not create a refresh loop; a changed or recovered state may
+    trigger a later retry. Non-staleness failures still retain their truthful
+    recovery actions.

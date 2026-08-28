@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
 
   import type {
     BillingDomainOverview,
@@ -21,6 +21,7 @@
     CredentialOwner
   } from '$core/onboarding-types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
+  import { createStaleRefreshController } from '$lib/stale-refresh.js';
 
   let locale: Locale = 'en';
   let overview: UsageOverview | null = null;
@@ -58,6 +59,8 @@
   let settingsReturnFocus: HTMLElement | null = null;
   let settingsPanel: HTMLElement | null = null;
   let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
+  let destroyed = false;
+  const staleRefreshController = createStaleRefreshController(() => refresh());
 
   $: selectedModelEntry =
     overview?.workbench?.modelRanking.entries.find((entry) => entry.id === selectedModelId) ?? null;
@@ -68,16 +71,16 @@
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     selectedWindow = storedWindow();
     selectedCurrency = storedCurrency();
-    await Promise.all([
-      refresh(),
-      loadConnectors(),
-      loadMonitoring(),
-      loadDiagnostics(),
-      loadRetention()
-    ]);
+    await Promise.all([refresh(), loadConnectors(), loadMonitoring(), loadRetention()]);
     if (!overview) await loadOverview();
+    if (!diagnostics) await loadDiagnostics();
     const deepLink = new URL(window.location.href).searchParams.get('settings');
     if (deepLink) await openSettings(deepLink, false);
+  });
+
+  onDestroy(() => {
+    destroyed = true;
+    staleRefreshController.dispose();
   });
 
   function t(key: MessageKey): string {
@@ -98,12 +101,15 @@
       });
       const response = await fetch(`/api/overview?${parameters}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      overview = (await response.json()) as UsageOverview;
+      const nextOverview = (await response.json()) as UsageOverview;
+      if (destroyed) return;
+      overview = nextOverview;
       overviewError = false;
+      scheduleStaleRefresh();
     } catch {
       overviewError = true;
     } finally {
-      loading = false;
+      if (!destroyed) loading = false;
     }
   }
 
@@ -117,8 +123,16 @@
     } catch {
       refreshError = true;
     } finally {
-      refreshing = false;
+      if (!destroyed) {
+        refreshing = false;
+        scheduleStaleRefresh();
+      }
     }
+  }
+
+  function scheduleStaleRefresh(): void {
+    if (destroyed || !overview) return;
+    staleRefreshController.schedule(overview, diagnostics, refreshing);
   }
 
   async function loadConnectors(): Promise<void> {
@@ -148,8 +162,11 @@
     try {
       const response = await fetch('/api/doctor');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      diagnostics = (await response.json()) as DoctorReport;
+      const nextDiagnostics = (await response.json()) as DoctorReport;
+      if (destroyed) return;
+      diagnostics = nextDiagnostics;
       diagnosticsError = false;
+      scheduleStaleRefresh();
     } catch {
       diagnosticsError = true;
     }
@@ -792,7 +809,7 @@
     billingDomainId?: string
   ): string | null {
     const candidates = report?.connectors.filter(
-      (candidate) => candidate.providerId === providerId
+      (candidate) => candidate.providerId === providerId && candidate.category !== 'stale'
     );
     const exactDomainDiagnostic = billingDomainId
       ? candidates?.find((candidate) => candidate.billingDomainId === billingDomainId)
@@ -809,7 +826,10 @@
     billingDomainId?: string
   ): DoctorReport['connectors'][number] | null {
     const candidates = report?.connectors.filter(
-      (candidate) => candidate.providerId === providerId && candidate.status === 'degraded'
+      (candidate) =>
+        candidate.providerId === providerId &&
+        candidate.status === 'degraded' &&
+        candidate.category !== 'stale'
     );
     return billingDomainId
       ? (candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ?? null)
@@ -1073,12 +1093,17 @@
                       <h2 data-provider-logo={logo ? undefined : provider.id}>
                         {provider.displayName}
                       </h2>
-                      <p class="freshness" data-status={domainFreshness.status}>
+                      <p
+                        class="freshness"
+                        data-status={domainFreshness.status === 'unavailable'
+                          ? 'unavailable'
+                          : 'available'}
+                      >
                         <span></span>
                         {domainFreshness.status === 'fresh'
                           ? t('updatedNow')
-                          : domainFreshness.status === 'stale'
-                            ? t('stale')
+                          : domainFreshness.lastSuccessAt
+                            ? t('updated')
                             : t('unavailable')}
                         {domainFreshness.lastSuccessAt
                           ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
@@ -1089,7 +1114,7 @@
                   <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
                 </div>
 
-                {#if domainHealth.status === 'degraded'}
+                {#if recoveryDiagnostic || (domainHealth.status === 'degraded' && domainHealth.errorCode !== 'stale')}
                   <div class="degraded" role="status">
                     <strong>
                       {recoveryDiagnostic
@@ -1772,7 +1797,7 @@
             {/if}
             {#if diagnostics}
               <div class="diagnostics-grid">
-                {#each diagnostics.connectors as diagnostic (diagnostic.id)}
+                {#each diagnostics.connectors.filter((diagnostic) => diagnostic.category !== 'stale') as diagnostic (diagnostic.id)}
                   <article
                     class:diagnostic-degraded={diagnostic.status === 'degraded'}
                     class:settings-target-active={settingsTarget === `diagnostic:${diagnostic.id}`}
@@ -3014,10 +3039,6 @@
     border-radius: 50%;
     background: #4bd29a;
     box-shadow: 0 0 10px rgba(75, 210, 154, 0.45);
-  }
-
-  .freshness[data-status='stale'] span {
-    background: #e3ac55;
   }
 
   .freshness[data-status='unavailable'] span {

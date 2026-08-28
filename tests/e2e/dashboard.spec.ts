@@ -207,6 +207,14 @@ test('renders Codex quota without duplicating Token detail and keeps the actiona
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  let refreshRequests = 0;
+  let refreshResponses = 0;
+  await page.route('**/api/refresh', async (route) => {
+    refreshRequests += 1;
+    const response = await route.fetch();
+    refreshResponses += 1;
+    await route.fulfill({ response });
+  });
   await page.route('**/api/doctor', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -215,6 +223,18 @@ test('renders Codex quota without duplicating Token detail and keeps the actiona
         daemon: { status: 'healthy' },
         database: { status: 'healthy' },
         connectors: [
+          {
+            id: 'codex-stale',
+            providerId: 'codex',
+            billingDomainId: 'subscription',
+            status: 'degraded',
+            category: 'stale',
+            message: 'Older Codex data is stale.',
+            recovery: 'Refresh Codex.',
+            affectedCoverage: ['quota'],
+            lastAttemptAt: '2026-08-28T01:00:00.000Z',
+            lastSuccessAt: '2026-08-27T02:00:00.000Z'
+          },
           {
             id: 'codex',
             providerId: 'codex',
@@ -300,6 +320,19 @@ test('renders Codex quota without duplicating Token detail and keeps the actiona
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Codex' });
   await expect(provider.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible();
+  await expect.poll(() => refreshRequests).toBe(2);
+  await expect.poll(() => refreshResponses).toBe(2);
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  expect(refreshRequests).toBe(2);
+  await expect(provider.getByText('Data is stale')).toHaveCount(0);
+  await expect(provider.locator('.freshness')).toHaveAttribute('data-status', 'available');
+  await expect(provider.locator('.freshness')).toContainText('Updated ·');
   await expect(page.locator('.risk-banner')).toHaveCount(0);
   await expect(page.getByText('Connection needs attention')).toHaveCount(0);
   await expect(provider.getByText('5 hour', { exact: true })).toBeVisible();
@@ -313,8 +346,12 @@ test('renders Codex quota without duplicating Token detail and keeps the actiona
   const diagnostic = page.getByTestId('settings-diagnostic-codex');
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   await expect(diagnostic).toBeFocused();
+  await expect(page.getByTestId('settings-diagnostic-codex-stale')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(reviewButton).toBeFocused();
+  await page.getByRole('button', { name: '中文' }).click();
+  await expect(page.getByText('数据已过期')).toHaveCount(0);
+  await expect(provider.locator('.freshness')).toContainText('更新于 ·');
 });
 
 test('keeps successful usage visible when an auxiliary settings request fails', async ({
@@ -507,6 +544,14 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  let refreshRequests = 0;
+  let refreshResponses = 0;
+  await page.route('**/api/refresh', async (route) => {
+    refreshRequests += 1;
+    const response = await route.fetch();
+    refreshResponses += 1;
+    await route.fulfill({ response });
+  });
   await page.route('**/api/doctor', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -519,11 +564,11 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
             id: 'grok',
             providerId: 'grok',
             billingDomainId: 'grok-build-subscription',
-            status: 'healthy',
-            category: null,
-            message: null,
-            recovery: null,
-            affectedCoverage: [],
+            status: 'degraded',
+            category: 'stale',
+            message: 'Build telemetry is stale.',
+            recovery: 'Refresh Grok Build telemetry.',
+            affectedCoverage: ['tokens'],
             lastAttemptAt: '2026-08-28T02:00:00.000Z',
             lastSuccessAt: null
           },
@@ -618,12 +663,20 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Grok' });
+  await expect.poll(() => refreshRequests).toBe(2);
+  await expect.poll(() => refreshResponses).toBe(2);
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+  expect(refreshRequests).toBe(2);
   await expect(provider.getByText('Weekly limit')).toBeVisible();
-  await expect(provider.getByText('Refresh Grok Build telemetry.')).toBeVisible();
+  await expect(provider.getByText('Refresh Grok Build telemetry.')).toHaveCount(0);
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
-  await provider.getByRole('button', { name: 'Review in settings' }).click();
-  await expect(page.getByTestId('settings-diagnostic-grok')).toBeFocused();
-  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(provider.getByRole('button', { name: 'Review in settings' })).toHaveCount(0);
   await expectQuotaShowsOnlyReset(provider, 1);
   await expect(provider.getByText('Plan: SuperGrok Heavy')).toHaveCount(0);
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
@@ -633,6 +686,7 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
+  await expect(page.getByTestId('settings-diagnostic-grok')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expectProviderHasNoTokenDetail(provider);
   await expect(provider.getByText('Weekly limit')).toHaveCount(0);
