@@ -288,10 +288,13 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   await expect(provider).toContainText(/Unclassified:\s*1,250/);
   await expect(provider.getByText('codex · Unauthorized')).toBeVisible();
   await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toBeVisible();
-  await provider.getByRole('button', { name: 'Review in settings' }).click();
+  const reviewButton = provider.getByRole('button', { name: 'Review in settings' });
+  await reviewButton.click();
   const diagnostic = page.getByTestId('settings-diagnostic-codex');
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   await expect(diagnostic).toBeFocused();
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(reviewButton).toBeFocused();
 });
 
 test('keeps successful usage visible when an auxiliary settings request fails', async ({
@@ -900,7 +903,12 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(detail).toContainText('Recorded total 450');
   await expect(detail).toContainText('Classified 400');
   await expect(detail).toContainText('Unclassified 50');
-  await expect(detail).toContainText('Source-reported total 450');
+  await expect(detail.locator('.model-detail-summary')).toContainText(
+    'Source-reported total Unavailable'
+  );
+  await expect(detail.locator('.model-observations article')).toContainText(
+    'Source-reported total 450'
+  );
   await expect(detail).toContainText('Scope This Mac only');
   await expect(detail).toContainText('Aggregation Delta');
   await expect(detail).toContainText('Input · 320 · $3.20');

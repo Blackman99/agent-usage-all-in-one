@@ -55,6 +55,7 @@
   let settingsOpen = false;
   let settingsTarget: string | null = null;
   let settingsButton: HTMLButtonElement | null = null;
+  let settingsReturnFocus: HTMLElement | null = null;
   let settingsPanel: HTMLElement | null = null;
   let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
 
@@ -253,6 +254,11 @@
   }
 
   async function openSettings(target: string | null = null, syncUrl = true): Promise<void> {
+    if (!settingsOpen) {
+      const active = document.activeElement;
+      settingsReturnFocus =
+        active instanceof HTMLElement && active !== document.body ? active : null;
+    }
     settingsOpen = true;
     settingsTarget = target;
     if (syncUrl) {
@@ -271,13 +277,15 @@
   }
 
   async function closeSettings(): Promise<void> {
+    const returnFocus = settingsReturnFocus;
     settingsOpen = false;
     settingsTarget = null;
+    settingsReturnFocus = null;
     const url = new URL(window.location.href);
     url.searchParams.delete('settings');
     window.history.replaceState(null, '', url);
     await tick();
-    settingsButton?.focus();
+    (returnFocus?.isConnected ? returnFocus : settingsButton)?.focus();
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
@@ -2197,7 +2205,14 @@
             <span>{t('recordedTotal')} <b>{formatNumber(model.tokenTotals.total)}</b></span>
             <span
               >{t('sourceReportedTotal')}
-              <b>{formatNumber(model.tokenEvidence.sourceReportedTokens)}</b></span
+              <b>
+                {model.tokenEvidence.sourceReportedObservationCount === 0
+                  ? t('notAvailable')
+                  : formatNumber(model.tokenEvidence.sourceReportedTokens)}
+                {#if model.tokenEvidence.sourceReportedObservationCount > 0 && model.tokenEvidence.sourceReportedObservationCount < model.tokenEvidence.observationCount}
+                  · {t('coveragePartial')}
+                {/if}
+              </b></span
             >
             <span
               >{t('totalDerivation')}
