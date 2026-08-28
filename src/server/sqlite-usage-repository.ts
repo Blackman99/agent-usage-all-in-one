@@ -474,9 +474,7 @@ export class SqliteUsageRepository implements UsageRepository {
           persistedCost.priceSnapshot?.effectiveAt ?? null,
           persistedCost.priceSnapshot?.effectiveUntil ?? null,
           persistedCost.priceSnapshot?.currency ?? null,
-          persistedCost.priceSnapshot
-            ? JSON.stringify(persistedCost.priceSnapshot.ratesPerMillion)
-            : null,
+          serializePriceRates(persistedCost.priceSnapshot),
           persistedCost.priceSnapshot?.sourceUrl ?? null,
           persistedCost.priceSnapshot?.contextTier ?? null,
           persistedCost.model ?? null,
@@ -651,7 +649,7 @@ export class SqliteUsageRepository implements UsageRepository {
           cost.priceSnapshot?.effectiveAt ?? null,
           cost.priceSnapshot?.effectiveUntil ?? null,
           cost.priceSnapshot?.currency ?? null,
-          cost.priceSnapshot ? JSON.stringify(cost.priceSnapshot.ratesPerMillion) : null,
+          serializePriceRates(cost.priceSnapshot),
           cost.priceSnapshot?.sourceUrl ?? null,
           cost.priceSnapshot?.contextTier ?? null,
           cost.model ?? null,
@@ -1871,15 +1869,6 @@ export class SqliteUsageRepository implements UsageRepository {
     }
     this.#database.exec(`
       DELETE FROM cost_records
-      WHERE kind = 'retail-equivalent'
-        AND (
-          price_snapshot_currency IS NULL
-          OR price_snapshot_rates_json IS NULL
-          OR price_snapshot_canonical_model IS NULL
-        )
-    `);
-    this.#database.exec(`
-      DELETE FROM cost_records
       WHERE kind = 'estimate' AND id LIKE 'opencode-quota-estimate:%'
     `);
     this.#database.exec(`
@@ -1946,6 +1935,10 @@ function normalizeCostForPersistence(cost: CostRecord): CostRecord {
     lineItems: [],
     calculatedAt: null
   };
+}
+
+function serializePriceRates(priceSnapshot: CostRecord['priceSnapshot']): string | null {
+  return priceSnapshot?.ratesPerMillion ? JSON.stringify(priceSnapshot.ratesPerMillion) : null;
 }
 
 function mapQuotaRow(row: QuotaRow): QuotaBucket {

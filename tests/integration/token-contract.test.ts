@@ -46,8 +46,8 @@ describe('expanded token contract', () => {
     expect(domain.tokenEvidence).toEqual(provider.tokenEvidence);
     expect(domain.history.tokenEvidence).toEqual(provider.tokenEvidence);
     expect(domain.history.models.map((model) => model.model)).toEqual([
-      'known-source-model',
-      'known-model'
+      'known-model',
+      'known-source-model'
     ]);
 
     const application = new UsageApplication({ repository, connectors: [] });
