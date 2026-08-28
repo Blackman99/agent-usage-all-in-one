@@ -164,14 +164,21 @@ describe('local HTTP server', () => {
     });
     const server = await startLocalServer({ application, apiToken: 'manual-refresh-token' });
     servers.push(server);
-    const request = () =>
+    const manualRequest = () =>
       fetch(`${server.origin}/api/refresh`, {
         method: 'POST',
         headers: { authorization: 'Bearer manual-refresh-token' }
       });
+    const automaticRequest = () =>
+      fetch(`${server.origin}/api/refresh?mode=automatic`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer manual-refresh-token' }
+      });
 
-    expect((await request()).status).toBe(204);
-    expect((await request()).status).toBe(204);
+    expect((await manualRequest()).status).toBe(204);
+    expect((await automaticRequest()).status).toBe(204);
+    expect(attempts).toBe(1);
+    expect((await manualRequest()).status).toBe(204);
 
     expect(attempts).toBe(2);
     expect(await application.getOverview()).toMatchObject({

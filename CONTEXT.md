@@ -168,9 +168,14 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     explicit marker that it is not part of the headline total or its percentage
     denominator. Provider billing-domain tabs remain quota and connection views;
     they do not duplicate Token or cost detail.
-31. The dashboard never labels Provider data as stale or asks the user to refresh
-    stale data. Detecting stale freshness, health, or diagnostics triggers one
-    automatic refresh for that unchanged stale evidence. Repeated identical
-    evidence does not create a refresh loop; a changed or recovered state may
-    trigger a later retry. Non-staleness failures still retain their truthful
-    recovery actions.
+31. Agent usage cards never render technical diagnostic or recovery banners.
+    Stale, unavailable, and timeout evidence from freshness, health, or connector
+    diagnostics triggers one automatic refresh for that unchanged evidence.
+    Repeated identical evidence does not create a refresh loop; a changed or
+    recovered state may trigger a later retry. Rate-limited evidence stays under
+    the existing Provider backoff and never forces an immediate retry.
+32. Automatically managed stale, unavailable, timeout, and rate-limited
+    diagnostics remain internal. Failures that require a human action, such as
+    installing a client, connecting an account, signing in again, or upgrading
+    an unsupported integration, remain available only in connection management
+    and Settings diagnostics; they never interrupt the usage-first dashboard.

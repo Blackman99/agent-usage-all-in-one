@@ -20,8 +20,11 @@
     CoverageDimension,
     CredentialOwner
   } from '$core/onboarding-types.js';
+  import {
+    createAutomaticRecoveryController,
+    isAutomaticallyManagedCategory
+  } from '$lib/automatic-recovery.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
-  import { createStaleRefreshController } from '$lib/stale-refresh.js';
 
   let locale: Locale = 'en';
   let overview: UsageOverview | null = null;
@@ -60,7 +63,7 @@
   let settingsPanel: HTMLElement | null = null;
   let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
   let destroyed = false;
-  const staleRefreshController = createStaleRefreshController(() => refresh());
+  const automaticRecoveryController = createAutomaticRecoveryController(() => automaticRefresh());
 
   $: selectedModelEntry =
     overview?.workbench?.modelRanking.entries.find((entry) => entry.id === selectedModelId) ?? null;
@@ -80,7 +83,7 @@
 
   onDestroy(() => {
     destroyed = true;
-    staleRefreshController.dispose();
+    automaticRecoveryController.dispose();
   });
 
   function t(key: MessageKey): string {
@@ -105,7 +108,7 @@
       if (destroyed) return;
       overview = nextOverview;
       overviewError = false;
-      scheduleStaleRefresh();
+      scheduleAutomaticRecovery();
     } catch {
       overviewError = true;
     } finally {
@@ -114,9 +117,18 @@
   }
 
   async function refresh(): Promise<void> {
+    await performRefresh('manual');
+  }
+
+  async function automaticRefresh(): Promise<void> {
+    await performRefresh('automatic');
+  }
+
+  async function performRefresh(mode: 'manual' | 'automatic'): Promise<void> {
     refreshing = true;
     try {
-      const response = await fetch('/api/refresh', { method: 'POST' });
+      const endpoint = mode === 'automatic' ? '/api/refresh?mode=automatic' : '/api/refresh';
+      const response = await fetch(endpoint, { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       await Promise.all([loadOverview(), loadDiagnostics()]);
       refreshError = false;
@@ -125,14 +137,14 @@
     } finally {
       if (!destroyed) {
         refreshing = false;
-        scheduleStaleRefresh();
+        scheduleAutomaticRecovery();
       }
     }
   }
 
-  function scheduleStaleRefresh(): void {
+  function scheduleAutomaticRecovery(): void {
     if (destroyed || !overview) return;
-    staleRefreshController.schedule(overview, diagnostics, refreshing);
+    automaticRecoveryController.schedule(overview, diagnostics, refreshing);
   }
 
   async function loadConnectors(): Promise<void> {
@@ -166,7 +178,7 @@
       if (destroyed) return;
       diagnostics = nextDiagnostics;
       diagnosticsError = false;
-      scheduleStaleRefresh();
+      scheduleAutomaticRecovery();
     } catch {
       diagnosticsError = true;
     }
@@ -552,14 +564,6 @@
     return t(confidence === 'high' ? 'confidenceHigh' : 'confidenceMedium');
   }
 
-  function providerHealthMessage(target: { health: ProviderOverview['health'] }): string | null {
-    return locale === 'en' ? target.health.message : t('providerDegraded');
-  }
-
-  function providerHealthRecovery(target: { health: ProviderOverview['health'] }): string | null {
-    return locale === 'en' ? target.health.recovery : t('providerRecovery');
-  }
-
   function activeBillingDomain(
     provider: ProviderOverview,
     selected: string | undefined
@@ -803,39 +807,6 @@
     };
   }
 
-  function diagnosticTargetForProvider(
-    report: DoctorReport | null,
-    providerId: string,
-    billingDomainId?: string
-  ): string | null {
-    const candidates = report?.connectors.filter(
-      (candidate) => candidate.providerId === providerId && candidate.category !== 'stale'
-    );
-    const exactDomainDiagnostic = billingDomainId
-      ? candidates?.find((candidate) => candidate.billingDomainId === billingDomainId)
-      : null;
-    const diagnostic = billingDomainId
-      ? exactDomainDiagnostic
-      : (degradedDiagnosticForProvider(report, providerId) ?? candidates?.[0]);
-    return diagnostic ? `diagnostic:${diagnostic.id}` : null;
-  }
-
-  function degradedDiagnosticForProvider(
-    report: DoctorReport | null,
-    providerId: string,
-    billingDomainId?: string
-  ): DoctorReport['connectors'][number] | null {
-    const candidates = report?.connectors.filter(
-      (candidate) =>
-        candidate.providerId === providerId &&
-        candidate.status === 'degraded' &&
-        candidate.category !== 'stale'
-    );
-    return billingDomainId
-      ? (candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ?? null)
-      : (candidates?.[0] ?? null);
-  }
-
   function formatMoney(amount: number | null, currency: string): string {
     if (amount === null) return '—';
     return new Intl.NumberFormat(locale, {
@@ -1071,13 +1042,7 @@
                 provider,
                 selectedBillingDomains[provider.id]
               )}
-              {@const recoveryDiagnostic = degradedDiagnosticForProvider(
-                diagnostics,
-                provider.id,
-                selectedDomain.id
-              )}
               {@const domainFreshness = selectedDomain.freshness ?? provider.freshness}
-              {@const domainHealth = selectedDomain.health ?? provider.health}
               {@const domainCoverage = selectedDomain.coverage ?? provider.coverage}
               <article class="provider-card">
                 <div class="provider-heading">
@@ -1113,27 +1078,6 @@
                   </div>
                   <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
                 </div>
-
-                {#if recoveryDiagnostic || (domainHealth.status === 'degraded' && domainHealth.errorCode !== 'stale')}
-                  <div class="degraded" role="status">
-                    <strong>
-                      {recoveryDiagnostic
-                        ? `${recoveryDiagnostic.id} · ${diagnosticCategoryLabel(recoveryDiagnostic)}`
-                        : providerHealthMessage({ health: domainHealth })}
-                    </strong>
-                    <code>
-                      {recoveryDiagnostic
-                        ? diagnosticRecovery(recoveryDiagnostic)
-                        : providerHealthRecovery({ health: domainHealth })}
-                    </code>
-                    <button
-                      on:click={() =>
-                        openSettings(
-                          diagnosticTargetForProvider(diagnostics, provider.id, selectedDomain.id)
-                        )}>{t('reviewInSettings')}</button
-                    >
-                  </div>
-                {/if}
 
                 {#if (provider.billingDomains?.length ?? 0) > 1}
                   <div
@@ -1797,7 +1741,7 @@
             {/if}
             {#if diagnostics}
               <div class="diagnostics-grid">
-                {#each diagnostics.connectors.filter((diagnostic) => diagnostic.category !== 'stale') as diagnostic (diagnostic.id)}
+                {#each diagnostics.connectors.filter((diagnostic) => !isAutomaticallyManagedCategory(diagnostic.category)) as diagnostic (diagnostic.id)}
                   <article
                     class:diagnostic-degraded={diagnostic.status === 'degraded'}
                     class:settings-target-active={settingsTarget === `diagnostic:${diagnostic.id}`}
@@ -2615,17 +2559,6 @@
     color: #eef2ff;
   }
 
-  .degraded button {
-    min-height: 32px;
-    padding: 0 11px;
-    border: 1px solid var(--warning-border);
-    border-radius: 9px;
-    background: transparent;
-    color: var(--warning-text);
-    cursor: pointer;
-    font-size: 0.7rem;
-  }
-
   .inline-error,
   .settings-error {
     margin: 0 0 14px;
@@ -2939,23 +2872,6 @@
     padding: 14px 18px;
     border-radius: 14px;
     box-shadow: none;
-  }
-
-  .degraded {
-    display: grid;
-    gap: 7px;
-    margin: 18px 0;
-    padding: 12px 14px;
-    border: 1px solid var(--warning-border);
-    border-radius: 12px;
-    background: var(--warning-bg);
-    color: var(--warning-text);
-    font-size: 0.75rem;
-  }
-
-  .degraded code {
-    color: #d7b99c;
-    white-space: normal;
   }
 
   .domain-tabs {
@@ -3558,10 +3474,6 @@
     border-color: var(--border);
     background: var(--button);
     color: var(--text);
-  }
-
-  .degraded code {
-    color: var(--warning-text);
   }
 
   .refresh:hover:not(:disabled) {

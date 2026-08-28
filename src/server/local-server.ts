@@ -119,7 +119,9 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
           sendJson(response, 403, { error: 'invalid-origin' });
           return;
         }
-        await options.application.refresh({ userInitiated: true });
+        await options.application.refresh({
+          userInitiated: requestUrl.searchParams.get('mode') !== 'automatic'
+        });
         response.writeHead(204);
         response.end();
         return;

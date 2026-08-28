@@ -32,7 +32,7 @@ test.afterAll(async () => {
 
 test('shows persisted provider usage and refreshes from the dashboard', async ({ page }) => {
   let refreshRequests = 0;
-  await page.route('**/api/refresh', async (route) => {
+  await page.route('**/api/refresh**', async (route) => {
     refreshRequests += 1;
     await route.continue();
   });
@@ -203,13 +203,13 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await page.getByRole('checkbox', { name: 'Local notifications' }).uncheck();
 });
 
-test('renders Codex quota without duplicating Token detail and keeps the actionable degraded state', async ({
+test('renders Codex quota without card diagnostics and keeps human actions in settings', async ({
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   let refreshRequests = 0;
   let refreshResponses = 0;
-  await page.route('**/api/refresh', async (route) => {
+  await page.route('**/api/refresh**', async (route) => {
     refreshRequests += 1;
     const response = await route.fetch();
     refreshResponses += 1;
@@ -339,16 +339,15 @@ test('renders Codex quota without duplicating Token detail and keeps the actiona
   await expect(provider.getByText('Week', { exact: true })).toBeVisible();
   await expectQuotaShowsOnlyReset(provider, 2);
   await expectProviderHasNoTokenDetail(provider);
-  await expect(provider.getByText('codex · Unauthorized')).toBeVisible();
-  await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toBeVisible();
-  const reviewButton = provider.getByRole('button', { name: 'Review in settings' });
-  await reviewButton.click();
+  await expect(provider.locator('.degraded')).toHaveCount(0);
+  await expect(provider.getByText('codex · Unauthorized')).toHaveCount(0);
+  await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const diagnostic = page.getByTestId('settings-diagnostic-codex');
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
-  await expect(diagnostic).toBeFocused();
+  await expect(diagnostic).toBeVisible();
   await expect(page.getByTestId('settings-diagnostic-codex-stale')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
-  await expect(reviewButton).toBeFocused();
   await page.getByRole('button', { name: '中文' }).click();
   await expect(page.getByText('数据已过期')).toHaveCount(0);
   await expect(provider.locator('.freshness')).toContainText('更新于 ·');
@@ -450,6 +449,39 @@ test('keeps Claude All models and Fable-only quota without duplicating local Tok
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  let refreshRequests = 0;
+  let refreshResponses = 0;
+  await page.route('**/api/refresh**', async (route) => {
+    refreshRequests += 1;
+    const response = await route.fetch();
+    refreshResponses += 1;
+    await route.fulfill({ response });
+  });
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-28T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [
+          {
+            id: 'claude-code',
+            providerId: 'claude-code',
+            billingDomainId: 'subscription',
+            status: 'degraded',
+            category: 'unavailable',
+            message: 'Claude Code subscription quota is unavailable.',
+            recovery: 'Run doctor, check the connector, and retry refresh.',
+            affectedCoverage: ['quota'],
+            lastAttemptAt: '2026-08-28T02:00:00.000Z',
+            lastSuccessAt: '2026-08-28T01:58:00.000Z'
+          }
+        ],
+        providers: []
+      })
+    });
+  });
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -462,10 +494,10 @@ test('keeps Claude All models and Fable-only quota without duplicating local Tok
               displayName: 'Claude Code',
               freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
               health: {
-                status: 'healthy',
-                errorCode: null,
-                message: null,
-                recovery: null
+                status: 'degraded',
+                errorCode: 'claude-subscription-quota-unavailable',
+                message: 'Claude Code subscription quota is unavailable.',
+                recovery: 'Run doctor, check the connector, and retry refresh.'
               },
               coverage: {
                 quota: 'complete',
@@ -531,13 +563,23 @@ test('keeps Claude All models and Fable-only quota without duplicating local Tok
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Claude Code' });
+  await expect.poll(() => refreshRequests).toBe(2);
+  await expect.poll(() => refreshResponses).toBe(2);
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await expect(provider.getByText('Week · All models')).toBeVisible();
   await expect(provider.getByText('Week · Fable only')).toBeVisible();
+  await expect(provider.locator('.degraded')).toHaveCount(0);
+  await expect(provider.getByText('claude-code · Unavailable')).toHaveCount(0);
+  await expect(
+    provider.getByText('Run doctor, check the connector, and retry refresh.')
+  ).toHaveCount(0);
   await expectQuotaShowsOnlyReset(provider, 3);
   const quotaEvidence = provider.getByText('Source: Official Client');
   await expect(quotaEvidence).toHaveCount(3);
   for (const evidence of await quotaEvidence.all()) await expect(evidence).toBeHidden();
   await expectProviderHasNoTokenDetail(provider);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByTestId('settings-diagnostic-claude-code')).toHaveCount(0);
 });
 
 test('renders Grok shared weekly quota without duplicating telemetry or inventing a five-hour bucket', async ({
@@ -546,7 +588,7 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   let refreshRequests = 0;
   let refreshResponses = 0;
-  await page.route('**/api/refresh', async (route) => {
+  await page.route('**/api/refresh**', async (route) => {
     refreshRequests += 1;
     const response = await route.fetch();
     refreshResponses += 1;
@@ -683,9 +725,10 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   await expectProviderHasNoTokenDetail(provider);
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
   await provider.getByRole('tab', { name: 'xAI API' }).click();
-  await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
-  await provider.getByRole('button', { name: 'Review in settings' }).click();
-  await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
+  await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
+  await expect(provider.locator('.degraded')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeVisible();
   await expect(page.getByTestId('settings-diagnostic-grok')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expectProviderHasNoTokenDetail(provider);
@@ -1084,7 +1127,7 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   page
 }) => {
   let delayRefresh = false;
-  await page.route('**/api/refresh', async (route) => {
+  await page.route('**/api/refresh**', async (route) => {
     if (delayRefresh) await new Promise((resolve) => setTimeout(resolve, 250));
     await route.continue();
   });
