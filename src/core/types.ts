@@ -49,10 +49,22 @@ export interface QuotaForecast {
   };
 }
 
+export type ReasoningTokenSemantics = 'included-in-output' | 'separate';
+export type CacheTokenSemantics = 'included-in-input' | 'separate';
+export type TokenTimePrecision = 'event' | 'hour' | 'day' | 'billing-period' | 'unknown';
+export type TokenTotalDerivation = 'source-reported' | 'categorized' | 'legacy-total';
+export type TokenModelAttribution = 'known' | 'unclassified';
+
+export interface TokenSemantics {
+  reasoning: ReasoningTokenSemantics;
+  cacheRead: CacheTokenSemantics;
+  cacheWrite: CacheTokenSemantics;
+}
+
 export interface UsageObservation {
   id: string;
   billingDomainId: string;
-  model: string;
+  model: string | null;
   sessionId?: string | null;
   observedAt: string;
   inputTokens: number;
@@ -61,7 +73,22 @@ export interface UsageObservation {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   totalTokens?: number | null;
+  sourceReportedTotalTokens?: number | null;
+  tokenSemantics?: TokenSemantics;
+  modelAttribution?: TokenModelAttribution;
+  timePrecision?: TokenTimePrecision;
   authority: DataAuthority;
+}
+
+export interface NormalizedUsageObservation extends UsageObservation {
+  reasoningTokens: number;
+  sourceReportedTotalTokens: number | null;
+  tokenSemantics: TokenSemantics;
+  modelAttribution: TokenModelAttribution;
+  timePrecision: TokenTimePrecision;
+  recordedTokens: number;
+  unclassifiedTokens: number;
+  totalDerivation: TokenTotalDerivation;
 }
 
 export type CostKind = 'actual' | 'subscription' | 'estimate';
@@ -162,9 +189,22 @@ export interface TokenTotals {
   cacheWrite: number;
 }
 
+export interface TokenEvidence {
+  recordedTokens: number;
+  sourceReportedTokens: number;
+  sourceReportedObservationCount: number;
+  observationCount: number;
+  unclassifiedTokens: number;
+  classifiedTokens: number;
+  classificationCoverage: number | null;
+  totalDerivations: TokenTotalDerivation[];
+  timePrecisions: TokenTimePrecision[];
+}
+
 export interface BillingDomainOverview extends BillingDomain {
   quotaBuckets: QuotaBucket[];
   tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
   tokenAuthority: DataAuthority | 'mixed' | null;
   costs: CostRecord[];
   balances: BalanceRecord[];
@@ -176,11 +216,13 @@ export interface BillingDomainOverview extends BillingDomain {
 export interface HistoryModel {
   model: string;
   tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
 }
 
 export interface HistoryDay {
   day: string;
   tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
   costs: HistoryCost[];
 }
 
@@ -202,6 +244,7 @@ export interface BillingHistory {
   end: string;
   timeZone: string;
   tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
   models: HistoryModel[];
   days: HistoryDay[];
   costs: HistoryCost[];
@@ -251,6 +294,7 @@ export interface ProviderOverview {
   };
   quotaBuckets: QuotaBucket[];
   tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
   tokenAuthority: DataAuthority | 'mixed' | null;
   billingDomains: BillingDomainOverview[];
   forecasts: QuotaForecast[];

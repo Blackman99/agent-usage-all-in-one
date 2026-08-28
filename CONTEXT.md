@@ -28,6 +28,21 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
   are never hard-coded as fixed columns.
 - **Usage observation**: A time-stamped token or activity measurement collected
   from an official account, official client, or local telemetry source.
+- **Source-reported Token total**: A total stated by the source itself. It is
+  preserved as evidence and takes precedence over a locally derived total.
+- **Recorded Tokens**: The one non-overlapping Token total used by summaries.
+  It comes from the source-reported total, a legacy total, or the sum of
+  categories under the observation's declared Token semantics, in that order.
+- **Unclassified usage**: Recorded Tokens that cannot be assigned honestly to
+  both a known model and known categories. `all-models`, `unknown`, and absent
+  model identifiers are unclassified and never enter model rankings.
+- **Token semantics**: Source metadata declaring whether reasoning is included
+  in output and whether cache reads and writes are included in input or are
+  separate. Missing legacy metadata uses the historical interpretation:
+  reasoning included in output, cache reads and writes separate.
+- **Time precision**: The smallest time unit supported by an observation:
+  event, hour, day, billing period, or unknown. A precise timestamp does not
+  upgrade a source's actual precision.
 - **Cost record**: An actual billed amount, a fixed subscription cost, or an API
   retail-price estimate. These cost kinds remain separate.
 - **Data authority**: The provenance level of a value: official account,
@@ -53,3 +68,11 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 6. Credentials stay in the system keychain or their owning official client and
    never appear in logs, exports, or the usage database.
 7. Every displayed number carries its data authority and observation time.
+8. Each observation contributes exactly one recorded Token total. Category
+   fields and source totals are evidence for that total, never additive totals.
+9. Recorded Tokens equal classified plus unclassified Tokens; a source total
+   larger than its categorized fields leaves an explicit unclassified remainder.
+10. `all-models` and unknown-model observations contribute to overall and time
+    summaries but never to per-model rankings.
+11. Migration preserves observation identity, authority, and observed time and
+    does not invent source totals, model attribution, or time precision.

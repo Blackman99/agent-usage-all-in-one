@@ -434,11 +434,17 @@
         displayName: provider.displayName,
         quotaBuckets: provider.quotaBuckets,
         tokenTotals: provider.tokenTotals,
+        tokenEvidence: provider.tokenEvidence,
         tokenAuthority: provider.tokenAuthority,
         costs: [],
         balances: [],
         invoices: [],
-        history: fallbackHistory(provider.tokenTotals, [], provider.tokenAuthority),
+        history: fallbackHistory(
+          provider.tokenTotals,
+          [],
+          provider.tokenAuthority,
+          provider.tokenEvidence
+        ),
         forecasts: []
       }
     );
@@ -446,14 +452,21 @@
 
   function activeHistory(domain: BillingDomainOverview): BillingHistory {
     return (
-      domain.history ?? fallbackHistory(domain.tokenTotals, domain.costs, domain.tokenAuthority)
+      domain.history ??
+      fallbackHistory(
+        domain.tokenTotals,
+        domain.costs,
+        domain.tokenAuthority,
+        domain.tokenEvidence
+      )
     );
   }
 
   function fallbackHistory(
     tokenTotals: ProviderOverview['tokenTotals'],
     costs: BillingDomainOverview['costs'],
-    tokenAuthority: BillingDomainOverview['tokenAuthority']
+    tokenAuthority: BillingDomainOverview['tokenAuthority'],
+    tokenEvidence: ProviderOverview['tokenEvidence'] = emptyTokenEvidence()
   ): BillingHistory {
     return {
       window: selectedWindow,
@@ -461,6 +474,7 @@
       end: '',
       timeZone,
       tokenTotals,
+      tokenEvidence,
       models: [],
       days: [],
       costs: costs.map((cost) => ({
@@ -570,6 +584,7 @@
       },
       quotaBuckets: [],
       tokenTotals,
+      tokenEvidence: emptyTokenEvidence(),
       tokenAuthority: null,
       billingDomains: [],
       forecasts: [],
@@ -584,6 +599,7 @@
       displayName,
       quotaBuckets: [],
       tokenTotals,
+      tokenEvidence: emptyTokenEvidence(),
       tokenAuthority: null,
       costs: [],
       balances: [],
@@ -595,6 +611,20 @@
 
   function emptyTokenTotals(): ProviderOverview['tokenTotals'] {
     return { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+  }
+
+  function emptyTokenEvidence(): ProviderOverview['tokenEvidence'] {
+    return {
+      recordedTokens: 0,
+      sourceReportedTokens: 0,
+      sourceReportedObservationCount: 0,
+      observationCount: 0,
+      unclassifiedTokens: 0,
+      classifiedTokens: 0,
+      classificationCoverage: null,
+      totalDerivations: [],
+      timePrecisions: []
+    };
   }
 
   function diagnosticTargetForProvider(

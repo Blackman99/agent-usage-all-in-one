@@ -6,8 +6,9 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import type {
   BalanceRecord,
   BillingDomainOverview,
-  ConnectorRuntimeState,
   ConnectorDiagnostic,
+  ConnectorRuntimeState,
+  ConnectorSnapshot,
   CoverageLevel,
   CostRecord,
   DataAuthority,
@@ -19,12 +20,16 @@ import type {
   ProviderOverview,
   QuotaBucket,
   QuotaForecast,
+  RetentionStatus,
+  TokenEvidence,
+  TokenModelAttribution,
+  TokenTimePrecision,
+  TokenTotalDerivation,
   UsageOverview,
   UsageQuery,
-  UsageRepository,
-  ConnectorSnapshot,
-  RetentionStatus
+  UsageRepository
 } from '../core/types.js';
+import { normalizeTokenObservation } from '../core/token-normalization.js';
 import type { ConnectorStatusRecord, ConnectorSetupState } from '../core/onboarding-types.js';
 
 const FRESHNESS_WINDOW_MS = 15 * 60 * 1000;
@@ -73,6 +78,11 @@ interface TokenRow {
   cache_read_tokens: number | null;
   cache_write_tokens: number | null;
   observation_count: number;
+  source_reported_tokens: number | null;
+  source_reported_observation_count: number;
+  unclassified_tokens: number | null;
+  total_derivations: string | null;
+  time_precisions: string | null;
   authorities: string | null;
 }
 
@@ -106,6 +116,21 @@ interface UsageHistoryRow {
   reasoning_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  source_reported_total_tokens: number | null;
+  unclassified_tokens: number;
+  total_derivation: TokenTotalDerivation;
+  model_attribution: TokenModelAttribution;
+  time_precision: TokenTimePrecision;
+}
+
+interface MutableTokenEvidence {
+  recordedTokens: number;
+  sourceReportedTokens: number;
+  sourceReportedObservationCount: number;
+  observationCount: number;
+  unclassifiedTokens: number;
+  totalDerivations: Set<TokenTotalDerivation>;
+  timePrecisions: Set<TokenTimePrecision>;
 }
 
 interface ExchangeRateRow {
@@ -289,8 +314,11 @@ export class SqliteUsageRepository implements UsageRepository {
         `INSERT INTO usage_observations (
            provider_id, id, billing_domain_id, model, session_id, observed_at,
            total_tokens, input_tokens, output_tokens, reasoning_tokens,
-           cache_read_tokens, cache_write_tokens, authority
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           cache_read_tokens, cache_write_tokens, authority,
+           source_reported_total_tokens, unclassified_tokens, total_derivation,
+           reasoning_semantics, cache_read_semantics, cache_write_semantics,
+           model_attribution, time_precision
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            billing_domain_id = excluded.billing_domain_id,
            model = excluded.model,
@@ -302,27 +330,40 @@ export class SqliteUsageRepository implements UsageRepository {
            reasoning_tokens = excluded.reasoning_tokens,
            cache_read_tokens = excluded.cache_read_tokens,
            cache_write_tokens = excluded.cache_write_tokens,
-           authority = excluded.authority`
+           authority = excluded.authority,
+           source_reported_total_tokens = excluded.source_reported_total_tokens,
+           unclassified_tokens = excluded.unclassified_tokens,
+           total_derivation = excluded.total_derivation,
+           reasoning_semantics = excluded.reasoning_semantics,
+           cache_read_semantics = excluded.cache_read_semantics,
+           cache_write_semantics = excluded.cache_write_semantics,
+           model_attribution = excluded.model_attribution,
+           time_precision = excluded.time_precision`
       );
       for (const observation of snapshot.usage) {
+        const normalized = normalizeTokenObservation(observation);
         usageStatement.run(
           snapshot.provider.id,
-          observation.id,
-          observation.billingDomainId,
-          observation.model,
-          observation.sessionId ?? null,
-          observation.observedAt,
-          observation.totalTokens ??
-            observation.inputTokens +
-              observation.outputTokens +
-              observation.cacheReadTokens +
-              observation.cacheWriteTokens,
-          observation.inputTokens,
-          observation.outputTokens,
-          observation.reasoningTokens ?? 0,
-          observation.cacheReadTokens,
-          observation.cacheWriteTokens,
-          observation.authority
+          normalized.id,
+          normalized.billingDomainId,
+          normalized.model?.trim() || '__unclassified__',
+          normalized.sessionId ?? null,
+          normalized.observedAt,
+          normalized.recordedTokens,
+          normalized.inputTokens,
+          normalized.outputTokens,
+          normalized.reasoningTokens,
+          normalized.cacheReadTokens,
+          normalized.cacheWriteTokens,
+          normalized.authority,
+          normalized.sourceReportedTotalTokens,
+          normalized.unclassifiedTokens,
+          normalized.totalDerivation,
+          normalized.tokenSemantics.reasoning,
+          normalized.tokenSemantics.cacheRead,
+          normalized.tokenSemantics.cacheWrite,
+          normalized.modelAttribution,
+          normalized.timePrecision
         );
       }
 
@@ -808,6 +849,12 @@ export class SqliteUsageRepository implements UsageRepository {
            COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
            COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
            COUNT(*) AS observation_count,
+           COALESCE(SUM(source_reported_total_tokens), 0) AS source_reported_tokens,
+           SUM(CASE WHEN source_reported_total_tokens IS NOT NULL THEN 1 ELSE 0 END)
+             AS source_reported_observation_count,
+           COALESCE(SUM(unclassified_tokens), 0) AS unclassified_tokens,
+           GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
+           GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
            GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations WHERE provider_id = ?`
       )
@@ -848,6 +895,7 @@ export class SqliteUsageRepository implements UsageRepository {
         cacheRead: Number(tokens.cache_read_tokens ?? 0),
         cacheWrite: Number(tokens.cache_write_tokens ?? 0)
       },
+      tokenEvidence: mapTokenEvidence(tokens),
       tokenAuthority: tokenAuthority(tokens.authorities),
       billingDomains: domainRows.map((domain) =>
         this.#getBillingDomainOverview(
@@ -886,6 +934,12 @@ export class SqliteUsageRepository implements UsageRepository {
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                 COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                 COUNT(*) AS observation_count,
+                COALESCE(SUM(source_reported_total_tokens), 0) AS source_reported_tokens,
+                SUM(CASE WHEN source_reported_total_tokens IS NOT NULL THEN 1 ELSE 0 END)
+                  AS source_reported_observation_count,
+                COALESCE(SUM(unclassified_tokens), 0) AS unclassified_tokens,
+                GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
+                GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
                 GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations WHERE provider_id = ? AND billing_domain_id = ?`
       )
@@ -915,6 +969,7 @@ export class SqliteUsageRepository implements UsageRepository {
       displayName: domain.display_name,
       quotaBuckets: quotaRows.map(mapQuotaRow),
       tokenTotals: mapTokenTotals(tokens),
+      tokenEvidence: mapTokenEvidence(tokens),
       tokenAuthority: tokenAuthority(tokens.authorities),
       costs: costs.map((row) => ({
         id: row.id,
@@ -1056,7 +1111,8 @@ export class SqliteUsageRepository implements UsageRepository {
     const usage = this.#database
       .prepare(
         `SELECT model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
-                cache_read_tokens, cache_write_tokens
+                cache_read_tokens, cache_write_tokens, source_reported_total_tokens,
+                unclassified_tokens, total_derivation, model_attribution, time_precision
          FROM usage_observations
          WHERE provider_id = ? AND billing_domain_id = ?
            AND observed_at >= ? AND observed_at < ?
@@ -1091,26 +1147,50 @@ export class SqliteUsageRepository implements UsageRepository {
     }
 
     const tokenTotals = zeroTokenTotals();
-    const byModel = new Map<string, ReturnType<typeof zeroTokenTotals>>();
+    const tokenEvidence = emptyTokenEvidence();
+    const byModel = new Map<
+      string,
+      { tokens: ReturnType<typeof zeroTokenTotals>; evidence: MutableTokenEvidence }
+    >();
     const authorities = new Set<DataAuthority>();
     const byDay = new Map<
       string,
-      { tokens: ReturnType<typeof zeroTokenTotals>; costs: CostRow[] }
+      {
+        tokens: ReturnType<typeof zeroTokenTotals>;
+        evidence: MutableTokenEvidence;
+        costs: CostRow[];
+      }
     >();
     for (const row of usage) {
       authorities.add(row.authority);
       addUsageRow(tokenTotals, row);
-      const model = byModel.get(row.model) ?? zeroTokenTotals();
-      addUsageRow(model, row);
-      byModel.set(row.model, model);
+      addTokenEvidence(tokenEvidence, row);
+      if (row.model_attribution === 'known') {
+        const model = byModel.get(row.model) ?? {
+          tokens: zeroTokenTotals(),
+          evidence: emptyTokenEvidence()
+        };
+        addUsageRow(model.tokens, row);
+        addTokenEvidence(model.evidence, row);
+        byModel.set(row.model, model);
+      }
       const day = localDay(row.observed_at, normalized.timeZone);
-      const daily = byDay.get(day) ?? { tokens: zeroTokenTotals(), costs: [] };
+      const daily = byDay.get(day) ?? {
+        tokens: zeroTokenTotals(),
+        evidence: emptyTokenEvidence(),
+        costs: []
+      };
       addUsageRow(daily.tokens, row);
+      addTokenEvidence(daily.evidence, row);
       byDay.set(day, daily);
     }
     for (const cost of costs) {
       const day = localDay(cost.observed_at, normalized.timeZone);
-      const daily = byDay.get(day) ?? { tokens: zeroTokenTotals(), costs: [] };
+      const daily = byDay.get(day) ?? {
+        tokens: zeroTokenTotals(),
+        evidence: emptyTokenEvidence(),
+        costs: []
+      };
       daily.costs.push(cost);
       byDay.set(day, daily);
     }
@@ -1130,8 +1210,13 @@ export class SqliteUsageRepository implements UsageRepository {
       end,
       timeZone: normalized.timeZone,
       tokenTotals,
+      tokenEvidence: finishTokenEvidence(tokenEvidence),
       models: [...byModel.entries()]
-        .map(([model, totals]) => ({ model, tokenTotals: totals }))
+        .map(([model, value]) => ({
+          model,
+          tokenTotals: value.tokens,
+          tokenEvidence: finishTokenEvidence(value.evidence)
+        }))
         .sort(
           (left, right) =>
             right.tokenTotals.total - left.tokenTotals.total ||
@@ -1142,6 +1227,7 @@ export class SqliteUsageRepository implements UsageRepository {
         .map(([day, daily]) => ({
           day,
           tokenTotals: daily.tokens,
+          tokenEvidence: finishTokenEvidence(daily.evidence),
           costs: summarizeCosts(daily.costs)
         })),
       costs: summarizeCosts(costs),
@@ -1195,12 +1281,21 @@ export class SqliteUsageRepository implements UsageRepository {
         model TEXT NOT NULL,
         session_id TEXT,
         observed_at TEXT NOT NULL,
+        total_tokens INTEGER NOT NULL DEFAULT 0,
         input_tokens INTEGER NOT NULL,
         output_tokens INTEGER NOT NULL,
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
         cache_read_tokens INTEGER NOT NULL,
         cache_write_tokens INTEGER NOT NULL,
         authority TEXT NOT NULL,
+        source_reported_total_tokens INTEGER,
+        unclassified_tokens INTEGER NOT NULL DEFAULT 0,
+        total_derivation TEXT NOT NULL DEFAULT 'legacy-total',
+        reasoning_semantics TEXT NOT NULL DEFAULT 'included-in-output',
+        cache_read_semantics TEXT NOT NULL DEFAULT 'separate',
+        cache_write_semantics TEXT NOT NULL DEFAULT 'separate',
+        model_attribution TEXT NOT NULL DEFAULT 'known',
+        time_precision TEXT NOT NULL DEFAULT 'unknown',
         PRIMARY KEY (provider_id, id),
         FOREIGN KEY (provider_id, billing_domain_id)
           REFERENCES billing_domains(provider_id, id) ON DELETE CASCADE
@@ -1351,6 +1446,34 @@ export class SqliteUsageRepository implements UsageRepository {
         'ALTER TABLE usage_observations ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0'
       );
     }
+    for (const [name, definition] of [
+      ['source_reported_total_tokens', 'INTEGER'],
+      ['unclassified_tokens', 'INTEGER NOT NULL DEFAULT 0'],
+      ["total_derivation", "TEXT NOT NULL DEFAULT 'legacy-total'"],
+      ["reasoning_semantics", "TEXT NOT NULL DEFAULT 'included-in-output'"],
+      ["cache_read_semantics", "TEXT NOT NULL DEFAULT 'separate'"],
+      ["cache_write_semantics", "TEXT NOT NULL DEFAULT 'separate'"],
+      ["model_attribution", "TEXT NOT NULL DEFAULT 'known'"],
+      ["time_precision", "TEXT NOT NULL DEFAULT 'unknown'"]
+    ] as const) {
+      if (!usageColumns.some((column) => column.name === name)) {
+        this.#database.exec(`ALTER TABLE usage_observations ADD COLUMN ${name} ${definition}`);
+      }
+    }
+    this.#database.exec(`
+      UPDATE usage_observations
+      SET unclassified_tokens = MAX(
+        0,
+        total_tokens - input_tokens - output_tokens - cache_read_tokens - cache_write_tokens
+      )
+      WHERE total_derivation = 'legacy-total'
+    `);
+    this.#database.exec(`
+      UPDATE usage_observations
+      SET model_attribution = 'unclassified',
+          unclassified_tokens = total_tokens
+      WHERE lower(trim(model)) IN ('all-models', 'unknown', '__unclassified__')
+    `);
     const providerColumns = this.#database
       .prepare('PRAGMA table_info(providers)')
       .all() as unknown as Array<{ name: string }>;
@@ -1431,6 +1554,72 @@ function mapTokenTotals(tokens: TokenRow): ProviderOverview['tokenTotals'] {
     cacheRead: Number(tokens.cache_read_tokens ?? 0),
     cacheWrite: Number(tokens.cache_write_tokens ?? 0)
   };
+}
+
+function mapTokenEvidence(tokens: TokenRow): TokenEvidence {
+  const recordedTokens = Number(tokens.total_tokens ?? 0);
+  const unclassifiedTokens = Number(tokens.unclassified_tokens ?? 0);
+  const classifiedTokens = Math.max(0, recordedTokens - unclassifiedTokens);
+  return {
+    recordedTokens,
+    sourceReportedTokens: Number(tokens.source_reported_tokens ?? 0),
+    sourceReportedObservationCount: Number(tokens.source_reported_observation_count ?? 0),
+    observationCount: Number(tokens.observation_count ?? 0),
+    unclassifiedTokens,
+    classifiedTokens,
+    classificationCoverage: recordedTokens === 0 ? null : classifiedTokens / recordedTokens,
+    totalDerivations: commaSeparatedValues<TokenTotalDerivation>(tokens.total_derivations),
+    timePrecisions: commaSeparatedValues<TokenTimePrecision>(tokens.time_precisions)
+  };
+}
+
+function emptyTokenEvidence(): MutableTokenEvidence {
+  return {
+    recordedTokens: 0,
+    sourceReportedTokens: 0,
+    sourceReportedObservationCount: 0,
+    observationCount: 0,
+    unclassifiedTokens: 0,
+    totalDerivations: new Set(),
+    timePrecisions: new Set()
+  };
+}
+
+function addTokenEvidence(target: MutableTokenEvidence, row: UsageHistoryRow): void {
+  target.recordedTokens += Number(row.total_tokens);
+  target.observationCount += 1;
+  target.unclassifiedTokens += Number(row.unclassified_tokens);
+  if (row.source_reported_total_tokens !== null) {
+    target.sourceReportedTokens += Number(row.source_reported_total_tokens);
+    target.sourceReportedObservationCount += 1;
+  }
+  target.totalDerivations.add(row.total_derivation);
+  target.timePrecisions.add(row.time_precision);
+}
+
+function finishTokenEvidence(evidence: MutableTokenEvidence): TokenEvidence {
+  const classifiedTokens = Math.max(
+    0,
+    evidence.recordedTokens - evidence.unclassifiedTokens
+  );
+  return {
+    recordedTokens: evidence.recordedTokens,
+    sourceReportedTokens: evidence.sourceReportedTokens,
+    sourceReportedObservationCount: evidence.sourceReportedObservationCount,
+    observationCount: evidence.observationCount,
+    unclassifiedTokens: evidence.unclassifiedTokens,
+    classifiedTokens,
+    classificationCoverage:
+      evidence.recordedTokens === 0 ? null : classifiedTokens / evidence.recordedTokens,
+    totalDerivations: [...evidence.totalDerivations].sort(),
+    timePrecisions: [...evidence.timePrecisions].sort()
+  };
+}
+
+function commaSeparatedValues<T extends string>(value: string | null): T[] {
+  return value
+    ? ([...new Set(value.split(',').filter(Boolean))].sort() as T[])
+    : [];
 }
 
 function priceSnapshotFromRow(row: CostRow): PriceSnapshotReference | null {

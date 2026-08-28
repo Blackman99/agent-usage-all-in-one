@@ -410,6 +410,12 @@ describe('local HTTP server', () => {
         {
           id: 'claude-code',
           tokenTotals: { total: 125, input: 125 },
+          tokenEvidence: {
+            recordedTokens: 125,
+            unclassifiedTokens: 0,
+            totalDerivations: ['legacy-total'],
+            timePrecisions: ['unknown']
+          },
           tokenAuthority: 'local-observation'
         }
       ]
