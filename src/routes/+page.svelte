@@ -11,6 +11,7 @@
     MonitoringSettings,
     ProcessingStatus,
     ProviderOverview,
+    QuotaBucket,
     RetentionStatus,
     UsageOverview
   } from '$core/types.js';
@@ -836,6 +837,24 @@
     );
   }
 
+  function displayQuotaBuckets(buckets: QuotaBucket[]): QuotaBucket[] {
+    const displayPriority = (bucket: QuotaBucket): number => {
+      if (/\b5\s*hours?\b/i.test(bucket.label)) return 0;
+      if (/\b(?:week|weekly)\b/i.test(bucket.label)) return 1;
+      if (/\b(?:month|monthly)\b/i.test(bucket.label)) return 2;
+      return 3;
+    };
+
+    return buckets
+      .map((bucket, sourceIndex) => ({ bucket, sourceIndex }))
+      .sort(
+        (left, right) =>
+          displayPriority(left.bucket) - displayPriority(right.bucket) ||
+          left.sourceIndex - right.sourceIndex
+      )
+      .map(({ bucket }) => bucket);
+  }
+
   function emptyProvider(id: string, displayName: string): ProviderOverview {
     const tokenTotals = emptyTokenTotals();
     return {
@@ -1368,7 +1387,7 @@
                   {/if}
                   <div class="section-label">{t('quota')}</div>
                   <div class="quotas">
-                    {#each domain.quotaBuckets as bucket (bucket.id)}
+                    {#each displayQuotaBuckets(domain.quotaBuckets) as bucket (bucket.id)}
                       <div class="quota-row">
                         <div class="quota-copy">
                           <strong>{bucket.label}</strong>

@@ -402,6 +402,32 @@ test('shows OpenCode Go account quota without duplicating its Token history', as
               },
               quotaBuckets: [
                 {
+                  id: 'monthly',
+                  billingDomainId: 'go-subscription',
+                  label: 'Month',
+                  usedPercent: 50,
+                  resetsAt: '2026-09-28T00:00:00.000Z',
+                  authority: 'official-account',
+                  scope: 'account-wide',
+                  status: 'ok',
+                  limitAmount: 60,
+                  limitCurrency: 'USD',
+                  fallbackStatus: 'unknown'
+                },
+                {
+                  id: 'weekly',
+                  billingDomainId: 'go-subscription',
+                  label: 'Week',
+                  usedPercent: 40,
+                  resetsAt: '2026-09-01T00:00:00.000Z',
+                  authority: 'official-account',
+                  scope: 'account-wide',
+                  status: 'ok',
+                  limitAmount: 30,
+                  limitCurrency: 'USD',
+                  fallbackStatus: 'unknown'
+                },
+                {
                   id: 'rolling',
                   billingDomainId: 'go-subscription',
                   label: '5 hour',
@@ -444,7 +470,8 @@ test('shows OpenCode Go account quota without duplicating its Token history', as
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'OpenCode Go' });
-  await expectQuotaShowsOnlyReset(provider, 1);
+  await expect(provider.locator('.quota-copy strong')).toHaveText(['5 hour', 'Week', 'Month']);
+  await expectQuotaShowsOnlyReset(provider, 3);
   await expect(provider.getByRole('progressbar', { name: '5 hour' })).toHaveAccessibleDescription(
     /Source: Official account.*Aug 28/
   );
