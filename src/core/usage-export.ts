@@ -50,6 +50,7 @@ export function buildUsageExport(
         amount: null,
         currency: null,
         pricedTokens: null,
+        unpricedTokens: null,
         pricingCoverage: null,
         priceVersions: null,
         priceSourceUrls: null,
@@ -90,6 +91,7 @@ export function buildUsageExport(
           amount: cost.amount,
           currency: cost.currency,
           pricedTokens: cost.pricingEvidence?.pricedTokens ?? null,
+          unpricedTokens: cost.pricingEvidence?.unpricedTokens ?? null,
           pricingCoverage: cost.pricingEvidence?.pricingCoverage ?? null,
           priceVersions: cost.priceSnapshots.map((snapshot) => snapshot.version),
           priceSourceUrls: cost.priceSnapshots.flatMap((snapshot) =>
@@ -174,6 +176,7 @@ const CSV_COLUMNS = [
   'amount',
   'currency',
   'pricedTokens',
+  'unpricedTokens',
   'pricingCoverage',
   'priceVersions',
   'priceSourceUrls',

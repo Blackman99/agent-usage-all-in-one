@@ -69,6 +69,7 @@ describe('retail-equivalent application tracer', () => {
           currency: 'USD',
           pricingEvidence: {
             pricedTokens: 130_000,
+            unpricedTokens: 70_000,
             recordedTokens: 200_000,
             pricingCoverage: 0.65
           },

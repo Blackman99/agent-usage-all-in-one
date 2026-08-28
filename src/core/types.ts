@@ -261,6 +261,7 @@ export interface HistoryCost {
   observedAt?: string | null;
   pricingEvidence?: {
     pricedTokens: number;
+    unpricedTokens: number;
     recordedTokens: number;
     pricingCoverage: number | null;
   };
@@ -501,6 +502,8 @@ export interface UsageRepository {
   clearUsageData(): void;
   saveConnectorStatus(status: ConnectorStatusRecord): void;
   getConnectorStatuses(): ConnectorStatusRecord[];
+  getRetailPricingBackfillSnapshots?(): ConnectorSnapshot[];
+  saveDerivedCosts?(providerId: string, costs: CostRecord[]): void;
   close(): void;
 }
 

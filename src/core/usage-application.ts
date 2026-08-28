@@ -29,7 +29,7 @@ import type {
 import { redactSensitiveText } from './redaction.js';
 import { buildUsageExport } from './usage-export.js';
 import {
-  ANTHROPIC_PRICING_CATALOG,
+  OFFICIAL_PRICING_CATALOG,
   deriveRetailEquivalentCosts,
   type RetailPriceCatalog
 } from './retail-pricing.js';
@@ -81,7 +81,23 @@ export class UsageApplication {
     this.#notifier = options.notifier;
     this.#startAtLoginManager = options.startAtLoginManager;
     this.#priceCatalog =
-      options.priceCatalog === undefined ? ANTHROPIC_PRICING_CATALOG : options.priceCatalog;
+      options.priceCatalog === undefined ? OFFICIAL_PRICING_CATALOG : options.priceCatalog;
+    this.#backfillRetailCosts();
+  }
+
+  #backfillRetailCosts(): void {
+    if (
+      !this.#priceCatalog ||
+      !this.#repository.getRetailPricingBackfillSnapshots ||
+      !this.#repository.saveDerivedCosts
+    ) {
+      return;
+    }
+    const calculatedAt = this.#clock().toISOString();
+    for (const snapshot of this.#repository.getRetailPricingBackfillSnapshots()) {
+      const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
+      if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
+    }
   }
 
   refresh(options: RefreshOptions = {}): Promise<void> {

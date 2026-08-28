@@ -63,7 +63,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
   context tier, currency, effective interval, and Token-kind rates used by one
   retail-equivalent derivation.
 - **Pricing coverage**: Priced Tokens divided by recorded Tokens for the selected
-  window. It is independent from classification and Provider data Coverage.
+  window. Priced, unpriced, and recorded Token counts remain available so the
+  ratio can be recomputed. It is independent from classification and Provider
+  data Coverage.
 - **Data authority**: The provenance level of a value: official account,
   official client, local observation, estimate, or unavailable.
 - **Freshness**: The age and last-success state of a connector result.
@@ -111,3 +113,10 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     retail amount and never mutate actual, subscription, or reported estimates.
 17. Unknown retail equivalent is unavailable, never zero. Pricing coverage may
     be zero when Tokens were observed but none were eligible for pricing.
+18. Context-sensitive pricing requires observation evidence at the same
+    granularity as the Provider rule. Day or billing-period aggregates cannot
+    select request-length or time-of-day tiers. Grok Build/SuperGrok and xAI API
+    aliases, amounts, and coverage remain isolated by billing domain.
+19. Retained observations may be backfilled with the catalog entry effective at
+    their observation time. Once recorded, a retail price snapshot is immutable;
+    a later catalog release adds a new version instead of rewriting history.

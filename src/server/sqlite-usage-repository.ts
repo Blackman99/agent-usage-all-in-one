@@ -25,6 +25,7 @@ import type {
   TokenEvidence,
   TokenAggregationTemporality,
   TokenModelAttribution,
+  TokenSemantics,
   TokenTimePrecision,
   TokenTotalDerivation,
   TokenUsageScope,
@@ -135,6 +136,18 @@ interface UsageHistoryRow {
   time_precision: TokenTimePrecision;
   usage_scope: TokenUsageScope;
   aggregation_temporality: TokenAggregationTemporality;
+}
+
+interface PricingBackfillRow extends UsageHistoryRow {
+  provider_id: string;
+  provider_display_name: string;
+  id: string;
+  billing_domain_id: string;
+  billing_domain_display_name: string;
+  session_id: string | null;
+  reasoning_semantics: TokenSemantics['reasoning'];
+  cache_read_semantics: TokenSemantics['cacheRead'];
+  cache_write_semantics: TokenSemantics['cacheWrite'];
 }
 
 interface MutableTokenEvidence {
@@ -413,7 +426,8 @@ export class SqliteUsageRepository implements UsageRepository {
            usage_observation_id = excluded.usage_observation_id,
            priced_tokens = excluded.priced_tokens,
            line_items_json = excluded.line_items_json,
-           calculated_at = excluded.calculated_at`
+           calculated_at = excluded.calculated_at
+         WHERE cost_records.kind <> 'retail-equivalent'`
       );
       for (const cost of snapshot.costs) {
         costStatement.run(
@@ -494,6 +508,119 @@ export class SqliteUsageRepository implements UsageRepository {
         );
       }
 
+      this.#database.exec('COMMIT');
+    } catch (error) {
+      this.#database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  getRetailPricingBackfillSnapshots(): ConnectorSnapshot[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT u.provider_id, p.display_name AS provider_display_name,
+                u.id, u.billing_domain_id, b.display_name AS billing_domain_display_name,
+                u.model, u.session_id, u.observed_at, u.authority,
+                u.total_tokens, u.input_tokens, u.output_tokens, u.reasoning_tokens,
+                u.cache_read_tokens, u.cache_write_tokens, u.source_reported_total_tokens,
+                u.unclassified_tokens, u.total_derivation, u.model_attribution,
+                u.reasoning_semantics, u.cache_read_semantics, u.cache_write_semantics,
+                u.time_precision, u.usage_scope, u.aggregation_temporality
+         FROM usage_observations u
+         JOIN providers p ON p.id = u.provider_id
+         JOIN billing_domains b
+           ON b.provider_id = u.provider_id AND b.id = u.billing_domain_id
+         ORDER BY u.provider_id, u.observed_at, u.id`
+      )
+      .all() as unknown as PricingBackfillRow[];
+    const snapshots = new Map<string, ConnectorSnapshot>();
+    for (const row of rows) {
+      const snapshot = snapshots.get(row.provider_id) ?? {
+        provider: { id: row.provider_id, displayName: row.provider_display_name },
+        billingDomains: [],
+        quotaBuckets: [],
+        usage: [],
+        costs: [],
+        observedAt: row.observed_at
+      };
+      if (!snapshot.billingDomains.some((domain) => domain.id === row.billing_domain_id)) {
+        snapshot.billingDomains.push({
+          id: row.billing_domain_id,
+          displayName: row.billing_domain_display_name
+        });
+      }
+      snapshot.usage.push({
+        id: row.id,
+        billingDomainId: row.billing_domain_id,
+        model: row.model_attribution === 'known' ? row.model : null,
+        sessionId: row.session_id,
+        observedAt: row.observed_at,
+        inputTokens: Number(row.input_tokens),
+        outputTokens: Number(row.output_tokens),
+        reasoningTokens: Number(row.reasoning_tokens),
+        cacheReadTokens: Number(row.cache_read_tokens),
+        cacheWriteTokens: Number(row.cache_write_tokens),
+        sourceReportedTotalTokens:
+          row.source_reported_total_tokens === null
+            ? null
+            : Number(row.source_reported_total_tokens),
+        tokenSemantics: {
+          reasoning: row.reasoning_semantics,
+          cacheRead: row.cache_read_semantics,
+          cacheWrite: row.cache_write_semantics
+        },
+        modelAttribution: row.model_attribution,
+        timePrecision: row.time_precision,
+        usageScope: row.usage_scope,
+        aggregationTemporality: row.aggregation_temporality,
+        authority: row.authority
+      });
+      if (row.observed_at > snapshot.observedAt) snapshot.observedAt = row.observed_at;
+      snapshots.set(row.provider_id, snapshot);
+    }
+    return [...snapshots.values()];
+  }
+
+  saveDerivedCosts(providerId: string, costs: CostRecord[]): void {
+    if (costs.length === 0) return;
+    if (costs.some((cost) => cost.kind !== 'retail-equivalent')) {
+      throw new Error('Only retail-equivalent costs can be saved through the derivation seam.');
+    }
+    const statement = this.#database.prepare(
+      `INSERT INTO cost_records (
+         provider_id, id, source_id, billing_domain_id, observed_at, kind, amount, currency,
+         authority, price_snapshot_id, price_snapshot_version, price_snapshot_source,
+         price_snapshot_effective_at, price_snapshot_source_url, price_snapshot_context_tier,
+         model, usage_observation_id, priced_tokens, line_items_json, calculated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(provider_id, id) DO NOTHING`
+    );
+    this.#database.exec('BEGIN IMMEDIATE');
+    try {
+      for (const cost of costs) {
+        statement.run(
+          providerId,
+          cost.id,
+          cost.sourceId ?? null,
+          cost.billingDomainId,
+          cost.observedAt,
+          cost.kind,
+          cost.amount,
+          cost.currency,
+          cost.authority,
+          cost.priceSnapshot?.id ?? null,
+          cost.priceSnapshot?.version ?? null,
+          cost.priceSnapshot?.source ?? null,
+          cost.priceSnapshot?.effectiveAt ?? null,
+          cost.priceSnapshot?.sourceUrl ?? null,
+          cost.priceSnapshot?.contextTier ?? null,
+          cost.model ?? null,
+          cost.usageObservationId ?? null,
+          cost.pricedTokens ?? null,
+          cost.lineItems ? JSON.stringify(cost.lineItems) : null,
+          cost.calculatedAt ?? null
+        );
+      }
       this.#database.exec('COMMIT');
     } catch (error) {
       this.#database.exec('ROLLBACK');
@@ -1950,6 +2077,7 @@ function summarizeHistoryCosts(
         group.kind === 'retail-equivalent'
           ? {
               pricedTokens: group.pricedTokens,
+              unpricedTokens: Math.max(0, recordedTokens - group.pricedTokens),
               recordedTokens,
               pricingCoverage: recordedTokens === 0 ? null : group.pricedTokens / recordedTokens
             }

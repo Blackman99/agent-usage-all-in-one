@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { ANTHROPIC_PRICING_CATALOG, deriveRetailEquivalentCosts } from '$core/retail-pricing.js';
+import {
+  ANTHROPIC_PRICING_CATALOG,
+  OFFICIAL_PRICING_CATALOG,
+  deriveRetailEquivalentCosts
+} from '$core/retail-pricing.js';
 import type { ConnectorSnapshot, UsageObservation } from '$core/types.js';
 
 describe('API retail-equivalent pricing', () => {
@@ -119,6 +123,158 @@ describe('API retail-equivalent pricing', () => {
           }
         }
       ]
+    });
+  });
+
+  it('selects xAI short and long context tiers only from event-level prompt evidence', () => {
+    const short = deriveRetailEquivalentCosts(
+      snapshot(observation({ model: 'grok-4.6', billingDomainId: 'xai-api' }), {
+        providerId: 'grok',
+        domainId: 'xai-api',
+        domainName: 'xAI API'
+      }),
+      OFFICIAL_PRICING_CATALOG
+    );
+    const long = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'grok-long',
+          model: 'grok-4.6',
+          billingDomainId: 'xai-api',
+          inputTokens: 200_000
+        }),
+        { providerId: 'grok', domainId: 'xai-api', domainName: 'xAI API' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+    const billingPeriod = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'grok-invoice',
+          model: 'grok-4.6',
+          billingDomainId: 'xai-api',
+          timePrecision: 'billing-period'
+        }),
+        { providerId: 'grok', domainId: 'xai-api', domainName: 'xAI API' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(short.costs[0]).toMatchObject({
+      amount: 0.325,
+      model: 'grok-4.6',
+      priceSnapshot: { contextTier: 'prompt-at-or-below-200k' }
+    });
+    expect(long.costs[0]).toMatchObject({
+      amount: 1.05,
+      priceSnapshot: { contextTier: 'prompt-above-200k' }
+    });
+    expect(billingPeriod.costs).toEqual([]);
+    expect(billingPeriod.decisions[0]).toMatchObject({
+      status: 'unavailable',
+      reason: 'pricing-tier-ambiguous'
+    });
+  });
+
+  it('keeps Grok Build pricing in the subscription domain and resolves the client model label', () => {
+    const build = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'grok-build-event',
+          model: 'grok-build',
+          billingDomainId: 'grok-build-subscription'
+        }),
+        {
+          providerId: 'grok',
+          domainId: 'grok-build-subscription',
+          domainName: 'Build / SuperGrok'
+        }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+    const wrongDomain = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({ id: 'grok-build-api', model: 'grok-build', billingDomainId: 'xai-api' }),
+        { providerId: 'grok', domainId: 'xai-api', domainName: 'xAI API' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(build.costs[0]).toMatchObject({
+      amount: 0.142,
+      billingDomainId: 'grok-build-subscription',
+      model: 'grok-build-0.1'
+    });
+    expect(wrongDomain.costs).toEqual([]);
+  });
+
+  it('prices flat OpenCode Go models and refuses a day bucket with peak/off-peak ambiguity', () => {
+    const flat = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'opencode-flat',
+          model: 'opencode-go/glm-5.2',
+          billingDomainId: 'go-subscription',
+          tokenSemantics: {
+            reasoning: 'separate',
+            cacheRead: 'separate',
+            cacheWrite: 'separate'
+          }
+        }),
+        { providerId: 'opencode-go', domainId: 'go-subscription', domainName: 'OpenCode Go' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+    const ambiguous = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'opencode-day',
+          model: 'opencode-go/deepseek-v4-flash',
+          billingDomainId: 'go-subscription',
+          timePrecision: 'day',
+          tokenSemantics: {
+            reasoning: 'separate',
+            cacheRead: 'separate',
+            cacheWrite: 'separate'
+          }
+        }),
+        { providerId: 'opencode-go', domainId: 'go-subscription', domainName: 'OpenCode Go' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(flat.costs[0]).toMatchObject({ amount: 0.2526, model: 'glm-5.2' });
+    expect(ambiguous.costs).toEqual([]);
+    expect(ambiguous.decisions[0]).toMatchObject({ reason: 'pricing-tier-ambiguous' });
+  });
+
+  it('selects OpenCode Go peak and off-peak entries from exact UTC event time', () => {
+    const pricedAt = (observedAt: string) =>
+      deriveRetailEquivalentCosts(
+        snapshot(
+          observation({
+            id: `deepseek-${observedAt}`,
+            model: 'opencode-go/deepseek-v4-flash',
+            billingDomainId: 'go-subscription',
+            observedAt,
+            tokenSemantics: {
+              reasoning: 'separate',
+              cacheRead: 'separate',
+              cacheWrite: 'separate'
+            }
+          }),
+          { providerId: 'opencode-go', domainId: 'go-subscription', domainName: 'OpenCode Go' }
+        ),
+        OFFICIAL_PRICING_CATALOG
+      ).costs[0];
+
+    expect(pricedAt('2026-08-28T02:00:00.000Z')).toMatchObject({
+      amount: 0.07714,
+      priceSnapshot: { contextTier: 'weekday-peak-utc' }
+    });
+    expect(pricedAt('2026-08-28T05:00:00.000Z')).toMatchObject({
+      amount: 0.03857,
+      priceSnapshot: { contextTier: 'off-peak-utc' }
     });
   });
 });

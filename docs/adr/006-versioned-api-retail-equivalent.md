@@ -36,16 +36,26 @@ unclassified remainders, multiple active tiers, pre-effective observations, and
 cache writes without a known lifetime remain unpriced. They reduce pricing
 coverage but never create a zero amount.
 
-The first tracer covers Claude Fable 5 standard API pricing from its 2026-06-09
-availability date: input $10/MTok, output $50/MTok, and cache reads $1/MTok.
-Cache-write pricing is intentionally unavailable until the observation proves
-the 5-minute or 1-hour tier.
+The catalog covers Claude Fable 5, the current OpenCode Go models with published
+rates, Grok Build 0.1, and Grok 4.6. Fixed model rates can price coarse history
+when every Token kind is known. Request-length tiers require event-level delta
+evidence; OpenCode peak/off-peak tiers additionally require an exact event time.
+Day and billing-period aggregates therefore remain unpriced when they span a
+possible tier boundary. Claude cache writes remain unavailable until the
+observation proves the 5-minute or 1-hour lifetime.
+
+On startup, retained raw observations pass through the same derivation path.
+Derived inserts use immutable stable identities and ignore a conflict with an
+already recorded retail snapshot. A reviewed price change must use a new catalog
+entry and effective interval; changing an in-memory rate under an existing entry
+cannot rewrite prior amounts.
 
 ## Consequences
 
 Retail equivalent remains an `estimate`-authority comparison value, separate
-from Provider-reported estimates and actual charges. Repeated refresh and
-restart upsert the same derived record. Selected-window summaries can sum USD
-retail amounts and compute pricing coverage as priced Tokens divided by all
-recorded Tokens. Future catalog expansion and retained-history backfill can use
-the same effective-time and stable-identity rules.
+from Provider-reported estimates and actual charges. Repeated refresh, restart,
+and retained-history backfill produce the same derived record. Selected-window
+summaries sum USD retail amounts and expose priced, unpriced, and recorded Tokens
+so pricing coverage is independently recomputable. Provider and billing-domain
+scoping prevents identical aliases from merging Grok Build/SuperGrok with xAI
+API or any other unlike source.

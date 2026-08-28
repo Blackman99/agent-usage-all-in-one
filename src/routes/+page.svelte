@@ -1201,7 +1201,8 @@
                         {formatNumber(cost.pricingEvidence.pricedTokens)} / {formatNumber(
                           cost.pricingEvidence.recordedTokens
                         )}
-                        {t('tokens')}
+                        {t('tokens')} · {formatNumber(cost.pricingEvidence.unpricedTokens)}
+                        {t('unpricedTokens')}
                       </small>
                     {/if}
                     {#each cost.priceSnapshots as price (price.id)}
