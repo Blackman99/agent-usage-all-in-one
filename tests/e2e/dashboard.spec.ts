@@ -1123,6 +1123,7 @@ function withTokenDomain<
     provider.tokenEvidence ?? tokenEvidenceFixture({ total: provider.tokenTotals.total });
   return {
     ...provider,
+    summaryBillingDomainId: id,
     tokenEvidence,
     billingDomains: [
       {
@@ -1272,6 +1273,7 @@ function historyOverviewFixture(
       {
         id: 'history-agent',
         displayName: 'History Agent',
+        summaryBillingDomainId: 'api',
         freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
         health: { status: 'healthy', errorCode: null, message: null, recovery: null },
         coverage: {
