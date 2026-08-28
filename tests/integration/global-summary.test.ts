@@ -38,7 +38,7 @@ describe('global usage summary', () => {
         status: 'unavailable',
         amount: null,
         currency: 'USD',
-        pricingCoverage: null
+        pricingCoverage: 0
       },
       mostConstrained: {
         providerId: 'grok',

@@ -48,7 +48,12 @@ export function buildUsageExport(
         cacheWriteTokens: history.tokenTotals.cacheWrite,
         costKind: null,
         amount: null,
-        currency: null
+        currency: null,
+        pricedTokens: null,
+        pricingCoverage: null,
+        priceVersions: null,
+        priceSourceUrls: null,
+        priceContextTiers: null
       };
       const costRows = history.costs.map((cost) => {
         const authorities = domain.costs
@@ -65,7 +70,7 @@ export function buildUsageExport(
           recordType: 'cost',
           authority: exportAuthority(authorities),
           totalTokens: null,
-          recordedTokens: null,
+          recordedTokens: cost.pricingEvidence?.recordedTokens ?? null,
           sourceReportedTokens: null,
           sourceReportedObservationCount: null,
           observationCount: null,
@@ -83,7 +88,16 @@ export function buildUsageExport(
           cacheWriteTokens: null,
           costKind: cost.kind,
           amount: cost.amount,
-          currency: cost.currency
+          currency: cost.currency,
+          pricedTokens: cost.pricingEvidence?.pricedTokens ?? null,
+          pricingCoverage: cost.pricingEvidence?.pricingCoverage ?? null,
+          priceVersions: cost.priceSnapshots.map((snapshot) => snapshot.version),
+          priceSourceUrls: cost.priceSnapshots.flatMap((snapshot) =>
+            snapshot.sourceUrl ? [snapshot.sourceUrl] : []
+          ),
+          priceContextTiers: cost.priceSnapshots.flatMap((snapshot) =>
+            snapshot.contextTier ? [snapshot.contextTier] : []
+          )
         };
       });
       return [tokenRow, ...costRows];
@@ -158,7 +172,12 @@ const CSV_COLUMNS = [
   'cacheWriteTokens',
   'costKind',
   'amount',
-  'currency'
+  'currency',
+  'pricedTokens',
+  'pricingCoverage',
+  'priceVersions',
+  'priceSourceUrls',
+  'priceContextTiers'
 ] as const;
 
 function rowsToCsv(rows: Array<Record<string, unknown>>): string {

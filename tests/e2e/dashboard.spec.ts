@@ -665,8 +665,9 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(page.getByRole('heading', { name: 'Recent usage summary' })).toBeVisible();
   const summary = page.getByRole('region', { name: 'Recent usage summary' });
   await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('700');
-  await expect(page.getByTestId('summary-retail-equivalent')).toHaveText('Unavailable');
+  await expect(page.getByTestId('summary-retail-equivalent')).toHaveText('$1.25');
   await expect(summary.getByText('Classification coverage: 100%')).toBeVisible();
+  await expect(summary.getByText('Pricing coverage: 100%')).toBeVisible();
   await expect(summary.getByText('Precision: Day + Billing period')).toBeVisible();
   await expect(
     summary.getByText('History Agent · API').locator('..').getByText('700')
@@ -685,6 +686,10 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   ).toBeVisible();
   await expect(provider.getByText('actual · Native')).toBeVisible();
   await expect(provider.getByText('estimate · Native')).toBeVisible();
+  const retailEquivalent = provider.getByText('API retail equivalent · Native').locator('..');
+  await expect(retailEquivalent).toContainText('$1.25');
+  await expect(retailEquivalent).toContainText('Source: Estimate');
+  await expect(retailEquivalent).toContainText('Pricing coverage: 100% · 3,000 / 3,000 Tokens');
   await expect(
     provider.getByText('Price version: 2026-08-01 · Official retail pricing')
   ).toBeVisible();
@@ -866,10 +871,10 @@ function historyOverviewFixture(window: string, total: number): unknown {
       recordedTokens: total,
       tokenEvidence,
       apiRetailEquivalent: {
-        status: 'unavailable',
-        amount: null,
+        status: 'available',
+        amount: 1.25,
         currency: 'USD',
-        pricingCoverage: null
+        pricingCoverage: 1
       },
       mostConstrained,
       latestObservedAt: '2026-08-28T01:57:00.000Z',
@@ -950,10 +955,26 @@ function historyOverviewFixture(window: string, total: number): unknown {
                 {
                   kind: 'estimate',
                   currency: 'USD',
+                  amount: 0.42,
+                  convertedAmount: 3.02,
+                  comparisonCurrency: 'CNY',
+                  conversionUnavailableReason: null,
+                  priceSnapshots: []
+                },
+                {
+                  kind: 'retail-equivalent',
+                  currency: 'USD',
                   amount: 1.25,
                   convertedAmount: 9,
                   comparisonCurrency: 'CNY',
                   conversionUnavailableReason: null,
+                  pricingEvidence: {
+                    pricedTokens: total,
+                    recordedTokens: total,
+                    pricingCoverage: 1
+                  },
+                  authorities: ['estimate'],
+                  observedAt: '2026-08-28T01:57:00.000Z',
                   priceSnapshots: [
                     {
                       id: 'price-v1',

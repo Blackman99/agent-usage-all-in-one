@@ -1,5 +1,6 @@
 import type {
   Connector,
+  ConnectorSnapshot,
   ConnectorDiagnostic,
   ConnectorFailure,
   ConnectorPolicy,
@@ -27,6 +28,11 @@ import type {
 } from './onboarding-types.js';
 import { redactSensitiveText } from './redaction.js';
 import { buildUsageExport } from './usage-export.js';
+import {
+  ANTHROPIC_PRICING_CATALOG,
+  deriveRetailEquivalentCosts,
+  type RetailPriceCatalog
+} from './retail-pricing.js';
 
 export interface UsageApplicationOptions {
   repository: UsageRepository;
@@ -40,6 +46,7 @@ export interface UsageApplicationOptions {
   connectorPolicies?: Record<string, ConnectorPolicy>;
   notifier?: LocalNotifier;
   startAtLoginManager?: StartAtLoginManager;
+  priceCatalog?: RetailPriceCatalog | null;
 }
 
 export interface RefreshOptions {
@@ -58,6 +65,7 @@ export class UsageApplication {
   readonly #connectorPolicies: Record<string, ConnectorPolicy>;
   readonly #notifier?: LocalNotifier;
   readonly #startAtLoginManager?: StartAtLoginManager;
+  readonly #priceCatalog: RetailPriceCatalog | null;
   #refreshPromise: Promise<void> | null = null;
 
   constructor(options: UsageApplicationOptions) {
@@ -72,6 +80,8 @@ export class UsageApplication {
     this.#connectorPolicies = options.connectorPolicies ?? {};
     this.#notifier = options.notifier;
     this.#startAtLoginManager = options.startAtLoginManager;
+    this.#priceCatalog =
+      options.priceCatalog === undefined ? ANTHROPIC_PRICING_CATALOG : options.priceCatalog;
   }
 
   refresh(options: RefreshOptions = {}): Promise<void> {
@@ -122,7 +132,7 @@ export class UsageApplication {
             policy.timeoutMs,
             `${connector.id} timed out`
           );
-          this.#repository.saveSnapshot(snapshot);
+          this.#repository.saveSnapshot(this.#withRetailCosts(snapshot));
           if (snapshot.warnings && snapshot.warnings.length > 0) {
             const failure = redactFailure(combineFailures(snapshot.warnings));
             this.#repository.recordFailure(snapshot.provider, this.#clock().toISOString(), failure);
@@ -515,7 +525,14 @@ export class UsageApplication {
     if (snapshot.usage.length === 0 && snapshot.costs.length === 0) {
       throw new Error('Telemetry payload contained no supported metrics');
     }
-    this.#repository.saveSnapshot(snapshot, { preserveFailure: true });
+    this.#repository.saveSnapshot(this.#withRetailCosts(snapshot), { preserveFailure: true });
+  }
+
+  #withRetailCosts(snapshot: ConnectorSnapshot): ConnectorSnapshot {
+    const retailCosts = this.#priceCatalog
+      ? deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, this.#clock().toISOString()).costs
+      : [];
+    return { ...snapshot, costs: [...snapshot.costs, ...retailCosts] };
   }
 
   async discoverConnectors(): Promise<ConnectorStatus[]> {

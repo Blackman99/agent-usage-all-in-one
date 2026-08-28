@@ -20,6 +20,7 @@ import type {
   ProviderOverview,
   QuotaBucket,
   QuotaForecast,
+  RetailPriceLineItem,
   RetentionStatus,
   TokenEvidence,
   TokenAggregationTemporality,
@@ -108,6 +109,13 @@ interface CostRow {
   price_snapshot_version: string | null;
   price_snapshot_source: string | null;
   price_snapshot_effective_at: string | null;
+  price_snapshot_source_url: string | null;
+  price_snapshot_context_tier: string | null;
+  model: string | null;
+  usage_observation_id: string | null;
+  priced_tokens: number | null;
+  line_items_json: string | null;
+  calculated_at: string | null;
 }
 
 interface UsageHistoryRow {
@@ -383,8 +391,10 @@ export class SqliteUsageRepository implements UsageRepository {
         `INSERT INTO cost_records (
            provider_id, id, source_id, billing_domain_id, observed_at, kind, amount, currency,
            authority, price_snapshot_id, price_snapshot_version, price_snapshot_source,
-           price_snapshot_effective_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           price_snapshot_effective_at, price_snapshot_source_url, price_snapshot_context_tier,
+           model, usage_observation_id, priced_tokens,
+           line_items_json, calculated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            source_id = excluded.source_id,
            billing_domain_id = excluded.billing_domain_id,
@@ -396,7 +406,14 @@ export class SqliteUsageRepository implements UsageRepository {
            price_snapshot_id = excluded.price_snapshot_id,
            price_snapshot_version = excluded.price_snapshot_version,
            price_snapshot_source = excluded.price_snapshot_source,
-           price_snapshot_effective_at = excluded.price_snapshot_effective_at`
+           price_snapshot_effective_at = excluded.price_snapshot_effective_at,
+           price_snapshot_source_url = excluded.price_snapshot_source_url,
+           price_snapshot_context_tier = excluded.price_snapshot_context_tier,
+           model = excluded.model,
+           usage_observation_id = excluded.usage_observation_id,
+           priced_tokens = excluded.priced_tokens,
+           line_items_json = excluded.line_items_json,
+           calculated_at = excluded.calculated_at`
       );
       for (const cost of snapshot.costs) {
         costStatement.run(
@@ -412,7 +429,14 @@ export class SqliteUsageRepository implements UsageRepository {
           cost.priceSnapshot?.id ?? null,
           cost.priceSnapshot?.version ?? null,
           cost.priceSnapshot?.source ?? null,
-          cost.priceSnapshot?.effectiveAt ?? null
+          cost.priceSnapshot?.effectiveAt ?? null,
+          cost.priceSnapshot?.sourceUrl ?? null,
+          cost.priceSnapshot?.contextTier ?? null,
+          cost.model ?? null,
+          cost.usageObservationId ?? null,
+          cost.pricedTokens ?? null,
+          cost.lineItems ? JSON.stringify(cost.lineItems) : null,
+          cost.calculatedAt ?? null
         );
       }
 
@@ -966,7 +990,9 @@ export class SqliteUsageRepository implements UsageRepository {
       .prepare(
         `SELECT id, source_id, billing_domain_id, observed_at, kind, amount, currency, authority,
                 price_snapshot_id, price_snapshot_version, price_snapshot_source,
-                price_snapshot_effective_at
+                price_snapshot_effective_at, price_snapshot_source_url,
+                price_snapshot_context_tier, model, usage_observation_id, priced_tokens,
+                line_items_json, calculated_at
          FROM cost_records WHERE provider_id = ? AND billing_domain_id = ? ORDER BY observed_at DESC, id`
       )
       .all(providerId, domain.id) as unknown as CostRow[];
@@ -998,7 +1024,12 @@ export class SqliteUsageRepository implements UsageRepository {
         amount: row.amount,
         currency: row.currency,
         authority: row.authority,
-        priceSnapshot: priceSnapshotFromRow(row)
+        priceSnapshot: priceSnapshotFromRow(row),
+        model: row.model,
+        usageObservationId: row.usage_observation_id,
+        pricedTokens: row.priced_tokens,
+        lineItems: parseLineItems(row.line_items_json),
+        calculatedAt: row.calculated_at
       })),
       balances: balances.map((row) => ({
         id: row.id,
@@ -1142,7 +1173,9 @@ export class SqliteUsageRepository implements UsageRepository {
       .prepare(
         `SELECT id, source_id, billing_domain_id, observed_at, kind, amount, currency, authority,
                 price_snapshot_id, price_snapshot_version, price_snapshot_source,
-                price_snapshot_effective_at
+                price_snapshot_effective_at, price_snapshot_source_url,
+                price_snapshot_context_tier, model, usage_observation_id, priced_tokens,
+                line_items_json, calculated_at
          FROM cost_records
          WHERE provider_id = ? AND billing_domain_id = ?
            AND observed_at >= ? AND observed_at < ?
@@ -1215,9 +1248,10 @@ export class SqliteUsageRepository implements UsageRepository {
     }
 
     const exchangeRates = new Map<string, ExchangeRateSnapshot>();
-    const summarizeCosts = (rows: CostRow[]) =>
+    const summarizeCosts = (rows: CostRow[], recordedTokens: number) =>
       summarizeHistoryCosts(
         rows,
+        recordedTokens,
         rateByCurrency,
         normalized.comparisonCurrency,
         normalized.end,
@@ -1247,9 +1281,9 @@ export class SqliteUsageRepository implements UsageRepository {
           day,
           tokenTotals: daily.tokens,
           tokenEvidence: finishTokenEvidence(daily.evidence),
-          costs: summarizeCosts(daily.costs)
+          costs: summarizeCosts(daily.costs, daily.tokens.total)
         })),
-      costs: summarizeCosts(costs),
+      costs: summarizeCosts(costs, tokenTotals.total),
       exchangeRates: [...exchangeRates.values()],
       authorities: [...authorities].sort(),
       lastObservedAt: usage.at(-1)?.observed_at ?? null
@@ -1348,6 +1382,13 @@ export class SqliteUsageRepository implements UsageRepository {
         price_snapshot_version TEXT,
         price_snapshot_source TEXT,
         price_snapshot_effective_at TEXT,
+        price_snapshot_source_url TEXT,
+        price_snapshot_context_tier TEXT,
+        model TEXT,
+        usage_observation_id TEXT,
+        priced_tokens INTEGER,
+        line_items_json TEXT,
+        calculated_at TEXT,
         PRIMARY KEY (provider_id, id),
         FOREIGN KEY (provider_id, billing_domain_id)
           REFERENCES billing_domains(provider_id, id) ON DELETE CASCADE
@@ -1544,7 +1585,14 @@ export class SqliteUsageRepository implements UsageRepository {
       ['price_snapshot_id', 'TEXT'],
       ['price_snapshot_version', 'TEXT'],
       ['price_snapshot_source', 'TEXT'],
-      ['price_snapshot_effective_at', 'TEXT']
+      ['price_snapshot_effective_at', 'TEXT'],
+      ['price_snapshot_source_url', 'TEXT'],
+      ['price_snapshot_context_tier', 'TEXT'],
+      ['model', 'TEXT'],
+      ['usage_observation_id', 'TEXT'],
+      ['priced_tokens', 'INTEGER'],
+      ['line_items_json', 'TEXT'],
+      ['calculated_at', 'TEXT']
     ] as const) {
       if (!costColumns.some((column) => column.name === name)) {
         this.#database.exec(`ALTER TABLE cost_records ADD COLUMN ${name} ${type}`);
@@ -1688,8 +1736,20 @@ function priceSnapshotFromRow(row: CostRow): PriceSnapshotReference | null {
     id: row.price_snapshot_id,
     version: row.price_snapshot_version,
     source: row.price_snapshot_source,
-    effectiveAt: row.price_snapshot_effective_at
+    effectiveAt: row.price_snapshot_effective_at,
+    ...(row.price_snapshot_source_url ? { sourceUrl: row.price_snapshot_source_url } : {}),
+    ...(row.price_snapshot_context_tier ? { contextTier: row.price_snapshot_context_tier } : {})
   };
+}
+
+function parseLineItems(value: string | null): RetailPriceLineItem[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as RetailPriceLineItem[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function buildGlobalSummary(
@@ -1701,9 +1761,24 @@ function buildGlobalSummary(
   const evidence = emptyTokenEvidence();
   const contributions: UsageOverview['globalSummary']['contributions'] = [];
   let latestObservedAt: string | null = null;
+  let retailAmount = 0;
+  let retailPricedTokens = 0;
+  let sawRetailEquivalent = false;
 
   for (const provider of providers) {
     for (const domain of provider.billingDomains) {
+      for (const cost of domain.history.costs) {
+        if (
+          cost.kind !== 'retail-equivalent' ||
+          cost.currency.toUpperCase() !== 'USD' ||
+          cost.amount === null
+        ) {
+          continue;
+        }
+        sawRetailEquivalent = true;
+        retailAmount += cost.amount;
+        retailPricedTokens += cost.pricingEvidence?.pricedTokens ?? 0;
+      }
       for (const observedAt of [
         domain.history.lastObservedAt,
         ...domain.quotaBuckets.map((bucket) => bucket.observedAt ?? null),
@@ -1735,10 +1810,13 @@ function buildGlobalSummary(
     recordedTokens: tokenEvidence.observationCount > 0 ? tokenEvidence.recordedTokens : null,
     tokenEvidence,
     apiRetailEquivalent: {
-      status: 'unavailable',
-      amount: null,
+      status: sawRetailEquivalent ? 'available' : 'unavailable',
+      amount: sawRetailEquivalent ? preciseAmount(retailAmount) : null,
       currency: 'USD',
-      pricingCoverage: null
+      pricingCoverage:
+        tokenEvidence.recordedTokens === 0
+          ? null
+          : retailPricedTokens / tokenEvidence.recordedTokens
     },
     mostConstrained: riskSummary.mostConstrained,
     latestObservedAt,
@@ -1824,6 +1902,7 @@ function localDay(observedAt: string, timeZone: string): string {
 
 function summarizeHistoryCosts(
   rows: CostRow[],
+  recordedTokens: number,
   rates: Map<string, ExchangeRateRow>,
   comparisonCurrency: string,
   end: Date,
@@ -1839,6 +1918,7 @@ function summarizeHistoryCosts(
       prices: Map<string, PriceSnapshotReference>;
       authorities: Set<DataAuthority>;
       observedAt: string | null;
+      pricedTokens: number;
     }
   >();
   for (const row of rows) {
@@ -1851,12 +1931,14 @@ function summarizeHistoryCosts(
       unknown: false,
       prices: new Map<string, PriceSnapshotReference>(),
       authorities: new Set<DataAuthority>(),
-      observedAt: null
+      observedAt: null,
+      pricedTokens: 0
     };
     if (!group.observedAt || row.observed_at > group.observedAt) group.observedAt = row.observed_at;
     group.authorities.add(row.authority);
     if (row.amount === null) group.unknown = true;
     else group.amount += Number(row.amount);
+    if (row.kind === 'retail-equivalent') group.pricedTokens += Number(row.priced_tokens ?? 0);
     const price = priceSnapshotFromRow(row);
     if (price) group.prices.set(price.id, price);
     groups.set(key, group);
@@ -1864,6 +1946,14 @@ function summarizeHistoryCosts(
   return [...groups.values()]
     .map((group): HistoryCost => {
       const amount = group.unknown ? null : group.amount;
+      const pricingEvidence =
+        group.kind === 'retail-equivalent'
+          ? {
+              pricedTokens: group.pricedTokens,
+              recordedTokens,
+              pricingCoverage: recordedTokens === 0 ? null : group.pricedTokens / recordedTokens
+            }
+          : undefined;
       if (amount === null) {
         return {
           kind: group.kind,
@@ -1874,7 +1964,8 @@ function summarizeHistoryCosts(
           conversionUnavailableReason: 'unknown-native-amount',
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
-          observedAt: group.observedAt
+          observedAt: group.observedAt,
+          pricingEvidence
         };
       }
       if (group.currency === comparisonCurrency) {
@@ -1887,7 +1978,8 @@ function summarizeHistoryCosts(
           conversionUnavailableReason: null,
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
-          observedAt: group.observedAt
+          observedAt: group.observedAt,
+          pricingEvidence
         };
       }
       const rate = rates.get(group.currency);
@@ -1901,7 +1993,8 @@ function summarizeHistoryCosts(
           conversionUnavailableReason: 'missing-rate',
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
-          observedAt: group.observedAt
+          observedAt: group.observedAt,
+          pricingEvidence
         };
       }
       if (end.getTime() - new Date(rate.observed_at).getTime() > 7 * 24 * 60 * 60 * 1000) {
@@ -1914,7 +2007,8 @@ function summarizeHistoryCosts(
           conversionUnavailableReason: 'stale-rate',
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
-          observedAt: group.observedAt
+          observedAt: group.observedAt,
+          pricingEvidence
         };
       }
       usedRates.set(rate.id, {
@@ -1934,7 +2028,8 @@ function summarizeHistoryCosts(
         conversionUnavailableReason: null,
         priceSnapshots: [...group.prices.values()],
         authorities: [...group.authorities].sort(),
-        observedAt: group.observedAt
+        observedAt: group.observedAt,
+        pricingEvidence
       };
     })
     .sort(
@@ -2031,6 +2126,10 @@ function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSum
 
 function round(value: number): number {
   return Number(value.toFixed(6));
+}
+
+function preciseAmount(value: number): number {
+  return Number(value.toFixed(12));
 }
 
 function tokenAuthority(authorities: string | null): ProviderOverview['tokenAuthority'] {

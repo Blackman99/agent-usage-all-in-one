@@ -50,8 +50,20 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Aggregation temporality**: Whether a telemetry observation is a delta for
   one interval, a cumulative running total, or unknown. Only delta telemetry is
   additive across observation times.
-- **Cost record**: An actual billed amount, a fixed subscription cost, or an API
-  retail-price estimate. These cost kinds remain separate.
+- **Cost record**: An amount with one explicit purpose: actual billed cost,
+  fixed subscription cost, Provider/client-reported estimate, or calculated API
+  retail equivalent. These purposes remain separate.
+- **Reported estimate**: A monetary estimate stated by a Provider or official
+  client. It keeps its upstream authority and is never relabelled as an actual
+  charge or as Agent Usage's retail calculation.
+- **API retail equivalent**: Agent Usage's model-level estimate of what eligible
+  Tokens would cost at the public API list price effective at observation time.
+  It is comparison evidence, not a bill or subscription allocation.
+- **Price snapshot**: The immutable catalog entry, official source, version,
+  context tier, currency, effective interval, and Token-kind rates used by one
+  retail-equivalent derivation.
+- **Pricing coverage**: Priced Tokens divided by recorded Tokens for the selected
+  window. It is independent from classification and Provider data Coverage.
 - **Data authority**: The provenance level of a value: official account,
   official client, local observation, estimate, or unavailable.
 - **Freshness**: The age and last-success state of a connector result.
@@ -91,3 +103,11 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 14. Production Connectors never write the legacy Token-total input. The SQLite
     compatibility column and `legacy-total` derivation remain read-only migration
     evidence so a V1 database can upgrade without losing or duplicating usage.
+15. Retail-equivalent records are derived only from a known Provider, billing
+    domain, model, non-overlapping Token kinds, context tier, and price effective
+    at the observation time. Missing or ambiguous evidence remains unpriced.
+16. Repeating collection, restart, or price derivation for the same observation
+    and price version is idempotent. Line items reconcile exactly to the stored
+    retail amount and never mutate actual, subscription, or reported estimates.
+17. Unknown retail equivalent is unavailable, never zero. Pricing coverage may
+    be zero when Tokens were observed but none were eligible for pricing.

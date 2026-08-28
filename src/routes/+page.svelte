@@ -450,7 +450,8 @@
     const keys: Record<CostKind, MessageKey> = {
       actual: 'costActual',
       subscription: 'costSubscription',
-      estimate: 'costEstimate'
+      estimate: 'costEstimate',
+      'retail-equivalent': 'costRetailEquivalent'
     };
     return t(keys[kind]);
   }
@@ -1193,8 +1194,22 @@
                         : authorityLabel('unavailable')} ·
                       {formatReset(cost.observedAt ?? null)}
                     </small>
+                    {#if cost.pricingEvidence}
+                      <small>
+                        {t('pricingCoverage')}:
+                        {formatPercent(cost.pricingEvidence.pricingCoverage)} ·
+                        {formatNumber(cost.pricingEvidence.pricedTokens)} / {formatNumber(
+                          cost.pricingEvidence.recordedTokens
+                        )}
+                        {t('tokens')}
+                      </small>
+                    {/if}
                     {#each cost.priceSnapshots as price (price.id)}
-                      <small>{t('priceVersion')}: {price.version} · {price.source}</small>
+                      <small>
+                        {t('priceVersion')}: {price.version} · {price.source}{price.contextTier
+                          ? ` · ${price.contextTier}`
+                          : ''}
+                      </small>
                     {/each}
                   </div>
                 {/each}

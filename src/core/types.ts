@@ -96,13 +96,24 @@ export interface NormalizedUsageObservation extends UsageObservation {
   totalDerivation: TokenTotalDerivation;
 }
 
-export type CostKind = 'actual' | 'subscription' | 'estimate';
+export type CostKind = 'actual' | 'subscription' | 'estimate' | 'retail-equivalent';
+
+export type RetailTokenKind = 'input' | 'output' | 'reasoning' | 'cache-read' | 'cache-write';
+
+export interface RetailPriceLineItem {
+  tokenKind: RetailTokenKind;
+  tokens: number;
+  ratePerMillion: number;
+  amount: number;
+}
 
 export interface PriceSnapshotReference {
   id: string;
   version: string;
   source: string;
   effectiveAt: string;
+  sourceUrl?: string;
+  contextTier?: string;
 }
 
 export interface CostRecord {
@@ -115,6 +126,11 @@ export interface CostRecord {
   currency: string;
   authority: DataAuthority;
   priceSnapshot?: PriceSnapshotReference | null;
+  model?: string | null;
+  usageObservationId?: string | null;
+  pricedTokens?: number | null;
+  lineItems?: RetailPriceLineItem[];
+  calculatedAt?: string | null;
 }
 
 export type HistoryWindow = '24h' | '7d' | '30d';
@@ -243,6 +259,11 @@ export interface HistoryCost {
   priceSnapshots: PriceSnapshotReference[];
   authorities?: DataAuthority[];
   observedAt?: string | null;
+  pricingEvidence?: {
+    pricedTokens: number;
+    recordedTokens: number;
+    pricingCoverage: number | null;
+  };
 }
 
 export interface BillingHistory {
