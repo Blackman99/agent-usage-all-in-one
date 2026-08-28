@@ -28,23 +28,38 @@ describe('legacy telemetry token migration', () => {
     });
     const claude = overview.providers.find((provider) => provider.id === 'claude-code')!;
     expect(claude.coverage).toMatchObject({ tokens: 'partial', history: 'partial' });
-    expect(claude.tokenEvidence).toMatchObject({
-      totalDerivations: ['categorized'],
-      usageScopes: ['this-mac'],
-      aggregationTemporalities: ['unknown'],
-      timePrecisions: ['unknown']
-    });
+    expect(claude.tokenTotals.total).toBe(0);
+    expect(claude.tokenEvidence).toMatchObject({ observationCount: 0 });
 
     const grok = overview.providers.find((provider) => provider.id === 'grok')!;
-    expect(grok.tokenTotals).toMatchObject({ total: 525, reasoning: 12 });
-    expect(grok.tokenEvidence).toMatchObject({
-      totalDerivations: ['categorized'],
-      usageScopes: ['this-mac'],
-      aggregationTemporalities: ['delta'],
-      timePrecisions: ['unknown']
-    });
+    expect(grok.tokenTotals.total).toBe(0);
+    expect(grok.tokenEvidence).toMatchObject({ observationCount: 0 });
     expect(grok.billingDomains.map((domain) => domain.id)).toEqual(['grok-build-subscription']);
+    expect(migrated.getRetentionStatus()).toMatchObject({ rawObservations: 2 });
     migrated.close();
+
+    const database = new DatabaseSync(databasePath);
+    const rows = database
+      .prepare(
+        `SELECT provider_id, time_precision, usage_scope, aggregation_temporality
+         FROM usage_observations ORDER BY provider_id`
+      )
+      .all();
+    expect(rows).toEqual([
+      {
+        provider_id: 'claude-code',
+        time_precision: 'unknown',
+        usage_scope: 'this-mac',
+        aggregation_temporality: 'unknown'
+      },
+      {
+        provider_id: 'grok',
+        time_precision: 'unknown',
+        usage_scope: 'this-mac',
+        aggregation_temporality: 'unknown'
+      }
+    ]);
+    database.close();
   });
 });
 

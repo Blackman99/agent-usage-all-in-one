@@ -49,7 +49,7 @@ describe('retail-equivalent application tracer', () => {
           amount: 2.01,
           currency: 'USD',
           authority: 'estimate',
-          model: 'claude-fable-5',
+          model: 'Claude Fable 5',
           usageObservationId: 'fable-event',
           pricedTokens: 130_000,
           calculatedAt: NOW.toISOString(),
@@ -61,6 +61,27 @@ describe('retail-equivalent application tracer', () => {
         })
       ])
     );
+    expect(domain.history.models.find((model) => model.model === 'Claude Fable 5')).toMatchObject({
+      tokenTotals: { total: 130_000 },
+      priceEvidence: [
+        {
+          usageObservationId: 'fable-event',
+          pricedTokens: 130_000,
+          priceSnapshot: {
+            canonicalModel: 'claude-fable-5',
+            currency: 'USD',
+            effectiveUntil: null,
+            ratesPerMillion: {
+              input: 10,
+              output: 50,
+              reasoning: null,
+              'cache-read': 1,
+              'cache-write': null
+            }
+          }
+        }
+      ]
+    });
     expect(domain.history.costs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -192,7 +213,7 @@ describe('retail-equivalent application tracer', () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'retail-equivalent',
-          model: 'claude-fable-5',
+          model: 'Claude Fable 5',
           usageObservationId: 'fable-event',
           pricedTokens: 130_000,
           priceSnapshot: expect.objectContaining({
@@ -226,7 +247,7 @@ function application(repository: SqliteUsageRepository): UsageApplication {
           {
             id: 'fable-event',
             billingDomainId: 'subscription',
-            model: 'claude-fable-5',
+            model: 'Claude Fable 5',
             observedAt: '2026-08-28T01:00:00.000Z',
             inputTokens: 100_000,
             outputTokens: 20_000,

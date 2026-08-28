@@ -84,7 +84,17 @@ describe('agent-usage CLI', () => {
                 id: 'cli-retail-v1',
                 version: '2026-08-01',
                 source: 'CLI fixture retail price',
-                effectiveAt: '2026-08-01T00:00:00.000Z'
+                canonicalModel: null,
+                effectiveAt: '2026-08-01T00:00:00.000Z',
+                effectiveUntil: null,
+                currency: 'USD',
+                ratesPerMillion: {
+                  input: 40_000,
+                  output: null,
+                  reasoning: null,
+                  'cache-read': null,
+                  'cache-write': null
+                }
               }
             }
           ],

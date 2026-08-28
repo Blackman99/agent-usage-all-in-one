@@ -426,7 +426,7 @@ function priceObservation(
       amount,
       currency: entry.currency,
       authority: 'estimate',
-      model: entry.canonicalModel,
+      model: observation.model?.trim() || entry.canonicalModel,
       usageObservationId: observation.id,
       pricedTokens,
       lineItems,
@@ -435,7 +435,11 @@ function priceObservation(
         id: entry.id,
         version: entry.priceVersion,
         source: entry.source.title,
+        canonicalModel: entry.canonicalModel,
         effectiveAt: entry.effectiveFrom,
+        effectiveUntil: entry.effectiveUntil,
+        currency: entry.currency,
+        ratesPerMillion: { ...entry.ratesPerMillion },
         sourceUrl: entry.source.url,
         contextTier: entry.contextTier
       }

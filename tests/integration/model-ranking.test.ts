@@ -116,6 +116,73 @@ describe('model ranking read model', () => {
 
     repository.close();
   });
+
+  it('keeps source-total-only and named-model remainders out of known-model rankings', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-model-ranking-remainder-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(
+      snapshot(
+        'codex',
+        'Codex',
+        'subscription',
+        'Subscription',
+        [
+          {
+            ...usage(
+              'source-total-only',
+              'subscription',
+              'named-but-unclassified',
+              300,
+              '2026-08-28T00:10:00.000Z'
+            ),
+            inputTokens: 0,
+            outputTokens: 0
+          },
+          {
+            ...usage(
+              'named-with-remainder',
+              'subscription',
+              'partially-classified',
+              150,
+              '2026-08-28T00:20:00.000Z'
+            ),
+            inputTokens: 80,
+            outputTokens: 20
+          }
+        ],
+        []
+      )
+    );
+
+    const ranking = repository.getOverview(NOW, { window: '24h' }).workbench.modelRanking;
+    expect(ranking.entries).toEqual([
+      expect.objectContaining({
+        id: 'codex::subscription::partially-classified',
+        tokenTotals: expect.objectContaining({ total: 100 }),
+        observations: [
+          expect.objectContaining({
+            id: 'named-with-remainder',
+            recordedTokens: 100,
+            sourceReportedTotalTokens: 150,
+            unclassifiedTokens: 50
+          })
+        ]
+      })
+    ]);
+    expect(ranking.unclassified).toEqual([
+      expect.objectContaining({
+        providerId: 'codex',
+        billingDomainId: 'subscription',
+        tokenTotals: expect.objectContaining({ total: 350 })
+      })
+    ]);
+    expect(
+      ranking.entries.reduce((total, entry) => total + entry.tokenTotals.total, 0) +
+        ranking.unclassified.reduce((total, entry) => total + entry.tokenTotals.total, 0)
+    ).toBe(450);
+    repository.close();
+  });
 });
 
 async function fixture(): Promise<SqliteUsageRepository> {
@@ -259,7 +326,17 @@ function retailCost(
       version: '2026-08-01',
       source: 'Official fixture pricing',
       sourceUrl: 'https://example.invalid/official-pricing',
-      effectiveAt: '2026-08-01T00:00:00.000Z'
+      canonicalModel: model,
+      effectiveAt: '2026-08-01T00:00:00.000Z',
+      effectiveUntil: null,
+      currency: 'USD',
+      ratesPerMillion: {
+        input: (amount * 1_000_000) / pricedTokens,
+        output: (amount * 1_000_000) / pricedTokens,
+        reasoning: null,
+        'cache-read': null,
+        'cache-write': null
+      }
     },
     calculatedAt: '2026-08-28T01:30:00.000Z'
   };

@@ -97,7 +97,17 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
             id: 'claude-code-otlp-reported-cost-v1',
             version: '2026-08-28',
             source: 'Claude Code official OTLP reported cost',
-            effectiveAt: '2026-08-28T00:00:00.000Z'
+            canonicalModel: model,
+            effectiveAt: '2026-08-28T00:00:00.000Z',
+            effectiveUntil: null,
+            currency: 'USD',
+            ratesPerMillion: {
+              input: null,
+              output: null,
+              reasoning: null,
+              'cache-read': null,
+              'cache-write': null
+            }
           }
         });
       }

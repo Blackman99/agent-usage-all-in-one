@@ -126,6 +126,18 @@ describe('token normalization', () => {
 
     expect(normalized.modelAttribution).toBe('unclassified');
   });
+
+  it('rejects a source total smaller than its non-overlapping categories', () => {
+    expect(() =>
+      normalizeTokenObservation(
+        observation({
+          sourceReportedTotalTokens: 99,
+          inputTokens: 100,
+          outputTokens: 25
+        })
+      )
+    ).toThrow('sourceReportedTotalTokens must be greater than or equal to categorized tokens');
+  });
 });
 
 function observation(overrides: Partial<UsageObservation>): UsageObservation {

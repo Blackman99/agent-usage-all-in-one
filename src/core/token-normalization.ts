@@ -30,6 +30,11 @@ export function normalizeTokenObservation(
     observation.sourceReportedTotalTokens,
     'sourceReportedTotalTokens'
   );
+  if (sourceReportedTotalTokens !== null && sourceReportedTotalTokens < categorizedTokens) {
+    throw new Error(
+      'sourceReportedTotalTokens must be greater than or equal to categorized tokens'
+    );
+  }
   const totalDerivation =
     sourceReportedTotalTokens !== null ? ('source-reported' as const) : ('categorized' as const);
   const recordedTokens = sourceReportedTotalTokens ?? categorizedTokens;

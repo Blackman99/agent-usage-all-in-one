@@ -36,9 +36,19 @@ describe('API retail-equivalent pricing', () => {
           id: 'anthropic-fable-5-2026-06-09',
           version: 'anthropic-2026-06-09',
           source: 'Anthropic Claude API pricing',
+          canonicalModel: 'claude-fable-5',
           effectiveAt: '2026-06-09T00:00:00.000Z',
+          effectiveUntil: null,
+          currency: 'USD',
           sourceUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
-          contextTier: 'standard-api'
+          contextTier: 'standard-api',
+          ratesPerMillion: {
+            input: 10,
+            output: 50,
+            reasoning: null,
+            'cache-read': 1,
+            'cache-write': null
+          }
         },
         lineItems: [
           { tokenKind: 'input', tokens: 100_000, ratePerMillion: 10, amount: 1 },
@@ -55,7 +65,11 @@ describe('API retail-equivalent pricing', () => {
   it('resolves the official display-name alias inside the Claude subscription scope', () => {
     const result = deriveRetailEquivalentCosts(snapshot(observation({ model: 'Claude Fable 5' })));
 
-    expect(result.costs[0]).toMatchObject({ model: 'claude-fable-5', amount: 2.01 });
+    expect(result.costs[0]).toMatchObject({
+      model: 'Claude Fable 5',
+      amount: 2.01,
+      priceSnapshot: { canonicalModel: 'claude-fable-5' }
+    });
   });
 
   it('selects price versions by observation time and rejects pre-effective history', () => {
@@ -203,7 +217,8 @@ describe('API retail-equivalent pricing', () => {
     expect(build.costs[0]).toMatchObject({
       amount: 0.142,
       billingDomainId: 'grok-build-subscription',
-      model: 'grok-build-0.1'
+      model: 'grok-build',
+      priceSnapshot: { canonicalModel: 'grok-build-0.1' }
     });
     expect(wrongDomain.costs).toEqual([]);
   });
@@ -243,7 +258,11 @@ describe('API retail-equivalent pricing', () => {
       OFFICIAL_PRICING_CATALOG
     );
 
-    expect(flat.costs[0]).toMatchObject({ amount: 0.2526, model: 'glm-5.2' });
+    expect(flat.costs[0]).toMatchObject({
+      amount: 0.2526,
+      model: 'opencode-go/glm-5.2',
+      priceSnapshot: { canonicalModel: 'glm-5.2' }
+    });
     expect(ambiguous.costs).toEqual([]);
     expect(ambiguous.decisions[0]).toMatchObject({ reason: 'pricing-tier-ambiguous' });
   });

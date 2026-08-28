@@ -28,6 +28,11 @@ export function buildUsageExport(
         freshness: provider.freshness.status,
         lastSuccessAt: provider.freshness.lastSuccessAt,
         recordType: 'tokens',
+        recordId: null,
+        model: null,
+        usageObservationId: null,
+        observedAt: history.lastObservedAt ?? null,
+        timePrecision: null,
         authority: tokenAuthority,
         totalTokens: history.tokenTotals.total,
         recordedTokens: history.tokenEvidence.recordedTokens,
@@ -55,9 +60,58 @@ export function buildUsageExport(
         unpricedTokens: null,
         pricingCoverage: null,
         priceVersions: null,
+        priceCanonicalModels: null,
+        priceEffectiveAts: null,
+        priceEffectiveUntils: null,
+        priceCurrencies: null,
+        priceRatesPerMillion: null,
         priceSourceUrls: null,
         priceContextTiers: null
       };
+      const tokenObservationRows = [
+        ...history.models.flatMap((model) =>
+          model.observations.map((observation) => ({
+            model: model.model,
+            observation,
+            classified: true
+          }))
+        ),
+        ...(history.unclassified.observations ?? []).map((observation) => ({
+          model: observation.model,
+          observation,
+          classified: false
+        }))
+      ].map(({ model, observation, classified }) => ({
+        ...tokenRow,
+        recordType: 'token-observation',
+        recordId: observation.id,
+        model,
+        usageObservationId: observation.id,
+        observedAt: observation.observedAt,
+        timePrecision: observation.timePrecision,
+        authority: observation.authority,
+        totalTokens: observation.tokenTotals.total,
+        recordedTokens: observation.recordedTokens,
+        sourceReportedTokens: observation.sourceReportedTotalTokens,
+        sourceReportedObservationCount: observation.sourceReportedTotalTokens === null ? 0 : 1,
+        observationCount: 1,
+        unclassifiedTokens: observation.unclassifiedTokens,
+        classifiedTokens: classified ? observation.recordedTokens : 0,
+        classificationCoverage:
+          observation.recordedTokens + (classified ? observation.unclassifiedTokens : 0) === 0
+            ? null
+            : (classified ? observation.recordedTokens : 0) /
+              (observation.recordedTokens + (classified ? observation.unclassifiedTokens : 0)),
+        totalDerivations: [observation.totalDerivation],
+        timePrecisions: [observation.timePrecision],
+        usageScopes: null,
+        aggregationTemporalities: null,
+        inputTokens: observation.tokenTotals.input,
+        outputTokens: observation.tokenTotals.output,
+        reasoningTokens: observation.tokenTotals.reasoning,
+        cacheReadTokens: observation.tokenTotals.cacheRead,
+        cacheWriteTokens: observation.tokenTotals.cacheWrite
+      }));
       const costRows = history.costs.map((cost) => {
         const authorities = domain.costs
           .filter(
@@ -98,6 +152,13 @@ export function buildUsageExport(
           unpricedTokens: cost.pricingEvidence?.unpricedTokens ?? null,
           pricingCoverage: cost.pricingEvidence?.pricingCoverage ?? null,
           priceVersions: cost.priceSnapshots.map((snapshot) => snapshot.version),
+          priceCanonicalModels: cost.priceSnapshots.map((snapshot) => snapshot.canonicalModel),
+          priceEffectiveAts: cost.priceSnapshots.map((snapshot) => snapshot.effectiveAt),
+          priceEffectiveUntils: cost.priceSnapshots.map((snapshot) => snapshot.effectiveUntil),
+          priceCurrencies: cost.priceSnapshots.map((snapshot) => snapshot.currency),
+          priceRatesPerMillion: cost.priceSnapshots.map((snapshot) =>
+            JSON.stringify(snapshot.ratesPerMillion)
+          ),
           priceSourceUrls: cost.priceSnapshots.flatMap((snapshot) =>
             snapshot.sourceUrl ? [snapshot.sourceUrl] : []
           ),
@@ -106,7 +167,57 @@ export function buildUsageExport(
           )
         };
       });
-      return [tokenRow, ...costRows];
+      const costObservationRows = history.models.flatMap((model) =>
+        model.priceEvidence.map((cost) => {
+          const snapshot = cost.priceSnapshot;
+          return {
+            ...tokenRow,
+            recordType: 'cost-observation',
+            recordId: cost.id,
+            model: model.model,
+            usageObservationId: cost.usageObservationId,
+            observedAt: cost.observedAt ?? null,
+            timePrecision:
+              model.observations.find((observation) => observation.id === cost.usageObservationId)
+                ?.timePrecision ?? null,
+            authority: cost.authority,
+            totalTokens: null,
+            recordedTokens: null,
+            sourceReportedTokens: null,
+            sourceReportedObservationCount: null,
+            observationCount: null,
+            unclassifiedTokens: null,
+            classifiedTokens: null,
+            classificationCoverage: null,
+            totalDerivations: null,
+            timePrecisions: null,
+            usageScopes: null,
+            aggregationTemporalities: null,
+            inputTokens: null,
+            outputTokens: null,
+            reasoningTokens: null,
+            cacheReadTokens: null,
+            cacheWriteTokens: null,
+            costKind: cost.kind,
+            costPurpose: cost.kind,
+            legacyPurposeUnknown: false,
+            amount: cost.amount,
+            currency: cost.currency,
+            pricedTokens: cost.pricedTokens,
+            unpricedTokens: null,
+            pricingCoverage: null,
+            priceVersions: snapshot ? [snapshot.version] : [],
+            priceCanonicalModels: snapshot ? [snapshot.canonicalModel] : [],
+            priceEffectiveAts: snapshot ? [snapshot.effectiveAt] : [],
+            priceEffectiveUntils: snapshot ? [snapshot.effectiveUntil] : [],
+            priceCurrencies: snapshot ? [snapshot.currency] : [],
+            priceRatesPerMillion: snapshot ? [JSON.stringify(snapshot.ratesPerMillion)] : [],
+            priceSourceUrls: snapshot?.sourceUrl ? [snapshot.sourceUrl] : [],
+            priceContextTiers: snapshot?.contextTier ? [snapshot.contextTier] : []
+          };
+        })
+      );
+      return [tokenRow, ...tokenObservationRows, ...costRows, ...costObservationRows];
     })
   );
   const generatedDay = overview.generatedAt.slice(0, 10);
@@ -158,6 +269,11 @@ const CSV_COLUMNS = [
   'freshness',
   'lastSuccessAt',
   'recordType',
+  'recordId',
+  'model',
+  'usageObservationId',
+  'observedAt',
+  'timePrecision',
   'authority',
   'totalTokens',
   'recordedTokens',
@@ -185,6 +301,11 @@ const CSV_COLUMNS = [
   'unpricedTokens',
   'pricingCoverage',
   'priceVersions',
+  'priceCanonicalModels',
+  'priceEffectiveAts',
+  'priceEffectiveUntils',
+  'priceCurrencies',
+  'priceRatesPerMillion',
   'priceSourceUrls',
   'priceContextTiers'
 ] as const;

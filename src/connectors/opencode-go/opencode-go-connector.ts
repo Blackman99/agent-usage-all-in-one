@@ -134,7 +134,17 @@ function mapLocalCost(session: OpenCodeLocalSession): CostRecord {
       id: 'opencode-export-reported-cost-v1',
       version: '2026-08-28',
       source: 'OpenCode local session export reported cost',
-      effectiveAt: '2026-08-28T00:00:00.000Z'
+      canonicalModel: session.model,
+      effectiveAt: '2026-08-28T00:00:00.000Z',
+      effectiveUntil: null,
+      currency: 'USD',
+      ratesPerMillion: {
+        input: null,
+        output: null,
+        reasoning: null,
+        'cache-read': null,
+        'cache-write': null
+      }
     }
   };
 }

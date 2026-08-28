@@ -1454,7 +1454,17 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
                     id: 'fable-price',
                     version: '2026-08-01',
                     source: 'Official fixture pricing',
-                    effectiveAt: '2026-08-01T00:00:00.000Z'
+                    canonicalModel: 'fable-model',
+                    effectiveAt: '2026-08-01T00:00:00.000Z',
+                    effectiveUntil: null,
+                    currency: 'USD',
+                    ratesPerMillion: {
+                      input: 10_000,
+                      output: 10_000,
+                      reasoning: null,
+                      'cache-read': null,
+                      'cache-write': null
+                    }
                   },
                   authority: 'estimate',
                   calculatedAt: '2026-08-28T00:31:00.000Z'

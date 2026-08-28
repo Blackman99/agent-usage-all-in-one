@@ -52,6 +52,15 @@ describe('privacy, export, and retention', () => {
           totalTokens: 125
         }),
         expect.objectContaining({
+          recordType: 'token-observation',
+          model: 'recent-model',
+          usageObservationId: 'recent-observation',
+          observedAt: '2026-08-27T00:00:00.000Z',
+          timePrecision: 'unknown',
+          authority: 'local-observation',
+          recordedTokens: 125
+        }),
+        expect.objectContaining({
           recordType: 'cost',
           costKind: 'actual',
           authority: 'official-account',
@@ -102,6 +111,8 @@ describe('privacy, export, and retention', () => {
     const csvArtifact = await application.exportUsage({ format: 'csv', window: '30d' });
     expect(csvArtifact.contentType).toBe('text/csv; charset=utf-8');
     expect(csvArtifact.body).toContain('window,windowStart,windowEnd');
+    expect(csvArtifact.body.split('\n')[0]).toContain('model,usageObservationId');
+    expect(csvArtifact.body).toContain('recent-model,recent-observation');
     expect(csvArtifact.body).toContain('local-observation');
     expect(csvArtifact.body).toContain(',actual,');
     expect(csvArtifact.body).toContain(',reported-estimate,');

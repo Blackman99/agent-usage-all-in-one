@@ -168,7 +168,17 @@ function historySnapshot(): ConnectorSnapshot {
           id: 'fixture-price-v1',
           version: '2026-08-01',
           source: 'fixture retail pricing',
-          effectiveAt: '2026-08-01T00:00:00.000Z'
+          canonicalModel: null,
+          effectiveAt: '2026-08-01T00:00:00.000Z',
+          effectiveUntil: null,
+          currency: 'USD',
+          ratesPerMillion: {
+            input: null,
+            output: null,
+            reasoning: null,
+            'cache-read': null,
+            'cache-write': null
+          }
         }
       },
       {

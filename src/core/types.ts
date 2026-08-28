@@ -112,7 +112,11 @@ export interface PriceSnapshotReference {
   id: string;
   version: string;
   source: string;
+  canonicalModel: string | null;
   effectiveAt: string;
+  effectiveUntil: string | null;
+  currency: string;
+  ratesPerMillion: Record<RetailTokenKind, number | null>;
   sourceUrl?: string;
   contextTier?: string;
 }
@@ -247,11 +251,13 @@ export interface HistoryModel {
 
 export interface HistoryModelObservation {
   id: string;
+  model: string | null;
   observedAt: string;
   authority: DataAuthority;
   timePrecision: TokenTimePrecision;
   sourceReportedTotalTokens: number | null;
   recordedTokens: number;
+  unclassifiedTokens: number;
   totalDerivation: TokenTotalDerivation;
   tokenTotals: TokenTotals;
 }
@@ -308,6 +314,7 @@ export interface HistoryUnclassifiedUsage {
   tokenEvidence: TokenEvidence;
   authorities: DataAuthority[];
   lastObservedAt: string | null;
+  observations?: HistoryModelObservation[];
 }
 
 export interface BillingHistory {
