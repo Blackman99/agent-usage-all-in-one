@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -102,6 +103,36 @@ describe('retained retail-equivalent backfill', () => {
       ]
     });
     restarted.close();
+  });
+
+  it('preserves immutable retail costs whose raw observations were already compacted', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-compacted-price-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    repository.saveSnapshot(snapshot([usage('old-priced-event', '2026-08-13T00:00:00.000Z')]));
+    const initial = new UsageApplication({
+      repository,
+      connectors: [],
+      clock: () => new Date('2026-08-14T00:00:00.000Z')
+    });
+    await initial.startBackgroundProcessing();
+    expect(await retailHistory(initial)).toMatchObject({ amount: 0.325 });
+
+    const rebuild = new UsageApplication({
+      repository,
+      connectors: [],
+      clock: () => new Date('2026-12-01T12:00:00.000Z')
+    });
+    await rebuild.startHardRebuild();
+    expect(repository.getRetentionStatus().rawObservations).toBe(0);
+    const database = new DatabaseSync(databasePath);
+    const retained = database
+      .prepare("SELECT amount FROM cost_records WHERE kind = 'retail-equivalent'")
+      .get() as { amount: number };
+    expect(retained.amount).toBe(0.325);
+    database.close();
+    repository.close();
   });
 });
 

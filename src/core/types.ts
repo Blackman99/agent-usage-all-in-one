@@ -211,11 +211,16 @@ export interface ConnectorSnapshot {
   observedAt: string;
 }
 
+export type CollectionMode = 'incremental' | 'hard-rebuild';
+export interface CollectionRequest {
+  mode: CollectionMode;
+}
+
 export interface Connector {
   readonly id: string;
   readonly displayName?: string;
   readonly consentId?: string;
-  collect(options?: { forceRebuild?: boolean }): Promise<ConnectorSnapshot>;
+  collect(options?: CollectionRequest): Promise<ConnectorSnapshot>;
 }
 
 export type ProcessingModuleId = 'discovery' | 'usage' | 'pricing' | 'retention';
@@ -791,6 +796,7 @@ export interface UsageRepository {
   deleteDerivedRetailCosts?(): void;
   getApplicationState?(key: string): string | null;
   saveApplicationState?(key: string, value: string): void;
+  ensureQueryIndexes?(): Promise<void> | void;
   close(): void;
 }
 

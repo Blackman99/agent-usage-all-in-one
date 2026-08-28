@@ -4,6 +4,7 @@ import type {
   ConnectorDiagnostic,
   ConnectorFailure,
   ConnectorPolicy,
+  CollectionMode,
   DoctorReport,
   ExchangeRateProvider,
   LocalNotification,
@@ -54,7 +55,7 @@ export interface UsageApplicationOptions {
 
 export interface RefreshOptions {
   userInitiated?: boolean;
-  forceRebuild?: boolean;
+  mode?: CollectionMode;
 }
 
 export class UsageApplication {
@@ -71,6 +72,7 @@ export class UsageApplication {
   readonly #startAtLoginManager?: StartAtLoginManager;
   readonly #priceCatalog: RetailPriceCatalog | null;
   #refreshPromise: Promise<void> | null = null;
+  #refreshMode: CollectionMode | null = null;
   #backgroundPromise: Promise<void> | null = null;
   #queuedHardRebuildPromise: Promise<void> | null = null;
   #processingStatus: ProcessingStatus;
@@ -150,8 +152,16 @@ export class UsageApplication {
   async #runProcessing(forceRebuild: boolean): Promise<void> {
     await this.#runModule('discovery', () => this.discoverConnectors().then(() => undefined));
     await Promise.all([
-      this.#runModule('usage', () => this.refresh({ userInitiated: forceRebuild, forceRebuild })),
-      this.#runModule('retention', () => this.compactRetention().then(() => undefined))
+      this.#runModule('usage', () =>
+        this.refresh({
+          userInitiated: forceRebuild,
+          mode: forceRebuild ? 'hard-rebuild' : 'incremental'
+        })
+      ),
+      this.#runModule('retention', async () => {
+        await this.#repository.ensureQueryIndexes?.();
+        await this.compactRetention();
+      })
     ]);
     await this.#runModule('pricing', async () => this.#backfillRetailCosts(forceRebuild));
   }
@@ -173,9 +183,17 @@ export class UsageApplication {
   }
 
   refresh(options: RefreshOptions = {}): Promise<void> {
-    if (this.#refreshPromise) return this.#refreshPromise;
+    const requestedMode = options.mode ?? 'incremental';
+    if (this.#refreshPromise) {
+      if (requestedMode === 'hard-rebuild' && this.#refreshMode !== 'hard-rebuild') {
+        return this.#refreshPromise.then(() => this.refresh(options));
+      }
+      return this.#refreshPromise;
+    }
+    this.#refreshMode = requestedMode;
     this.#refreshPromise = this.#performRefresh(options).finally(() => {
       this.#refreshPromise = null;
+      this.#refreshMode = null;
     });
     return this.#refreshPromise;
   }
@@ -216,7 +234,7 @@ export class UsageApplication {
         };
         try {
           const snapshot = await withTimeout(
-            connector.collect({ forceRebuild: options.forceRebuild }),
+            connector.collect({ mode: options.mode ?? 'incremental' }),
             policy.timeoutMs,
             `${connector.id} timed out`
           );

@@ -1,5 +1,6 @@
 import type {
   Connector,
+  CollectionRequest,
   ConnectorFailure,
   ConnectorSnapshot,
   QuotaBucket
@@ -31,7 +32,7 @@ export class ClaudeCodeConnector implements Connector {
     this.#clock = options.clock ?? (() => new Date());
   }
 
-  async collect(options: { forceRebuild?: boolean } = {}): Promise<ConnectorSnapshot> {
+  async collect(options: CollectionRequest = { mode: 'incremental' }): Promise<ConnectorSnapshot> {
     const observedAt = this.#clock().toISOString();
     let quota: ParsedClaudeQuota[] = [];
     const warnings: ConnectorFailure[] = [];

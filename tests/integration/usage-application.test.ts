@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -21,7 +22,17 @@ describe('UsageApplication', () => {
   it('reports independent background processing progress while cached reads stay available', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-processing-'));
     workspaces.push(workspace);
-    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    let database = new DatabaseSync(databasePath);
+    const indexNames = () =>
+      (
+        database.prepare("PRAGMA index_list('usage_observations')").all() as Array<{
+          name: string;
+        }>
+      ).map((index) => index.name);
+    expect(indexNames()).not.toContain('usage_provider_model_time_idx');
+    database.close();
     let releaseCollection!: () => void;
     const collectionGate = new Promise<void>((resolve) => {
       releaseCollection = resolve;
@@ -63,6 +74,44 @@ describe('UsageApplication', () => {
         retention: { state: 'ready' }
       }
     });
+    database = new DatabaseSync(databasePath);
+    expect(indexNames()).toContain('usage_provider_model_time_idx');
+    database.close();
+    repository.close();
+  });
+
+  it('queues hard collection behind an in-flight incremental refresh', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-hard-refresh-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let releaseIncremental!: () => void;
+    const incrementalGate = new Promise<void>((resolve) => {
+      releaseIncremental = resolve;
+    });
+    const modes: string[] = [];
+    const connector: Connector = {
+      id: 'mode-aware',
+      async collect(request) {
+        modes.push(request?.mode ?? 'incremental');
+        if (request?.mode !== 'hard-rebuild') await incrementalGate;
+        return {
+          provider: { id: 'mode-aware', displayName: 'Mode Aware' },
+          billingDomains: [{ id: 'subscription', displayName: 'Subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-28T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({ repository, connectors: [connector] });
+
+    const incremental = application.refresh();
+    const hardRebuild = application.startHardRebuild();
+    releaseIncremental();
+    await Promise.all([incremental, hardRebuild]);
+
+    expect(modes).toEqual(['incremental', 'hard-rebuild']);
     repository.close();
   });
 

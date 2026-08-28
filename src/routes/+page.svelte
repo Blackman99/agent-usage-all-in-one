@@ -28,6 +28,7 @@
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
 
   let locale: Locale = 'en';
+  let metaDescription: string;
   let overview: UsageOverview | null = null;
   let loading = true;
   let refreshing = false;
@@ -69,6 +70,8 @@
   let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
   let destroyed = false;
   const automaticRecoveryController = createAutomaticRecoveryController(() => automaticRefresh());
+
+  $: metaDescription = translate(locale, 'metaDescription');
 
   $: selectedModelEntry =
     overview?.workbench?.modelRanking.entries.find((entry) => entry.id === selectedModelId) ?? null;
@@ -214,6 +217,8 @@
       const next = (await response.json()) as ProcessingStatus;
       const previous = processing;
       processing = next;
+      if (next.modules.discovery.state === 'running') void loadConnectors();
+      if (next.modules.usage.state === 'running') void loadOverview();
       if (
         previous?.modules.discovery.state !== 'ready' &&
         next.modules.discovery.state === 'ready'
@@ -1133,10 +1138,7 @@
 <svelte:head>
   <title>Agent Usage</title>
   <link rel="icon" href="/brand/agent-usage-logo.svg" />
-  <meta
-    name="description"
-    content="A private local dashboard for coding-agent quota, token, and cost usage."
-  />
+  <meta name="description" content={metaDescription} />
 </svelte:head>
 
 <svelte:window on:keydown={handleWindowKeydown} />

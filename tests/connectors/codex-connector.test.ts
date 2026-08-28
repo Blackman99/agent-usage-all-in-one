@@ -67,10 +67,16 @@ describe('CodexConnector', () => {
 
     const first = await new LocalTranscriptUsageClient(options).readUsage();
     const persisted = await readFile(cachePath, 'utf8');
+    const corrupted = JSON.parse(persisted) as {
+      files: Array<{ records: Array<{ observation: { model: string } }> }>;
+    };
+    corrupted.files[0].records[0].observation.model = 'corrupted-cache-model';
+    await writeFile(cachePath, JSON.stringify(corrupted));
     const restarted = await new LocalTranscriptUsageClient(options).readUsage();
 
     expect(first.usage).toHaveLength(1);
     expect(restarted).toEqual(first);
+    expect(restarted.usage[0].model).toBe('gpt-5.6-sol');
     expect(persisted).not.toContain(workspace);
     expect(JSON.parse(persisted)).toMatchObject({ version: 1, files: [expect.any(Object)] });
   });

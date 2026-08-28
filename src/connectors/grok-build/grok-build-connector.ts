@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type {
   Connector,
+  CollectionRequest,
   ConnectorFailure,
   ConnectorSnapshot,
   QuotaBucket
@@ -63,7 +64,7 @@ export class GrokBuildConnector implements Connector {
     this.#clock = options.clock ?? (() => new Date());
   }
 
-  async collect(options: { forceRebuild?: boolean } = {}): Promise<ConnectorSnapshot> {
+  async collect(options: CollectionRequest = { mode: 'incremental' }): Promise<ConnectorSnapshot> {
     const warnings: ConnectorFailure[] = [];
     let quotaBuckets: QuotaBucket[] = [];
     let observedAt = this.#clock().toISOString();

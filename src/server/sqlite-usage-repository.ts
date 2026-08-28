@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 
 import type {
   BalanceRecord,
@@ -39,6 +40,22 @@ import { normalizeTokenObservation } from '../core/token-normalization.js';
 import type { ConnectorStatusRecord, ConnectorSetupState } from '../core/onboarding-types.js';
 
 const FRESHNESS_WINDOW_MS = 15 * 60 * 1000;
+const QUERY_INDEXES_SQL = `
+  CREATE INDEX IF NOT EXISTS usage_observed_at_idx
+    ON usage_observations(observed_at);
+  CREATE INDEX IF NOT EXISTS usage_provider_domain_time_idx
+    ON usage_observations(provider_id, billing_domain_id, observed_at);
+  CREATE INDEX IF NOT EXISTS usage_provider_model_time_idx
+    ON usage_observations(provider_id, model, observed_at);
+  CREATE INDEX IF NOT EXISTS cost_observed_at_idx
+    ON cost_records(observed_at);
+  CREATE INDEX IF NOT EXISTS cost_provider_domain_time_idx
+    ON cost_records(provider_id, billing_domain_id, observed_at);
+  CREATE INDEX IF NOT EXISTS cost_usage_observation_idx
+    ON cost_records(provider_id, usage_observation_id);
+  CREATE INDEX IF NOT EXISTS quota_provider_bucket_time_idx
+    ON quota_observations(provider_id, bucket_id, observed_at);
+`;
 const { DatabaseSync } = createRequire(import.meta.url)(
   'node:sqlite'
 ) as typeof import('node:sqlite');
@@ -275,8 +292,10 @@ interface ConnectorDiagnosticRow {
 
 export class SqliteUsageRepository implements UsageRepository {
   readonly #database: DatabaseSyncType;
+  readonly #databasePath: string;
 
   constructor(databasePath: string) {
+    this.#databasePath = databasePath;
     mkdirSync(dirname(databasePath), { recursive: true });
     this.#database = new DatabaseSync(databasePath);
     this.#database.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -1136,7 +1155,18 @@ export class SqliteUsageRepository implements UsageRepository {
   }
 
   deleteDerivedRetailCosts(): void {
-    this.#database.prepare("DELETE FROM cost_records WHERE kind = 'retail-equivalent'").run();
+    this.#database
+      .prepare(
+        `DELETE FROM cost_records
+         WHERE kind = 'retail-equivalent'
+           AND usage_observation_id IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM usage_observations usage
+             WHERE usage.provider_id = cost_records.provider_id
+               AND usage.id = cost_records.usage_observation_id
+           )`
+      )
+      .run();
   }
 
   getApplicationState(key: string): string | null {
@@ -1153,6 +1183,37 @@ export class SqliteUsageRepository implements UsageRepository {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`
       )
       .run(key, value);
+  }
+
+  async ensureQueryIndexes(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const worker = new Worker(
+        `
+          const { parentPort, workerData } = require('node:worker_threads');
+          const { DatabaseSync } = require('node:sqlite');
+          try {
+            const database = new DatabaseSync(workerData.databasePath);
+            database.exec(workerData.sql);
+            database.close();
+            parentPort.postMessage({ ok: true });
+          } catch (error) {
+            parentPort.postMessage({
+              ok: false,
+              message: error instanceof Error ? error.message : String(error)
+            });
+          }
+        `,
+        {
+          eval: true,
+          workerData: { databasePath: this.#databasePath, sql: QUERY_INDEXES_SQL }
+        }
+      );
+      worker.once('message', (message: { ok: boolean; message?: string }) => {
+        if (message.ok) resolve();
+        else reject(new Error(message.message ?? 'Unable to create usage query indexes'));
+      });
+      worker.once('error', reject);
+    });
   }
 
   close(): void {
@@ -1915,20 +1976,6 @@ export class SqliteUsageRepository implements UsageRepository {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS usage_observed_at_idx
-        ON usage_observations(observed_at);
-      CREATE INDEX IF NOT EXISTS usage_provider_domain_time_idx
-        ON usage_observations(provider_id, billing_domain_id, observed_at);
-      CREATE INDEX IF NOT EXISTS usage_provider_model_time_idx
-        ON usage_observations(provider_id, model, observed_at);
-      CREATE INDEX IF NOT EXISTS cost_observed_at_idx
-        ON cost_records(observed_at);
-      CREATE INDEX IF NOT EXISTS cost_provider_domain_time_idx
-        ON cost_records(provider_id, billing_domain_id, observed_at);
-      CREATE INDEX IF NOT EXISTS cost_usage_observation_idx
-        ON cost_records(provider_id, usage_observation_id);
-      CREATE INDEX IF NOT EXISTS quota_provider_bucket_time_idx
-        ON quota_observations(provider_id, bucket_id, observed_at);
     `);
     const usageColumns = this.#database
       .prepare('PRAGMA table_info(usage_observations)')

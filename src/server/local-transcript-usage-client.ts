@@ -4,7 +4,7 @@ import { mkdir, opendir, readFile, rename, stat, writeFile } from 'node:fs/promi
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
-import type { CostRecord, UsageObservation } from '../core/types.js';
+import type { CollectionRequest, CostRecord, UsageObservation } from '../core/types.js';
 
 export type LocalTranscriptProvider = 'claude-code' | 'codex' | 'grok';
 
@@ -15,7 +15,7 @@ export interface LocalTranscriptUsageResult {
 }
 
 export interface TranscriptUsageClient {
-  readUsage(options?: { forceRebuild?: boolean }): Promise<LocalTranscriptUsageResult>;
+  readUsage(options?: CollectionRequest): Promise<LocalTranscriptUsageResult>;
 }
 
 export interface LocalTranscriptUsageClientOptions {
@@ -40,6 +40,7 @@ interface TranscriptFile {
 
 interface CachedTranscriptFile extends TranscriptFile {
   records: ParsedTranscriptRecord[];
+  recordsDigest: string;
 }
 
 interface CodexScanState {
@@ -68,9 +69,11 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     this.#cachePath = options.cachePath;
   }
 
-  async readUsage(options: { forceRebuild?: boolean } = {}): Promise<LocalTranscriptUsageResult> {
+  async readUsage(
+    options: CollectionRequest = { mode: 'incremental' }
+  ): Promise<LocalTranscriptUsageResult> {
     await this.#loadCache();
-    if (options.forceRebuild) this.#fileCache.clear();
+    if (options.mode === 'hard-rebuild') this.#fileCache.clear();
     const cutoff = this.#clock().getTime() - this.#lookbackDays * 24 * 60 * 60 * 1000;
     const discovered = await listTranscriptFiles(this.#root, cutoff);
     const files = discovered.files;
@@ -152,7 +155,12 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     } catch {
       return { records: cached?.records ?? [], complete: false };
     }
-    this.#fileCache.set(cacheKey, { ...file, path: cacheKey, records });
+    this.#fileCache.set(cacheKey, {
+      ...file,
+      path: cacheKey,
+      records,
+      recordsDigest: stableId(JSON.stringify(records))
+    });
     return { records, complete: true };
   }
 
@@ -163,10 +171,14 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     try {
       const stored = JSON.parse(await readFile(this.#cachePath, 'utf8')) as {
         version?: number;
-        files?: CachedTranscriptFile[];
+        files?: unknown[];
       };
       if (stored.version !== 1 || !Array.isArray(stored.files)) return;
-      for (const file of stored.files) this.#fileCache.set(file.path, file);
+      for (const file of stored.files) {
+        if (!isCachedTranscriptFile(file)) continue;
+        if (file.recordsDigest !== stableId(JSON.stringify(file.records))) continue;
+        this.#fileCache.set(file.path, file);
+      }
     } catch {
       // A missing or corrupt optimization cache is rebuilt from source transcripts.
     }
@@ -187,6 +199,49 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
       // Cache persistence never makes transcript collection fail.
     }
   }
+}
+
+function isCachedTranscriptFile(value: unknown): value is CachedTranscriptFile {
+  const record = asObject(value);
+  if (!record || !Array.isArray(record.records)) return false;
+  return (
+    typeof record.path === 'string' &&
+    /^[0-9a-f]{24}$/.test(record.path) &&
+    finiteNonNegative(record.size) !== null &&
+    finiteNonNegative(record.mtimeMs) !== null &&
+    typeof record.recordsDigest === 'string' &&
+    /^[0-9a-f]{24}$/.test(record.recordsDigest) &&
+    record.records.every(isParsedTranscriptRecord)
+  );
+}
+
+function isParsedTranscriptRecord(value: unknown): value is ParsedTranscriptRecord {
+  const record = asObject(value);
+  const observation = asObject(record?.observation);
+  if (!record || !observation) return false;
+  const authority = observation.authority;
+  const numericFields = [
+    'inputTokens',
+    'outputTokens',
+    'reasoningTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens'
+  ];
+  return (
+    typeof record.dedupeKey === 'string' &&
+    (record.reportedCostUsd === null || finiteNonNegative(record.reportedCostUsd) !== null) &&
+    typeof observation.id === 'string' &&
+    typeof observation.billingDomainId === 'string' &&
+    (observation.model === null || typeof observation.model === 'string') &&
+    typeof observation.observedAt === 'string' &&
+    Number.isFinite(Date.parse(observation.observedAt)) &&
+    numericFields.every(
+      (field) => observation[field] === undefined || finiteNonNegative(observation[field]) !== null
+    ) &&
+    ['official-account', 'official-client', 'local-observation', 'estimate'].includes(
+      String(authority)
+    )
+  );
 }
 
 function parseGrokTranscriptLine(line: string): ParsedTranscriptRecord[] {

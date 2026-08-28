@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 480" role="img" aria-labelledby="title desc">
   <title id="title">Agent Usage</title>
-  <desc id="desc">One local dashboard for coding-agent quota, tokens, and equivalent API cost.</desc>
+  <desc id="desc">Agent Usage</desc>
   <defs>
     <linearGradient id="background" x1="60" y1="20" x2="1540" y2="460" gradientUnits="userSpaceOnUse">
       <stop stop-color="#111a34"/>
@@ -37,8 +37,7 @@
     <rect x="64" y="30" width="8" height="50" rx="4" fill="url(#meter)"/>
   </g>
   <text x="224" y="140" fill="#f4f6ff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="72" font-weight="700" letter-spacing="-3">Agent Usage</text>
-  <text x="92" y="246" fill="#aeb8d0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="29">One local view for quota, tokens, and equivalent API cost.</text>
-  <g transform="translate(92 300)" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="600">
+  <g transform="translate(92 230)" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="600">
     <rect width="126" height="48" rx="24" fill="#202a45"/><text x="24" y="31" fill="#e8ecf8">Codex</text>
     <rect x="140" width="182" height="48" rx="24" fill="#202a45"/><text x="164" y="31" fill="#e8ecf8">Claude Code</text>
     <rect x="336" width="190" height="48" rx="24" fill="#202a45"/><text x="360" y="31" fill="#e8ecf8">OpenCode Go</text>

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type {
   Connector,
+  CollectionRequest,
   ConnectorFailure,
   ConnectorSnapshot,
   QuotaBucket,
@@ -87,7 +88,7 @@ export class CodexConnector implements Connector {
     this.#historyClient = historyClient;
   }
 
-  async collect(options: { forceRebuild?: boolean } = {}): Promise<ConnectorSnapshot> {
+  async collect(options: CollectionRequest = { mode: 'incremental' }): Promise<ConnectorSnapshot> {
     const observedAt = this.#clock().toISOString();
     const warnings: ConnectorFailure[] = [];
     let payload: CodexAccountPayload | null = null;
