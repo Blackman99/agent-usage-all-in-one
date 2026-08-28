@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { UsageApplication } from '$core/usage-application.js';
 import type { Connector, ConnectorSnapshot } from '$core/types.js';
+import { buildUsageExport } from '$core/usage-export.js';
 import { SqliteUsageRepository } from '$server/sqlite-usage-repository.js';
 
 const workspaces: string[] = [];
@@ -284,6 +285,17 @@ describe('UsageApplication', () => {
       coverage: { quota: 'complete', actualCost: 'unavailable' },
       tokenTotals: { total: 525 }
     });
+    const exported = JSON.parse(
+      buildUsageExport(overview, { format: 'json', window: '24h' }).body
+    ) as { rows: Array<Record<string, unknown>> };
+    expect(
+      exported.rows
+        .filter((row) => row.recordType === 'tokens')
+        .map((row) => [row.billingDomain, row.freshness, row.lastSuccessAt])
+    ).toEqual([
+      ['Build / SuperGrok', 'stale', buildObservedAt],
+      ['xAI API', 'fresh', xaiObservedAt]
+    ]);
     repository.close();
   });
 });

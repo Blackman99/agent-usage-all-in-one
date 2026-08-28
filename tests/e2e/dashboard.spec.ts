@@ -582,7 +582,19 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
               }
             ),
             tokenAuthority: 'local-observation',
-            billingDomains: grokBillingDomains
+            billingDomains: grokBillingDomains.map((domain) =>
+              domain.id === 'grok-build-subscription'
+                ? {
+                    ...domain,
+                    health: {
+                      status: 'degraded',
+                      errorCode: 'stale',
+                      message: 'Build telemetry is stale.',
+                      recovery: 'Refresh Grok Build telemetry.'
+                    }
+                  }
+                : domain
+            )
           }
         ]
       })
@@ -592,6 +604,11 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Grok' });
   await expect(provider.getByText('Weekly limit')).toBeVisible();
+  await expect(provider.getByText('Refresh Grok Build telemetry.')).toBeVisible();
+  await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
+  await provider.getByRole('button', { name: 'Review in settings' }).click();
+  await expect(page.getByTestId('settings-diagnostic-grok')).toBeFocused();
+  await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(provider.getByText('Plan: SuperGrok Heavy')).toBeVisible();
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
   await expect(provider).toContainText('Source: Local observation');
@@ -602,7 +619,6 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await provider.getByText('Token breakdown', { exact: true }).click();
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
-  await expect(provider.getByRole('button', { name: 'Review in settings' })).toHaveCount(0);
   await provider.getByRole('tab', { name: 'xAI API' }).click();
   await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
@@ -885,6 +901,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(rows.first()).toContainText('fable-model');
   const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
   await expect(grokRow.locator('img')).toHaveCount(0);
+  await expect(grokRow).toContainText('Separate domain · not included in headline');
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
 
   const fableRow = rows.filter({ hasText: 'fable-model' });
@@ -1248,6 +1265,7 @@ function historyOverviewFixture(
           providerDisplayName: 'History Agent',
           billingDomainId: 'api',
           billingDomainDisplayName: 'API',
+          includedInHeadline: true,
           recordedTokens: total,
           tokenEvidence
         }
@@ -1448,6 +1466,7 @@ function tokenMoneyWorkbenchFixture(window: string, total: number, currency: str
                   providerDisplayName: 'History Agent',
                   billingDomainId: 'api',
                   billingDomainDisplayName: 'API',
+                  includedInHeadline: true,
                   recordedTokens: total,
                   observationCount: 1,
                   timePrecisions: ['billing-period'],
@@ -1523,12 +1542,13 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
         providerDisplayName,
         billingDomainId,
         billingDomainDisplayName,
+        includedInHeadline: billingDomainId !== 'xai-api',
         model,
         tokenTotals,
         tokenEvidence,
-        tokenShare: tokens / 2900,
+        tokenShare: billingDomainId === 'xai-api' ? null : tokens / 2900,
         retailEquivalent,
-        retailShare: amount === null ? null : amount / 9,
+        retailShare: amount === null || billingDomainId === 'xai-api' ? null : amount / 9,
         authorities: ['local-observation'],
         lastObservedAt: '2026-08-28T00:30:00.000Z',
         observations: [
@@ -1626,6 +1646,7 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
         providerDisplayName: 'Codex',
         billingDomainId: 'subscription',
         billingDomainDisplayName: 'Subscription',
+        includedInHeadline: true,
         tokenTotals: {
           total: 1000,
           input: 800,

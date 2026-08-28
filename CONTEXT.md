@@ -153,12 +153,16 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 27. Token ranking includes known unpriced models and labels retail equivalent as
     unavailable. Retail ranking puts priced models first and never represents an
     unavailable amount as zero.
-28. Ranked known-model Tokens plus separately disclosed unclassified Tokens
-    reconcile to the workbench recorded Token total for the selected window.
+28. Headline-included known-model Tokens plus headline-included, separately
+    disclosed unclassified Tokens reconcile to the workbench recorded Token
+    total for the selected window. Sibling-domain rows are separately marked and
+    excluded from that reconciliation.
 29. Model details retain observation-level Token evidence and immutable price
     snapshots so displayed totals, line items, authority, precision, time, and
     trend can be audited without joining model names across sources.
 30. A Provider with independent billing domains declares one
     `summaryBillingDomainId`. Provider headlines, the global summary, and the
-    workbench aggregate only that domain; sibling-domain evidence remains
-    visible in its own Provider tab and is never added into the headline total.
+    workbench scalar aggregate only that domain. Sibling-domain evidence remains
+    separately identified in global contributions, trends, rankings, and its
+    Provider tab, with an explicit marker that it is not part of the headline
+    total or its percentage denominator.

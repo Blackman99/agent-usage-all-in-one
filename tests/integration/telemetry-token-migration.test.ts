@@ -27,11 +27,19 @@ describe('legacy telemetry token migration', () => {
       window: '24h'
     });
     const claude = overview.providers.find((provider) => provider.id === 'claude-code')!;
+    expect(claude.freshness).toEqual({
+      status: 'stale',
+      lastSuccessAt: '2026-08-28T01:00:00.000Z'
+    });
     expect(claude.coverage).toMatchObject({ tokens: 'partial', history: 'partial' });
     expect(claude.tokenTotals.total).toBe(0);
     expect(claude.tokenEvidence).toMatchObject({ observationCount: 0 });
 
     const grok = overview.providers.find((provider) => provider.id === 'grok')!;
+    expect(grok.billingDomains[0].freshness).toEqual({
+      status: 'stale',
+      lastSuccessAt: '2026-08-28T01:30:00.000Z'
+    });
     expect(grok.tokenTotals.total).toBe(0);
     expect(grok.tokenEvidence).toMatchObject({ observationCount: 0 });
     expect(grok.billingDomains.map((domain) => domain.id)).toEqual(['grok-build-subscription']);
@@ -61,9 +69,36 @@ describe('legacy telemetry token migration', () => {
     ]);
     database.close();
   });
+
+  it('repairs domain freshness after an earlier upgrade already added the empty column', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-domain-freshness-repair-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    seedLegacyTelemetry(databasePath, true);
+
+    const migrated = new SqliteUsageRepository(databasePath);
+    const overview = migrated.getOverview(new Date('2026-08-28T02:00:00.000Z'), {
+      window: '24h'
+    });
+    expect(
+      overview.providers.map((provider) => [provider.id, provider.freshness.lastSuccessAt])
+    ).toEqual([
+      ['claude-code', '2026-08-28T01:00:00.000Z'],
+      ['grok', '2026-08-28T01:30:00.000Z']
+    ]);
+    expect(
+      overview.providers
+        .find((provider) => provider.id === 'grok')
+        ?.billingDomains.map((domain) => [domain.id, domain.freshness.lastSuccessAt])
+    ).toEqual([
+      ['grok-build-subscription', '2026-08-28T01:30:00.000Z'],
+      ['xai-api', null]
+    ]);
+    migrated.close();
+  });
 });
 
-function seedLegacyTelemetry(databasePath: string): void {
+function seedLegacyTelemetry(databasePath: string, includeEmptyFreshnessColumn = false): void {
   const database = new DatabaseSync(databasePath);
   database.exec(`
     CREATE TABLE providers (
@@ -77,7 +112,7 @@ function seedLegacyTelemetry(databasePath: string): void {
     CREATE TABLE billing_domains (
       provider_id TEXT NOT NULL,
       id TEXT NOT NULL,
-      display_name TEXT NOT NULL,
+      display_name TEXT NOT NULL${includeEmptyFreshnessColumn ? ',\n      last_success_at TEXT' : ''},
       PRIMARY KEY (provider_id, id)
     );
     CREATE TABLE usage_observations (
@@ -96,12 +131,13 @@ function seedLegacyTelemetry(databasePath: string): void {
       authority TEXT NOT NULL,
       PRIMARY KEY (provider_id, id)
     );
-    INSERT INTO providers (id, display_name) VALUES
-      ('claude-code', 'Claude Code'),
-      ('grok', 'Grok');
+    INSERT INTO providers (id, display_name, last_success_at) VALUES
+      ('claude-code', 'Claude Code', '2026-08-28T01:00:00.000Z'),
+      ('grok', 'Grok', '2026-08-28T01:30:00.000Z');
     INSERT INTO billing_domains (provider_id, id, display_name) VALUES
       ('claude-code', 'subscription', 'Claude subscription'),
-      ('grok', 'grok-build-subscription', 'Grok Build / SuperGrok shared pool');
+      ('grok', 'grok-build-subscription', 'Grok Build / SuperGrok shared pool')
+      ${includeEmptyFreshnessColumn ? ", ('grok', 'xai-api', 'xAI API')" : ''};
     INSERT INTO usage_observations (
       provider_id, id, billing_domain_id, model, observed_at, total_tokens,
       input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,

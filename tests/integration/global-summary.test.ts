@@ -51,12 +51,14 @@ describe('global usage summary', () => {
       expect.objectContaining({
         providerId: 'codex',
         billingDomainId: 'subscription',
-        recordedTokens: 100
+        recordedTokens: 100,
+        includedInHeadline: true
       }),
       expect.objectContaining({
         providerId: 'grok',
         billingDomainId: 'grok-build-subscription',
-        recordedTokens: 525
+        recordedTokens: 525,
+        includedInHeadline: true
       })
     ]);
 
@@ -71,8 +73,15 @@ describe('global usage summary', () => {
     expect(
       thirtyDay.contributions
         .filter((contribution) => contribution.providerId === 'grok')
-        .map((contribution) => [contribution.billingDomainId, contribution.recordedTokens])
-    ).toEqual([['grok-build-subscription', 525]]);
+        .map((contribution) => [
+          contribution.billingDomainId,
+          contribution.recordedTokens,
+          contribution.includedInHeadline
+        ])
+    ).toEqual([
+      ['grok-build-subscription', 525, true],
+      ['xai-api', 1_742, false]
+    ]);
     expect(
       thirtyDayOverview.providers
         .find((provider) => provider.id === 'grok')

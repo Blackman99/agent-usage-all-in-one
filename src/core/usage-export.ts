@@ -52,8 +52,8 @@ export function buildUsageExport(
         ...(request.includeAccountIdentifiers
           ? { accountIdentifier: accountIdentifiers[provider.id] ?? null }
           : {}),
-        freshness: provider.freshness.status,
-        lastSuccessAt: provider.freshness.lastSuccessAt,
+        freshness: domain.freshness.status,
+        lastSuccessAt: domain.freshness.lastSuccessAt,
         recordType: 'tokens',
         recordId: null,
         model: null,

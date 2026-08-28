@@ -470,6 +470,7 @@ export interface WorkbenchTrendSegment {
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  includedInHeadline: boolean;
   recordedTokens: number;
   observationCount: number;
   timePrecisions: TokenTimePrecision[];
@@ -530,6 +531,7 @@ export interface WorkbenchModelEntry {
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  includedInHeadline: boolean;
   model: string;
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
@@ -548,6 +550,7 @@ export interface WorkbenchUnclassifiedUsage {
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  includedInHeadline: boolean;
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
   tokenShare: number | null;
@@ -567,6 +570,7 @@ export interface GlobalUsageContribution {
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  includedInHeadline: boolean;
   recordedTokens: number;
   tokenEvidence: TokenEvidence;
   authorities?: DataAuthority[];

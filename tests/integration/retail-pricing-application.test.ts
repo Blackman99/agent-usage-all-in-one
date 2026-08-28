@@ -21,6 +21,71 @@ afterEach(async () => {
 });
 
 describe('retail-equivalent application tracer', () => {
+  it('invalidates derived pricing when context eligibility changes under the same observation id', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retail-context-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let timePrecision: 'event' | 'day' = 'event';
+    let aggregationTemporality: 'delta' | 'cumulative' = 'delta';
+    const connector: Connector = {
+      id: 'opencode-context-fixture',
+      async collect() {
+        return {
+          provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
+          billingDomains: [{ id: 'go-subscription', displayName: 'Go subscription' }],
+          quotaBuckets: [],
+          usage: [
+            {
+              id: 'context-sensitive-observation',
+              billingDomainId: 'go-subscription',
+              model: 'grok-4.6',
+              observedAt: '2026-08-28T01:00:00.000Z',
+              inputTokens: 100_000,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              modelAttribution: 'known' as const,
+              timePrecision,
+              usageScope: 'this-mac' as const,
+              aggregationTemporality,
+              authority: 'local-observation' as const
+            }
+          ],
+          costs: [],
+          observedAt: NOW.toISOString()
+        };
+      }
+    };
+    const usage = new UsageApplication({ repository, connectors: [connector], clock: () => NOW });
+
+    await usage.refresh({ userInitiated: true });
+    expect(
+      (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0].costs.filter(
+        (cost) => cost.kind === 'retail-equivalent'
+      )
+    ).toHaveLength(1);
+
+    timePrecision = 'day';
+    await usage.refresh({ userInitiated: true });
+    expect(
+      (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0].costs.filter(
+        (cost) => cost.kind === 'retail-equivalent'
+      )
+    ).toHaveLength(0);
+
+    timePrecision = 'event';
+    await usage.refresh({ userInitiated: true });
+    aggregationTemporality = 'cumulative';
+    await usage.refresh({ userInitiated: true });
+    expect(
+      (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0].costs.filter(
+        (cost) => cost.kind === 'retail-equivalent'
+      )
+    ).toHaveLength(0);
+    repository.close();
+  });
+
   it('re-derives a mutable daily observation without repricing unchanged history', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retail-mutable-'));
     workspaces.push(workspace);

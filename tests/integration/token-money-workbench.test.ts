@@ -74,8 +74,11 @@ describe('token and money workbench', () => {
       cny.trend.buckets
         .flatMap((bucket) => bucket.segments)
         .filter((segment) => segment.providerId === 'grok')
-        .map((segment) => segment.billingDomainId)
-    ).toEqual(['grok-build-subscription']);
+        .map((segment) => [segment.billingDomainId, segment.includedInHeadline])
+    ).toEqual([
+      ['grok-build-subscription', true],
+      ['xai-api', false]
+    ]);
     expect(
       cny.trend.buckets
         .flatMap((bucket) => bucket.segments)
@@ -90,9 +93,13 @@ describe('token and money workbench', () => {
     expect(usd.costs.actual).toMatchObject({ status: 'available', amount: 0.25 });
     expect(usd.costs.reportedEstimate).toMatchObject({ status: 'available', amount: 0.0004 });
     expect(usd.costs.retailEquivalent).toMatchObject({ status: 'available', amount: 0.0001 });
-    expect(usd.modelRanking.entries.some((entry) => entry.billingDomainId === 'xai-api')).toBe(
-      false
-    );
+    expect(
+      usd.modelRanking.entries.find((entry) => entry.billingDomainId === 'xai-api')
+    ).toMatchObject({
+      includedInHeadline: false,
+      tokenShare: null,
+      retailShare: null
+    });
 
     repository.close();
   });

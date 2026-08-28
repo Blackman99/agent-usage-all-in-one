@@ -401,7 +401,8 @@ export class SqliteUsageRepository implements UsageRepository {
       const existingPricedUsageStatement = this.#database.prepare(
         `SELECT billing_domain_id, model, observed_at, total_tokens, input_tokens, output_tokens,
                 reasoning_tokens, cache_read_tokens, cache_write_tokens, unclassified_tokens,
-                reasoning_semantics, cache_read_semantics, cache_write_semantics, model_attribution
+                reasoning_semantics, cache_read_semantics, cache_write_semantics, model_attribution,
+                time_precision, aggregation_temporality
          FROM usage_observations
          WHERE provider_id = ? AND id = ?`
       );
@@ -1877,6 +1878,34 @@ export class SqliteUsageRepository implements UsageRepository {
     if (!billingDomainColumns.some((column) => column.name === 'last_success_at')) {
       this.#database.exec('ALTER TABLE billing_domains ADD COLUMN last_success_at TEXT');
     }
+    this.#database.exec(`
+      UPDATE billing_domains
+      SET last_success_at = (
+        SELECT providers.last_success_at
+        FROM providers
+        WHERE providers.id = billing_domains.provider_id
+      )
+      WHERE last_success_at IS NULL
+        AND id = (
+          SELECT candidate.id
+          FROM billing_domains AS candidate
+          WHERE candidate.provider_id = billing_domains.provider_id
+          ORDER BY
+            CASE
+              WHEN candidate.provider_id = 'grok'
+                AND candidate.id = 'grok-build-subscription' THEN 0
+              ELSE 1
+            END,
+            candidate.id
+          LIMIT 1
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM billing_domains AS sibling
+          WHERE sibling.provider_id = billing_domains.provider_id
+            AND sibling.last_success_at IS NOT NULL
+        )
+    `);
     const costColumns = this.#database
       .prepare('PRAGMA table_info(cost_records)')
       .all() as unknown as Array<{ name: string }>;
@@ -2155,7 +2184,22 @@ function buildGlobalSummary(
   let retailPricedTokens = 0;
   let sawRetailEquivalent = false;
 
-  for (const { provider, domain } of summaryDomainHistories(providers)) {
+  for (const { provider, domain, includedInHeadline } of allDomainHistories(providers)) {
+    const domainEvidence = domain.history.tokenEvidence;
+    if (domainEvidence.observationCount > 0) {
+      contributions.push({
+        providerId: provider.id,
+        providerDisplayName: provider.displayName,
+        billingDomainId: domain.id,
+        billingDomainDisplayName: domain.displayName,
+        includedInHeadline,
+        recordedTokens: domain.history.tokenTotals.total,
+        tokenEvidence: domainEvidence,
+        authorities: domain.history.authorities ?? [],
+        lastObservedAt: domain.history.lastObservedAt ?? null
+      });
+    }
+    if (!includedInHeadline) continue;
     for (const cost of domain.history.costs) {
       if (
         cost.kind !== 'retail-equivalent' ||
@@ -2179,19 +2223,8 @@ function buildGlobalSummary(
         latestObservedAt = observedAt;
       }
     }
-    const domainEvidence = domain.history.tokenEvidence;
     if (domainEvidence.observationCount === 0) continue;
     addAggregatedTokenEvidence(evidence, domainEvidence);
-    contributions.push({
-      providerId: provider.id,
-      providerDisplayName: provider.displayName,
-      billingDomainId: domain.id,
-      billingDomainDisplayName: domain.displayName,
-      recordedTokens: domain.history.tokenTotals.total,
-      tokenEvidence: domainEvidence,
-      authorities: domain.history.authorities ?? [],
-      lastObservedAt: domain.history.lastObservedAt ?? null
-    });
   }
 
   const tokenEvidence = finishTokenEvidence(evidence);
@@ -2221,14 +2254,17 @@ function buildTokenMoneyWorkbench(
   query: UsageQuery
 ): UsageOverview['workbench'] {
   const normalized = normalizeUsageQuery(now, query);
-  const histories = summaryDomainHistories(providers);
-  const costs = histories.flatMap(({ history }) => history.costs);
-  const rates = uniqueExchangeRates(histories.flatMap(({ history }) => history.exchangeRates));
-  const recordedTokens = histories.reduce(
+  const allHistories = allDomainHistories(providers);
+  const headlineHistories = allHistories.filter(({ includedInHeadline }) => includedInHeadline);
+  const costs = headlineHistories.flatMap(({ history }) => history.costs);
+  const rates = uniqueExchangeRates(
+    headlineHistories.flatMap(({ history }) => history.exchangeRates)
+  );
+  const recordedTokens = headlineHistories.reduce(
     (total, { history }) => total + history.tokenEvidence.recordedTokens,
     0
   );
-  const observationCount = histories.reduce(
+  const observationCount = headlineHistories.reduce(
     (total, { history }) => total + history.tokenEvidence.observationCount,
     0
   );
@@ -2240,7 +2276,7 @@ function buildTokenMoneyWorkbench(
   const retailEquivalent = metric('retail-equivalent');
   const emptyIntervals = buildHistoryIntervals(normalized);
   const buckets = emptyIntervals.map((emptyInterval, index) => {
-    const segments = histories.flatMap(({ provider, domain, history }) => {
+    const segments = allHistories.flatMap(({ provider, domain, history, includedInHeadline }) => {
       const interval = history.intervals[index];
       if (!interval) return [];
       const retailEquivalent = buildWorkbenchMetric(
@@ -2258,6 +2294,7 @@ function buildTokenMoneyWorkbench(
           providerDisplayName: provider.displayName,
           billingDomainId: domain.id,
           billingDomainDisplayName: domain.displayName,
+          includedInHeadline,
           recordedTokens: interval.tokenEvidence.recordedTokens,
           observationCount: interval.tokenEvidence.observationCount,
           timePrecisions: interval.tokenEvidence.timePrecisions,
@@ -2296,7 +2333,7 @@ function buildTokenMoneyWorkbench(
       buckets
     },
     modelRanking: buildWorkbenchModelRanking(
-      histories,
+      allHistories,
       buckets,
       comparisonCurrency,
       observationCount > 0 ? recordedTokens : null,
@@ -2305,17 +2342,20 @@ function buildTokenMoneyWorkbench(
   };
 }
 
-function summaryDomainHistories(providers: ProviderOverview[]): Array<{
+function allDomainHistories(providers: ProviderOverview[]): Array<{
   provider: ProviderOverview;
   domain: BillingDomainOverview;
   history: BillingHistory;
+  includedInHeadline: boolean;
 }> {
-  return providers.flatMap((provider) => {
-    const domain = provider.billingDomains.find(
-      (candidate) => candidate.id === provider.summaryBillingDomainId
-    );
-    return domain ? [{ provider, domain, history: domain.history }] : [];
-  });
+  return providers.flatMap((provider) =>
+    provider.billingDomains.map((domain) => ({
+      provider,
+      domain,
+      history: domain.history,
+      includedInHeadline: domain.id === provider.summaryBillingDomainId
+    }))
+  );
 }
 
 function buildWorkbenchMetric(
@@ -2420,13 +2460,14 @@ function buildWorkbenchModelRanking(
     provider: ProviderOverview;
     domain: BillingDomainOverview;
     history: BillingHistory;
+    includedInHeadline: boolean;
   }>,
   buckets: UsageOverview['workbench']['trend']['buckets'],
   comparisonCurrency: string,
   recordedTokens: number | null,
   totalRetailEquivalent: UsageOverview['workbench']['costs']['retailEquivalent']
 ): UsageOverview['workbench']['modelRanking'] {
-  const entries = histories.flatMap(({ provider, domain, history }) =>
+  const entries = histories.flatMap(({ provider, domain, history, includedInHeadline }) =>
     history.models.map((model) => {
       const retailEquivalent = buildWorkbenchMetric(
         model.priceEvidence,
@@ -2448,15 +2489,17 @@ function buildWorkbenchModelRanking(
         providerDisplayName: provider.displayName,
         billingDomainId: domain.id,
         billingDomainDisplayName: domain.displayName,
+        includedInHeadline,
         model: model.model,
         tokenTotals: model.tokenTotals,
         tokenEvidence: model.tokenEvidence,
         tokenShare:
-          recordedTokens === null || recordedTokens === 0
+          !includedInHeadline || recordedTokens === null || recordedTokens === 0
             ? null
             : model.tokenTotals.total / recordedTokens,
         retailEquivalent,
         retailShare:
+          includedInHeadline &&
           retailEquivalent.status === 'available' &&
           retailEquivalent.amount !== null &&
           totalRetailEquivalent.status === 'available' &&
@@ -2534,15 +2577,16 @@ function buildWorkbenchModelRanking(
   });
   const unclassified = histories
     .filter(({ history }) => history.unclassified.tokenEvidence.observationCount > 0)
-    .map(({ provider, domain, history }) => ({
+    .map(({ provider, domain, history, includedInHeadline }) => ({
       providerId: provider.id,
       providerDisplayName: provider.displayName,
       billingDomainId: domain.id,
       billingDomainDisplayName: domain.displayName,
+      includedInHeadline,
       tokenTotals: history.unclassified.tokenTotals,
       tokenEvidence: history.unclassified.tokenEvidence,
       tokenShare:
-        recordedTokens === null || recordedTokens === 0
+        !includedInHeadline || recordedTokens === null || recordedTokens === 0
           ? null
           : history.unclassified.tokenTotals.total / recordedTokens,
       authorities: history.unclassified.authorities,
@@ -3082,7 +3126,9 @@ function pricingInputsChanged(
     existing.reasoning_semantics !== observation.tokenSemantics.reasoning ||
     existing.cache_read_semantics !== observation.tokenSemantics.cacheRead ||
     existing.cache_write_semantics !== observation.tokenSemantics.cacheWrite ||
-    existing.model_attribution !== observation.modelAttribution
+    existing.model_attribution !== observation.modelAttribution ||
+    existing.time_precision !== observation.timePrecision ||
+    existing.aggregation_temporality !== observation.aggregationTemporality
   );
 }
 

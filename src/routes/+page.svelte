@@ -823,10 +823,12 @@
     const candidates = report?.connectors.filter(
       (candidate) => candidate.providerId === providerId
     );
-    const diagnostic =
-      degradedDiagnosticForProvider(report, providerId, billingDomainId) ??
-      candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ??
-      candidates?.[0];
+    const exactDomainDiagnostic = billingDomainId
+      ? candidates?.find((candidate) => candidate.billingDomainId === billingDomainId)
+      : null;
+    const diagnostic = billingDomainId
+      ? exactDomainDiagnostic
+      : (degradedDiagnosticForProvider(report, providerId) ?? candidates?.[0]);
     return diagnostic ? `diagnostic:${diagnostic.id}` : null;
   }
 
@@ -838,11 +840,9 @@
     const candidates = report?.connectors.filter(
       (candidate) => candidate.providerId === providerId && candidate.status === 'degraded'
     );
-    return (
-      candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ??
-      candidates?.[0] ??
-      null
-    );
+    return billingDomainId
+      ? (candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ?? null)
+      : (candidates?.[0] ?? null);
   }
 
   function actionableRisk(
@@ -986,7 +986,9 @@
       segment.authorities && segment.authorities.length > 0
         ? segment.authorities.map(authorityLabel).join(' + ')
         : authorityLabel('unavailable');
-    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}: ${value} · ${t('timePrecision')}: ${precision} · ${t('source')}: ${authorities} · ${formatReset(segment.lastObservedAt ?? null)}`;
+    const headlineScope =
+      segment.includedInHeadline === false ? ` · ${t('separateFromHeadline')}` : '';
+    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}${headlineScope}: ${value} · ${t('timePrecision')}: ${precision} · ${t('source')}: ${authorities} · ${formatReset(segment.lastObservedAt ?? null)}`;
   }
 
   function overviewTokenDisplayEvidence(currentOverview: UsageOverview): {
@@ -1202,6 +1204,9 @@
                     >{formatCompactNumber(contribution.recordedTokens)}</b
                   >
                   <small>
+                    {#if contribution.includedInHeadline === false}
+                      {t('separateFromHeadline')} ·
+                    {/if}
                     {displayAuthorities(contribution.authorities)} ·
                     {formatReset(contribution.lastObservedAt ?? null)}
                   </small>
@@ -1826,6 +1831,8 @@
                     style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
                   ></i>
                   {segment.providerDisplayName} · {segment.billingDomainDisplayName}
+                  {#if segment.includedInHeadline === false}
+                    · {t('separateFromHeadline')}{/if}
                 </span>
               {/each}
             </div>
@@ -1906,6 +1913,9 @@
                         <strong>{model.model}</strong>
                         <small>{model.providerDisplayName} · {model.billingDomainDisplayName}</small
                         >
+                        {#if model.includedInHeadline === false}
+                          <small>{t('separateFromHeadline')}</small>
+                        {/if}
                         <small>
                           {displayAuthorities(model.authorities)} ·
                           {formatReset(model.lastObservedAt)}
@@ -1916,7 +1926,12 @@
                       <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
                         >{formatCompactNumber(model.tokenTotals.total)} {t('tokens')}</strong
                       >
-                      <small>{t('tokenShare')}: {formatPercent(model.tokenShare)}</small>
+                      <small>
+                        {t('tokenShare')}:
+                        {model.includedInHeadline !== false
+                          ? formatPercent(model.tokenShare)
+                          : t('headlineShareNotApplicable')}
+                      </small>
                     </span>
                     <span class="ranking-value">
                       <strong>
@@ -1927,7 +1942,12 @@
                             )
                           : t('notAvailable')}
                       </strong>
-                      <small>{t('retailShare')}: {formatPercent(model.retailShare)}</small>
+                      <small>
+                        {t('retailShare')}:
+                        {model.includedInHeadline !== false
+                          ? formatPercent(model.retailShare)
+                          : t('headlineShareNotApplicable')}
+                      </small>
                       <small>
                         {displayAuthorities(model.retailEquivalent.authorities)} ·
                         {formatReset(model.retailEquivalent.observedAt)}
@@ -1943,10 +1963,16 @@
                 {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
                   <span>
                     {item.providerDisplayName} · {item.billingDomainDisplayName}
+                    {#if item.includedInHeadline === false}
+                      · {t('separateFromHeadline')}{/if}
                     <b aria-label={tokenValueLabel(item.tokenTotals.total)}
                       >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
                     >
-                    <small>{formatPercent(item.tokenShare)}</small>
+                    <small>
+                      {item.includedInHeadline !== false
+                        ? formatPercent(item.tokenShare)
+                        : t('headlineShareNotApplicable')}
+                    </small>
                     <small>
                       {displayAuthorities(item.authorities)} · {formatReset(item.lastObservedAt)}
                     </small>
@@ -2195,6 +2221,9 @@
         <div class="model-detail-header">
           <div>
             <p class="eyebrow">{model.providerDisplayName} · {model.billingDomainDisplayName}</p>
+            {#if model.includedInHeadline === false}
+              <p>{t('separateFromHeadline')}</p>
+            {/if}
             <h2>{t('modelDetail')}: {model.model}</h2>
           </div>
           <button aria-label={t('closeModelDetail')} on:click={closeModelDetail}>×</button>
