@@ -29,18 +29,19 @@ Current result:
 - Formatting: passed.
 - Lint: passed.
 - Svelte/TypeScript check: 0 errors and 0 warnings.
-- Vitest: 33 files, 118 unit, integration, Connector-contract, HTTP, CLI, migration,
+- Vitest: 33 files, 125 unit, integration, Connector-contract, HTTP, CLI, migration,
   privacy, and security tests passed.
 - Production build: static Dashboard and packaged CLI passed.
 - Package smoke: all lifecycle commands listed above passed in a temporary install
   and temporary application Home.
 - Playwright: 14 Dashboard scenarios passed.
 - Lighthouse desktop navigation audit: Accessibility 100 and Best Practices 100.
-- Independent Standards/Spec review: the first fixed-point pass from `41710fd`
+- Independent Standards/Spec review: the fixed-point passes from `41710fd`
   identified migration evidence, model/unclassified conservation, alias pricing,
-  export auditability, recovery actions, preference persistence, and numeric-evidence
-  gaps. Those hard findings are fixed and regression-tested; the final pass remains
-  pending until the complete gate below is rerun.
+  export auditability, recovery actions, preference persistence, numeric evidence,
+  and independent Grok-domain analysis gaps. All hard findings are fixed and
+  regression-tested. The final Standards and Spec closure reviews report zero
+  unresolved findings.
 
 Security coverage injects recognizable fake secrets through connectors, sessions,
 source ids, Keychain references, HTTP, CLI, browser, diagnostics, and export paths.
@@ -83,9 +84,13 @@ regression before this receipt was completed.
 - `token-money-workbench` and `model-ranking` prove total/ranking conservation,
   separate classification/pricing coverage, isolated Provider/domain identity,
   and `unavailable` rather than false zero for unpriced data.
-- V2 JSON/CSV export includes observation ids, models, observed time, precision,
-  authority, per-observation Token totals, and complete immutable price-snapshot
-  evidence without exporting sessions or secrets.
+- Global/workbench regressions prove xAI API remains a separately identified
+  contribution, trend segment, and ranking entry while Grok headline Tokens,
+  money, coverage denominators, and shares remain Build/SuperGrok-only.
+- V2 JSON/CSV export includes anonymous per-export observation aliases, models,
+  observed time, precision, authority, per-observation Token totals, domain-scoped
+  freshness, and complete immutable price-snapshot evidence without exporting raw
+  observation/session ids or secrets.
 
 The runtime catalog is bundled and deterministic; it never scrapes vendor pricing
 at runtime. Reviewed official sources and excluded pricing cases are recorded in
@@ -112,9 +117,11 @@ are recorded in [`connector-receipts-2026-08-28.md`](connector-receipts-2026-08-
 
 ## Brand evidence
 
-OpenAI Blossom, Claude, OpenCode light/dark, and xAI light/dark assets are bundled
-under `static/brands/`. Their official sources, audited retrieval date, SHA-256,
-theme selection, text fallback, and trademark constraints are recorded in
+OpenAI Blossom, Claude, and OpenCode light/dark assets are bundled under
+`static/brands/`. Grok uses the documented plain-text fallback because the official
+product-mark package rejected the audited retrieval; the separate xAI corporate
+mark is not substituted. Official sources, audited retrieval dates, SHA-256 values,
+theme selection, fallback behavior, and trademark constraints are recorded in
 [`../../static/brands/README.md`](../../static/brands/README.md). Browser regression
 also proves that rendering these marks makes no third-party network request.
 

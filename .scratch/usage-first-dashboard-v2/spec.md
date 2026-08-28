@@ -1,6 +1,6 @@
 # Usage-first Dashboard V2 Specification
 
-**Status:** ready-for-agent
+**Status:** complete
 
 ## Problem Statement
 
