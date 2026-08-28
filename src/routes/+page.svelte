@@ -38,7 +38,7 @@
   let pendingConnectorId: string | null = null;
   let secretInputs: Record<string, string> = {};
   let selectedBillingDomains: Record<string, string> = {};
-  let selectedWindow: HistoryWindow = '24h';
+  let selectedWindow: HistoryWindow = '7d';
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
   let diagnostics: DoctorReport | null = null;
@@ -55,6 +55,7 @@
     locale = detectLocale(navigator.language);
     document.documentElement.lang = locale;
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    selectedWindow = storedWindow();
     await Promise.all([
       refresh(),
       loadConnectors(),
@@ -342,6 +343,13 @@
     return new Intl.NumberFormat(locale).format(value);
   }
 
+  function formatPercent(value: number | null): string {
+    if (value === null) return t('notAvailable');
+    return new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1 }).format(
+      value
+    );
+  }
+
   function formatReset(value: string | null): string {
     if (!value) return '—';
     return new Intl.DateTimeFormat(locale, {
@@ -536,8 +544,22 @@
 
   async function selectWindow(window: HistoryWindow): Promise<void> {
     selectedWindow = window;
+    try {
+      localStorage.setItem('agent-usage:history-window', window);
+    } catch {
+      // A disabled local preference store must not block usage queries.
+    }
     loading = true;
     await loadOverview();
+  }
+
+  function storedWindow(): HistoryWindow {
+    try {
+      const stored = localStorage.getItem('agent-usage:history-window');
+      return stored === '24h' || stored === '7d' || stored === '30d' ? stored : '7d';
+    } catch {
+      return '7d';
+    }
   }
 
   function selectBillingDomain(providerId: string, billingDomainId: string): void {
@@ -768,15 +790,96 @@
     {#if overview.providers.length === 0}
       <div class="state compact">{t('noProviders')}</div>
     {/if}
-    <div class="history-toolbar" aria-label={t('history')}>
-      {#each ['24h', '7d', '30d'] as window (window)}
-        <button
-          type="button"
-          aria-pressed={selectedWindow === window}
-          on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
-        >
-      {/each}
-    </div>
+    <section class="global-summary" aria-labelledby="global-summary-heading">
+      <div class="global-summary-heading">
+        <div>
+          <p class="eyebrow">{selectedWindow}</p>
+          <h2 id="global-summary-heading">{t('globalSummary')}</h2>
+        </div>
+        <div class="history-toolbar" aria-label={t('history')}>
+          {#each ['24h', '7d', '30d'] as window (window)}
+            <button
+              type="button"
+              aria-pressed={selectedWindow === window}
+              on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
+            >
+          {/each}
+        </div>
+      </div>
+      {#if overview.globalSummary}
+        {@const summary = overview.globalSummary}
+        <div class="summary-metrics">
+          <article>
+            <span>{t('recordedTokens')}</span>
+            <strong data-testid="summary-recorded-tokens">
+              {summary.recordedTokens === null
+                ? t('notAvailable')
+                : formatNumber(summary.recordedTokens)}
+            </strong>
+            <small>
+              {#if summary.recordedTokens === null}
+                {t('noObservations')}
+              {:else}
+                {t('classificationCoverage')}:
+                {formatPercent(summary.tokenEvidence.classificationCoverage)} ·
+                {t('timePrecision')}:
+                {summary.tokenEvidence.timePrecisions.map(timePrecisionLabel).join(' + ') ||
+                  t('unknown')}
+              {/if}
+            </small>
+          </article>
+          <article>
+            <span>{t('apiRetailEquivalent')}</span>
+            <strong data-testid="summary-retail-equivalent">
+              {summary.apiRetailEquivalent.status === 'available'
+                ? formatMoney(
+                    summary.apiRetailEquivalent.amount,
+                    summary.apiRetailEquivalent.currency
+                  )
+                : t('notAvailable')}
+            </strong>
+            <small>
+              {t('pricingCoverage')}:
+              {formatPercent(summary.apiRetailEquivalent.pricingCoverage)}
+            </small>
+          </article>
+          <article>
+            <span>{t('mostConstrained')}</span>
+            <strong>
+              {summary.mostConstrained
+                ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label}`
+                : t('notAvailable')}
+            </strong>
+            <small>
+              {#if summary.mostConstrained}
+                {formatNumber(summary.mostConstrained.remainingPercent)}% {t('remaining')} ·
+                {formatRelativeReset(summary.mostConstrained.resetsAt)} ·
+                {formatReset(summary.mostConstrained.resetsAt)}
+              {:else}
+                {t('notAvailable')}
+              {/if}
+            </small>
+          </article>
+          <article>
+            <span>{t('latestData')}</span>
+            <strong>
+              {summary.latestObservedAt ? formatReset(summary.latestObservedAt) : t('notAvailable')}
+            </strong>
+            <small>{t('generatedAt')}: {formatReset(summary.generatedAt)}</small>
+          </article>
+        </div>
+        {#if summary.contributions.length > 0}
+          <div class="summary-contributions" aria-label={t('domainContributions')}>
+            {#each summary.contributions as contribution (`${contribution.providerId}:${contribution.billingDomainId}`)}
+              <span>
+                {contribution.providerDisplayName} · {contribution.billingDomainDisplayName}
+                <b>{formatNumber(contribution.recordedTokens)}</b>
+              </span>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </section>
     {#if risk}
       <section class="risk-banner" aria-label={t('riskOverview')}>
         <div>
@@ -1495,6 +1598,84 @@
     margin-bottom: 48px;
   }
 
+  .global-summary {
+    margin-bottom: 18px;
+    padding: 18px;
+    border: 1px solid rgba(122, 136, 164, 0.2);
+    border-radius: 18px;
+    background: rgba(14, 17, 24, 0.84);
+  }
+
+  .global-summary-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 16px;
+  }
+
+  .global-summary-heading .eyebrow,
+  .global-summary-heading h2 {
+    margin: 0;
+  }
+
+  .global-summary-heading h2 {
+    margin-top: 5px;
+    font-size: 1rem;
+  }
+
+  .summary-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .summary-metrics article {
+    display: grid;
+    align-content: start;
+    gap: 7px;
+    min-height: 112px;
+    padding: 13px;
+    border: 1px solid rgba(122, 136, 164, 0.14);
+    border-radius: 13px;
+    background: rgba(20, 24, 33, 0.72);
+  }
+
+  .summary-metrics span,
+  .summary-metrics small {
+    color: #929baa;
+    font-size: 0.7rem;
+  }
+
+  .summary-metrics strong {
+    overflow-wrap: anywhere;
+    color: #f2f4f8;
+    font-size: 1.04rem;
+    font-weight: 650;
+  }
+
+  .summary-contributions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .summary-contributions span {
+    display: inline-flex;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid rgba(122, 136, 164, 0.14);
+    border-radius: 999px;
+    color: #929baa;
+    font-size: 0.66rem;
+  }
+
+  .summary-contributions b {
+    color: #dce1ea;
+    font-weight: 650;
+  }
+
   .history-toolbar {
     display: flex;
     width: fit-content;
@@ -1504,6 +1685,10 @@
     border: 1px solid rgba(122, 136, 164, 0.16);
     border-radius: 12px;
     background: rgba(14, 17, 24, 0.78);
+  }
+
+  .global-summary .history-toolbar {
+    margin: 0;
   }
 
   .history-toolbar button {
@@ -2382,6 +2567,15 @@
 
     .tokens {
       grid-template-columns: repeat(2, 1fr);
+    }
+
+    .global-summary-heading {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .summary-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .quota-meta {

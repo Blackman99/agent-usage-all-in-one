@@ -98,6 +98,12 @@ describe('agent-usage CLI', () => {
 
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
+      globalSummary: {
+        window: '24h',
+        recordedTokens: 100,
+        apiRetailEquivalent: { status: 'unavailable', amount: null },
+        tokenEvidence: { classifiedTokens: 0, unclassifiedTokens: 100 }
+      },
       providers: [
         {
           id: 'codex',
@@ -118,10 +124,14 @@ describe('agent-usage CLI', () => {
     expect(textStatus.stdout).toContain(
       '0/100 classified; 100 unclassified; precision day; scope account-wide'
     );
+    expect(textStatus.stdout).toContain(
+      'Summary (24h): 100 recorded tokens; API retail equivalent unavailable; 0/100 classified'
+    );
 
     const sevenDay = await runCli(['--home', home, 'status', '--json', '--window', '7d']);
     expect(sevenDay.exitCode).toBe(0);
     expect(JSON.parse(sevenDay.stdout)).toMatchObject({
+      globalSummary: { window: '7d', recordedTokens: 100 },
       providers: [{ id: 'codex' }, { id: 'demo', billingDomains: [{ history: { window: '7d' } }] }]
     });
 

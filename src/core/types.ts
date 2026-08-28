@@ -342,11 +342,37 @@ export interface AgentRecommendation {
 
 export interface UsageOverview {
   generatedAt: string;
+  globalSummary: GlobalUsageSummary;
   providers: ProviderOverview[];
   riskSummary: {
     mostConstrained: QuotaRisk | null;
     recommendation: AgentRecommendation | null;
   };
+}
+
+export interface GlobalUsageContribution {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  recordedTokens: number;
+  tokenEvidence: TokenEvidence;
+}
+
+export interface GlobalUsageSummary {
+  window: HistoryWindow;
+  recordedTokens: number | null;
+  tokenEvidence: TokenEvidence;
+  apiRetailEquivalent: {
+    status: 'available' | 'unavailable';
+    amount: number | null;
+    currency: 'USD';
+    pricingCoverage: number | null;
+  };
+  mostConstrained: QuotaRisk | null;
+  latestObservedAt: string | null;
+  generatedAt: string;
+  contributions: GlobalUsageContribution[];
 }
 
 export interface MonitoringSettings {

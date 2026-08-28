@@ -514,10 +514,12 @@ export class SqliteUsageRepository implements UsageRepository {
       .all() as unknown as ProviderRow[];
 
     const overviews = providers.map((provider) => this.#getProviderOverview(provider, now, query));
+    const riskSummary = buildRiskSummary(overviews);
     return {
       generatedAt: now.toISOString(),
+      globalSummary: buildGlobalSummary(overviews, riskSummary, now, query),
       providers: overviews,
-      riskSummary: buildRiskSummary(overviews)
+      riskSummary
     };
   }
 
@@ -1688,6 +1690,75 @@ function priceSnapshotFromRow(row: CostRow): PriceSnapshotReference | null {
     source: row.price_snapshot_source,
     effectiveAt: row.price_snapshot_effective_at
   };
+}
+
+function buildGlobalSummary(
+  providers: ProviderOverview[],
+  riskSummary: UsageOverview['riskSummary'],
+  now: Date,
+  query: UsageQuery
+): UsageOverview['globalSummary'] {
+  const evidence = emptyTokenEvidence();
+  const contributions: UsageOverview['globalSummary']['contributions'] = [];
+  let latestObservedAt: string | null = null;
+
+  for (const provider of providers) {
+    for (const domain of provider.billingDomains) {
+      for (const observedAt of [
+        domain.history.lastObservedAt,
+        ...domain.quotaBuckets.map((bucket) => bucket.observedAt ?? null),
+        ...domain.costs.map((cost) => cost.observedAt),
+        ...domain.balances.map((balance) => balance.observedAt),
+        ...domain.invoices.map((invoice) => invoice.createdAt)
+      ]) {
+        if (observedAt && (!latestObservedAt || observedAt > latestObservedAt)) {
+          latestObservedAt = observedAt;
+        }
+      }
+      const domainEvidence = domain.history.tokenEvidence;
+      if (domainEvidence.observationCount === 0) continue;
+      addAggregatedTokenEvidence(evidence, domainEvidence);
+      contributions.push({
+        providerId: provider.id,
+        providerDisplayName: provider.displayName,
+        billingDomainId: domain.id,
+        billingDomainDisplayName: domain.displayName,
+        recordedTokens: domain.history.tokenTotals.total,
+        tokenEvidence: domainEvidence
+      });
+    }
+  }
+
+  const tokenEvidence = finishTokenEvidence(evidence);
+  return {
+    window: query.window ?? providers[0]?.billingDomains[0]?.history.window ?? '24h',
+    recordedTokens: tokenEvidence.observationCount > 0 ? tokenEvidence.recordedTokens : null,
+    tokenEvidence,
+    apiRetailEquivalent: {
+      status: 'unavailable',
+      amount: null,
+      currency: 'USD',
+      pricingCoverage: null
+    },
+    mostConstrained: riskSummary.mostConstrained,
+    latestObservedAt,
+    generatedAt: now.toISOString(),
+    contributions
+  };
+}
+
+function addAggregatedTokenEvidence(target: MutableTokenEvidence, source: TokenEvidence): void {
+  target.recordedTokens += source.recordedTokens;
+  target.sourceReportedTokens += source.sourceReportedTokens;
+  target.sourceReportedObservationCount += source.sourceReportedObservationCount;
+  target.observationCount += source.observationCount;
+  target.unclassifiedTokens += source.unclassifiedTokens;
+  for (const value of source.totalDerivations) target.totalDerivations.add(value);
+  for (const value of source.timePrecisions) target.timePrecisions.add(value);
+  for (const value of source.usageScopes) target.usageScopes.add(value);
+  for (const value of source.aggregationTemporalities) {
+    target.aggregationTemporalities.add(value);
+  }
 }
 
 function normalizeUsageQuery(

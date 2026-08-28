@@ -101,10 +101,18 @@ describe('local HTTP server', () => {
       ).status
     ).toBe(204);
 
-    const cliResponse = await fetch(`${server.origin}/api/overview`, {
+    const cliResponse = await fetch(`${server.origin}/api/overview?window=7d`, {
       headers: { authorization: 'Bearer cli-api-token' }
     });
     expect(cliResponse.status).toBe(200);
+    expect(await cliResponse.json()).toMatchObject({
+      globalSummary: {
+        window: '7d',
+        recordedTokens: null,
+        apiRetailEquivalent: { status: 'unavailable', amount: null },
+        contributions: []
+      }
+    });
     const doctorResponse = await fetch(`${server.origin}/api/doctor`, {
       headers: { authorization: 'Bearer cli-api-token' }
     });

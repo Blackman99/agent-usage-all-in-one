@@ -646,8 +646,10 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const requestedWindows: string[] = [];
   await page.route('**/api/overview**', async (route) => {
     const window = new URL(route.request().url()).searchParams.get('window') ?? '24h';
+    requestedWindows.push(window);
     const total = window === '24h' ? 100 : window === '7d' ? 700 : 3000;
     await route.fulfill({
       contentType: 'application/json',
@@ -657,6 +659,19 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'History Agent' });
+  await expect(
+    provider.getByText('Total').locator('..').getByText('700', { exact: true })
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent usage summary' })).toBeVisible();
+  const summary = page.getByRole('region', { name: 'Recent usage summary' });
+  await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('700');
+  await expect(page.getByTestId('summary-retail-equivalent')).toHaveText('Unavailable');
+  await expect(summary.getByText('Classification coverage: 100%')).toBeVisible();
+  await expect(summary.getByText('Precision: Day + Billing period')).toBeVisible();
+  await expect(
+    summary.getByText('History Agent · API').locator('..').getByText('700')
+  ).toBeVisible();
+  await page.getByRole('button', { name: '24h' }).click();
   await expect(
     provider.getByText('Total').locator('..').getByText('100', { exact: true })
   ).toBeVisible();
@@ -675,9 +690,11 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   ).toBeVisible();
   await expect(provider.getByText('top-model')).toBeVisible();
   await expect(provider.getByText('2026-08-28')).toBeVisible();
-  await expect(page.getByText('Most constrained')).toHaveCount(0);
   await expect(page.getByText('Recommended agent')).toHaveCount(0);
   await expect(page.getByText('Advice only · never switches agents')).toHaveCount(0);
+  await page.reload();
+  await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
+  await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('3,000');
 });
 
 test('downloads a redacted export and clears only the selected local scope', async ({ page }) => {
@@ -693,7 +710,7 @@ test('downloads a redacted export and clears only the selected local scope', asy
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export JSON' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('agent-usage-24h.json');
+  expect(download.suggestedFilename()).toBe('agent-usage-7d.json');
   const downloadPath = await download.path();
   expect(downloadPath).not.toBeNull();
   const body = await readFile(downloadPath!, 'utf8');
@@ -701,6 +718,7 @@ test('downloads a redacted export and clears only the selected local scope', asy
     privacy: { accountIdentifiersIncluded: false, secretsIncluded: false }
   });
   expect(body).not.toContain('connector:');
+  expect(body).not.toContain('agent-usage:history-window');
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Clear local usage' }).click();
@@ -823,19 +841,52 @@ function historyOverviewFixture(window: string, total: number): unknown {
     cacheRead: 0,
     cacheWrite: 0
   };
+  const tokenEvidence = tokenEvidenceFixture(
+    { total },
+    {
+      totalDerivations: ['categorized'],
+      timePrecisions: ['day', 'billing-period'],
+      usageScopes: ['account-wide']
+    }
+  );
+  const mostConstrained = {
+    providerId: 'history-agent',
+    displayName: 'History Agent',
+    billingDomainId: 'api',
+    bucketId: 'daily',
+    label: 'Daily limit',
+    remainingPercent: 40,
+    resetsAt: '2026-08-28T06:00:00.000Z',
+    forecast: null
+  };
   return {
     generatedAt: '2026-08-28T02:00:00.000Z',
-    riskSummary: {
-      mostConstrained: {
-        providerId: 'history-agent',
-        displayName: 'History Agent',
-        billingDomainId: 'api',
-        bucketId: 'daily',
-        label: 'Daily limit',
-        remainingPercent: 40,
-        resetsAt: '2026-08-28T06:00:00.000Z',
-        forecast: null
+    globalSummary: {
+      window,
+      recordedTokens: total,
+      tokenEvidence,
+      apiRetailEquivalent: {
+        status: 'unavailable',
+        amount: null,
+        currency: 'USD',
+        pricingCoverage: null
       },
+      mostConstrained,
+      latestObservedAt: '2026-08-28T01:57:00.000Z',
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      contributions: [
+        {
+          providerId: 'history-agent',
+          providerDisplayName: 'History Agent',
+          billingDomainId: 'api',
+          billingDomainDisplayName: 'API',
+          recordedTokens: total,
+          tokenEvidence
+        }
+      ]
+    },
+    riskSummary: {
+      mostConstrained,
       recommendation: {
         providerId: 'history-agent',
         displayName: 'History Agent',
@@ -864,6 +915,7 @@ function historyOverviewFixture(window: string, total: number): unknown {
         },
         quotaBuckets: [],
         tokenTotals,
+        tokenEvidence,
         tokenAuthority: 'official-account',
         billingDomains: [
           {
@@ -871,6 +923,7 @@ function historyOverviewFixture(window: string, total: number): unknown {
             displayName: 'API',
             quotaBuckets: [],
             tokenTotals,
+            tokenEvidence,
             tokenAuthority: 'official-account',
             costs: [],
             balances: [],
@@ -881,8 +934,9 @@ function historyOverviewFixture(window: string, total: number): unknown {
               end: '2026-08-28T02:00:00.000Z',
               timeZone: 'Asia/Shanghai',
               tokenTotals,
-              models: [{ model: 'top-model', tokenTotals }],
-              days: [{ day: '2026-08-28', tokenTotals, costs: [] }],
+              tokenEvidence,
+              models: [{ model: 'top-model', tokenTotals, tokenEvidence }],
+              days: [{ day: '2026-08-28', tokenTotals, tokenEvidence, costs: [] }],
               costs: [
                 {
                   kind: 'actual',

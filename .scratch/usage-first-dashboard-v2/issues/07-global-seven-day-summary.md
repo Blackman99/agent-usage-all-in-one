@@ -4,13 +4,15 @@
 
 **Blocked by:** 01 — 建立用量优先的 Provider 卡与官方品牌; 06 — 迁移 xAI API 并收缩旧 Token 契约.
 
-**Status:** ready-for-agent
+**Status:** implemented
 
-- [ ] 首次打开默认查询 7 天；24 小时、7 天和 30 天切换后，本地记住最后选择且不进入 export。
-- [ ] 紧凑摘要显示 selected-window recorded Token、API retail equivalent/不可估算状态、most constrained quota 和最新数据时间。
-- [ ] Recorded Token 包含已知模型与未分类用量，且能从 Provider/billing-domain 明细守恒回总量。
-- [ ] 分类 coverage 只描述 Token 分类完整度，不替代 quota/tokens/actual-cost/history 的独立 Coverage 状态。
-- [ ] 粗粒度数据在摘要证据中保留 time precision；没有观测的时间范围不被解释为零使用。
-- [ ] Provider-native quota bucket 不随分析窗口变化，reset 文案同时包含倒计时与本地绝对时间。
-- [ ] Grok Build/SuperGrok 与 xAI API 贡献保持独立标识，禁止生成合并的 Grok 总额。
-- [ ] 应用、HTTP、CLI 摘要和浏览器测试覆盖窗口持久化、未知金额、分类 coverage 与时间边界。
+- [x] 首次打开默认查询 7 天；24 小时、7 天和 30 天切换后，本地记住最后选择且不进入 export。
+- [x] 紧凑摘要显示 selected-window recorded Token、API retail equivalent/不可估算状态、most constrained quota 和最新数据时间。
+- [x] Recorded Token 包含已知模型与未分类用量，且能从 Provider/billing-domain 明细守恒回总量。
+- [x] 分类 coverage 只描述 Token 分类完整度，不替代 quota/tokens/actual-cost/history 的独立 Coverage 状态。
+- [x] 粗粒度数据在摘要证据中保留 time precision；没有观测的时间范围不被解释为零使用。
+- [x] Provider-native quota bucket 不随分析窗口变化，reset 文案同时包含倒计时与本地绝对时间。
+- [x] Grok Build/SuperGrok 与 xAI API 贡献保持独立标识，禁止生成合并的 Grok 总额。
+- [x] 应用、HTTP、CLI 摘要和浏览器测试覆盖窗口持久化、未知金额、分类 coverage 与时间边界。
+
+**Verification:** `pnpm lint`, `pnpm check`, `pnpm format:check`, 17 focused application/repository/HTTP/CLI/history/i18n tests, `pnpm build`, and all 11 Dashboard Playwright tests pass. Browser coverage proves the initial 7-day request, 24h/7d/30d switching, reload persistence, unavailable retail-equivalent state, weighted classification coverage, coarse precision evidence, billing-domain contributions, and local-preference exclusion from export.

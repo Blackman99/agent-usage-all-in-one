@@ -334,7 +334,10 @@ async function isHealthy(state: DaemonState): Promise<boolean> {
 }
 
 function formatOverview(overview: UsageOverview): string {
-  if (overview.providers.length === 0) return 'No providers have reported usage yet.\n';
+  const summary = formatGlobalSummary(overview);
+  if (overview.providers.length === 0) {
+    return `${summary}No providers have reported usage yet.\n`;
+  }
   const recommendation = overview.riskSummary.recommendation
     ? `Recommendation: ${overview.riskSummary.recommendation.displayName} — ${overview.riskSummary.recommendation.reasonKeys
         .map((reason) =>
@@ -347,7 +350,7 @@ function formatOverview(overview: UsageOverview): string {
         overview.riskSummary.recommendation.evidence.observedAt
       )}; advice only)\n`
     : '';
-  return `${recommendation}${overview.providers
+  return `${summary}${recommendation}${overview.providers
     .map((provider) => {
       const quota = provider.quotaBuckets
         .map(
@@ -384,6 +387,23 @@ function formatOverview(overview: UsageOverview): string {
       return `${provider.displayName} — ${quota || 'quota unavailable'}${domains ? ` — ${domains}` : ''}${diagnostic}`;
     })
     .join('\n')}\n`;
+}
+
+function formatGlobalSummary(overview: UsageOverview): string {
+  const summary = overview.globalSummary;
+  const tokens =
+    summary.recordedTokens === null
+      ? 'recorded tokens unavailable'
+      : `${summary.recordedTokens} recorded tokens`;
+  const retail =
+    summary.apiRetailEquivalent.status === 'available' &&
+    summary.apiRetailEquivalent.amount !== null
+      ? `${summary.apiRetailEquivalent.amount} ${summary.apiRetailEquivalent.currency}`
+      : 'unavailable';
+  const constrained = summary.mostConstrained
+    ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label} (${summary.mostConstrained.remainingPercent}% remaining)`
+    : 'unavailable';
+  return `Summary (${summary.window}): ${tokens}; API retail equivalent ${retail}; ${summary.tokenEvidence.classifiedTokens}/${summary.tokenEvidence.recordedTokens} classified; precision ${summary.tokenEvidence.timePrecisions.join('+') || 'unavailable'}; most constrained ${constrained}; latest observed ${summary.latestObservedAt ?? 'unavailable'}; generated ${summary.generatedAt}\n`;
 }
 
 function formatTokenEvidence(
