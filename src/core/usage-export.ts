@@ -6,6 +6,33 @@ export function buildUsageExport(
   request: UsageExportRequest,
   accountIdentifiers: Record<string, string> = {}
 ): UsageExportArtifact {
+  const usageObservationAliases = new Map<string, string>();
+  const costObservationAliases = new Map<string, string>();
+  const usageObservationAlias = (
+    providerId: string,
+    billingDomainId: string,
+    observationId: string | null | undefined
+  ): string | null => {
+    if (!observationId) return null;
+    const key = `${providerId}\u0000${billingDomainId}\u0000${observationId}`;
+    const existing = usageObservationAliases.get(key);
+    if (existing) return existing;
+    const alias = `usage-observation-${usageObservationAliases.size + 1}`;
+    usageObservationAliases.set(key, alias);
+    return alias;
+  };
+  const costObservationAlias = (
+    providerId: string,
+    billingDomainId: string,
+    costId: string
+  ): string => {
+    const key = `${providerId}\u0000${billingDomainId}\u0000${costId}`;
+    const existing = costObservationAliases.get(key);
+    if (existing) return existing;
+    const alias = `cost-observation-${costObservationAliases.size + 1}`;
+    costObservationAliases.set(key, alias);
+    return alias;
+  };
   const rows = overview.providers.flatMap((provider) =>
     provider.billingDomains.flatMap((domain) => {
       const history = domain.history;
@@ -93,12 +120,13 @@ export function buildUsageExport(
       ].map(({ model, observation }) => {
         const recordedTokens = observation.recordedTokens;
         const classifiedTokens = observation.classifiedTokens;
+        const exportId = usageObservationAlias(provider.id, domain.id, observation.id);
         return {
           ...tokenRow,
           recordType: 'token-observation',
-          recordId: observation.id,
+          recordId: exportId,
           model,
-          usageObservationId: observation.id,
+          usageObservationId: exportId,
           observedAt: observation.observedAt,
           timePrecision: observation.timePrecision,
           authority: observation.authority,
@@ -200,9 +228,13 @@ export function buildUsageExport(
           return {
             ...tokenRow,
             recordType: 'cost-observation',
-            recordId: cost.id,
+            recordId: costObservationAlias(provider.id, domain.id, cost.id),
             model: cost.model ?? null,
-            usageObservationId: cost.usageObservationId,
+            usageObservationId: usageObservationAlias(
+              provider.id,
+              domain.id,
+              cost.usageObservationId
+            ),
             observedAt: cost.observedAt ?? null,
             timePrecision: observation?.timePrecision ?? null,
             authority: cost.authority,

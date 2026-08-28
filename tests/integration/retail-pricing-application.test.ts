@@ -21,6 +21,70 @@ afterEach(async () => {
 });
 
 describe('retail-equivalent application tracer', () => {
+  it('re-derives a mutable daily observation without repricing unchanged history', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retail-mutable-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let inputTokens = 100_000;
+    const connector: Connector = {
+      id: 'opencode-daily-fixture',
+      async collect() {
+        return {
+          provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
+          billingDomains: [{ id: 'go-subscription', displayName: 'Go subscription' }],
+          quotaBuckets: [],
+          usage: [
+            {
+              id: '2026-08-28:glm-5.3',
+              billingDomainId: 'go-subscription',
+              model: 'glm-5.3',
+              observedAt: '2026-08-28T00:00:00.000Z',
+              inputTokens,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              modelAttribution: 'known' as const,
+              timePrecision: 'day' as const,
+              usageScope: 'this-mac' as const,
+              aggregationTemporality: 'cumulative' as const,
+              authority: 'local-observation' as const
+            }
+          ],
+          costs: [],
+          observedAt: NOW.toISOString()
+        };
+      }
+    };
+    const usage = new UsageApplication({ repository, connectors: [connector], clock: () => NOW });
+
+    await usage.refresh({ userInitiated: true });
+    const first = (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0];
+    expect(first.costs.find((cost) => cost.kind === 'retail-equivalent')).toMatchObject({
+      usageObservationId: '2026-08-28:glm-5.3',
+      pricedTokens: 100_000
+    });
+
+    inputTokens = 200_000;
+    await usage.refresh({ userInitiated: true });
+    const updated = (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0];
+    const updatedRetail = updated.costs.filter((cost) => cost.kind === 'retail-equivalent');
+    expect(updatedRetail).toHaveLength(1);
+    expect(updatedRetail[0]).toMatchObject({
+      usageObservationId: '2026-08-28:glm-5.3',
+      pricedTokens: 200_000
+    });
+    expect(updated.history.costs.find((cost) => cost.kind === 'retail-equivalent')).toMatchObject({
+      pricingEvidence: {
+        pricedTokens: 200_000,
+        unpricedTokens: 0,
+        recordedTokens: 200_000,
+        pricingCoverage: 1
+      }
+    });
+    repository.close();
+  });
+
   it('derives, persists, windows, and restarts one auditable model-level amount', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retail-tracer-'));
     workspaces.push(workspace);

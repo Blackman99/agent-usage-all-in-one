@@ -54,7 +54,8 @@ describe('privacy, export, and retention', () => {
         expect.objectContaining({
           recordType: 'token-observation',
           model: 'recent-model',
-          usageObservationId: 'recent-observation',
+          recordId: 'usage-observation-1',
+          usageObservationId: 'usage-observation-1',
           observedAt: '2026-08-27T00:00:00.000Z',
           timePrecision: 'unknown',
           authority: 'local-observation',
@@ -88,14 +89,14 @@ describe('privacy, export, and retention', () => {
           recordType: 'cost-observation',
           costKind: 'actual',
           model: 'recent-model',
-          usageObservationId: 'recent-observation',
+          usageObservationId: 'usage-observation-1',
           observedAt: '2026-08-27T01:00:00.000Z'
         }),
         expect.objectContaining({
           recordType: 'cost-observation',
           costKind: 'reported-estimate',
           model: 'recent-model',
-          usageObservationId: 'recent-observation',
+          usageObservationId: 'usage-observation-1',
           observedAt: '2026-08-27T01:30:00.000Z'
         })
       ])
@@ -103,9 +104,18 @@ describe('privacy, export, and retention', () => {
     expect(
       exported.rows.filter(
         (row) =>
-          row.recordType === 'token-observation' && row.usageObservationId === 'recent-observation'
+          row.recordType === 'token-observation' && row.usageObservationId === 'usage-observation-1'
       )
     ).toHaveLength(1);
+    const exportedCostObservationIds = exported.rows
+      .filter((row) => row.recordType === 'cost-observation')
+      .map((row) => row.recordId);
+    expect(exportedCostObservationIds).toHaveLength(2);
+    expect(new Set(exportedCostObservationIds).size).toBe(2);
+    expect(exportedCostObservationIds).toEqual([
+      expect.stringMatching(/^cost-observation-\d+$/),
+      expect.stringMatching(/^cost-observation-\d+$/)
+    ]);
     const serialized = JSON.stringify(exported);
     for (const forbidden of [
       'account-private-123',
@@ -140,7 +150,7 @@ describe('privacy, export, and retention', () => {
     expect(csvArtifact.contentType).toBe('text/csv; charset=utf-8');
     expect(csvArtifact.body).toContain('window,windowStart,windowEnd');
     expect(csvArtifact.body.split('\n')[0]).toContain('model,usageObservationId');
-    expect(csvArtifact.body).toContain('recent-model,recent-observation');
+    expect(csvArtifact.body).toContain('recent-model,usage-observation-1');
     expect(csvArtifact.body).toContain('local-observation');
     expect(csvArtifact.body).toContain(',actual,');
     expect(csvArtifact.body).toContain(',reported-estimate,');
@@ -296,7 +306,7 @@ function snapshot(): ConnectorSnapshot {
         authority: 'official-account'
       },
       {
-        id: 'recent-observation',
+        id: 'grok-headless:session-fake-secret:request:recent-model',
         billingDomainId: 'subscription',
         model: 'recent-model',
         sessionId: 'account-private-123',
@@ -327,7 +337,7 @@ function snapshot(): ConnectorSnapshot {
         currency: 'USD',
         authority: 'official-account',
         model: 'recent-model',
-        usageObservationId: 'recent-observation'
+        usageObservationId: 'grok-headless:session-fake-secret:request:recent-model'
       },
       {
         id: 'estimate',
@@ -339,7 +349,7 @@ function snapshot(): ConnectorSnapshot {
         currency: 'USD',
         authority: 'estimate',
         model: 'recent-model',
-        usageObservationId: 'recent-observation'
+        usageObservationId: 'grok-headless:session-fake-secret:request:recent-model'
       }
     ],
     observedAt: '2026-08-28T01:00:00.000Z'

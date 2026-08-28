@@ -394,8 +394,24 @@ export class SqliteUsageRepository implements UsageRepository {
            usage_scope = excluded.usage_scope,
            aggregation_temporality = excluded.aggregation_temporality`
       );
+      const existingPricedUsageStatement = this.#database.prepare(
+        `SELECT billing_domain_id, model, observed_at, total_tokens, input_tokens, output_tokens,
+                reasoning_tokens, cache_read_tokens, cache_write_tokens, unclassified_tokens,
+                reasoning_semantics, cache_read_semantics, cache_write_semantics, model_attribution
+         FROM usage_observations
+         WHERE provider_id = ? AND id = ?`
+      );
+      const deleteDerivedCostsStatement = this.#database.prepare(
+        `DELETE FROM cost_records
+         WHERE provider_id = ? AND usage_observation_id = ? AND kind = 'retail-equivalent'`
+      );
       for (const observation of snapshot.usage) {
         const normalized = normalizeTokenObservation(observation);
+        const existing = existingPricedUsageStatement.get(snapshot.provider.id, normalized.id) as
+          Record<string, unknown> | undefined;
+        if (existing && pricingInputsChanged(existing, normalized)) {
+          deleteDerivedCostsStatement.run(snapshot.provider.id, normalized.id);
+        }
         usageStatement.run(
           snapshot.provider.id,
           normalized.id,
@@ -3024,6 +3040,28 @@ function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSum
 
 function round(value: number): number {
   return Number(value.toFixed(6));
+}
+
+function pricingInputsChanged(
+  existing: Record<string, unknown>,
+  observation: ReturnType<typeof normalizeTokenObservation>
+): boolean {
+  return (
+    existing.billing_domain_id !== observation.billingDomainId ||
+    existing.model !== (observation.model?.trim() || '__unclassified__') ||
+    existing.observed_at !== observation.observedAt ||
+    Number(existing.total_tokens) !== observation.recordedTokens ||
+    Number(existing.input_tokens) !== observation.inputTokens ||
+    Number(existing.output_tokens) !== observation.outputTokens ||
+    Number(existing.reasoning_tokens) !== observation.reasoningTokens ||
+    Number(existing.cache_read_tokens) !== observation.cacheReadTokens ||
+    Number(existing.cache_write_tokens) !== observation.cacheWriteTokens ||
+    Number(existing.unclassified_tokens) !== observation.unclassifiedTokens ||
+    existing.reasoning_semantics !== observation.tokenSemantics.reasoning ||
+    existing.cache_read_semantics !== observation.tokenSemantics.cacheRead ||
+    existing.cache_write_semantics !== observation.tokenSemantics.cacheWrite ||
+    existing.model_attribution !== observation.modelAttribution
+  );
 }
 
 function preciseAmount(value: number): number {
