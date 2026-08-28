@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { UsageApplication } from '$core/usage-application.js';
 import type { ConnectorDefinition, DiscoveryProbe, SecretStore } from '$core/onboarding-types.js';
+import type { Connector } from '$core/types.js';
 import { startLocalServer, type LocalServer } from '$server/local-server.js';
 import { SqliteUsageRepository } from '$server/sqlite-usage-repository.js';
 import { parseClaudeOtlpMetrics } from '../../src/connectors/claude-code/claude-otlp.js';
@@ -112,6 +113,67 @@ describe('local HTTP server', () => {
       daemon: { status: 'healthy' },
       database: { status: 'healthy' },
       connectors: []
+    });
+  });
+
+  it('lets a user-initiated refresh retry a connector during automatic backoff', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-manual-refresh-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let attempts = 0;
+    const connector: Connector = {
+      id: 'grok',
+      displayName: 'Grok',
+      async collect() {
+        attempts += 1;
+        if (attempts === 1) throw new Error('temporary billing failure');
+        return {
+          provider: { id: 'grok', displayName: 'Grok' },
+          billingDomains: [
+            { id: 'grok-build-subscription', displayName: 'Grok Build / SuperGrok' }
+          ],
+          quotaBuckets: [
+            {
+              id: 'grok-build:weekly',
+              billingDomainId: 'grok-build-subscription',
+              label: 'Weekly limit',
+              usedPercent: 41,
+              resetsAt: '2026-09-03T09:38:55.682Z',
+              authority: 'official-client'
+            }
+          ],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-28T02:37:06.249Z'
+        };
+      }
+    };
+    const application = new UsageApplication({
+      repository,
+      connectors: [connector],
+      clock: () => new Date('2026-08-28T03:00:00.000Z'),
+      connectorPolicies: { grok: { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: 5_000 } }
+    });
+    const server = await startLocalServer({ application, apiToken: 'manual-refresh-token' });
+    servers.push(server);
+    const request = () =>
+      fetch(`${server.origin}/api/refresh`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer manual-refresh-token' }
+      });
+
+    expect((await request()).status).toBe(204);
+    expect((await request()).status).toBe(204);
+
+    expect(attempts).toBe(2);
+    expect(await application.getOverview()).toMatchObject({
+      providers: [
+        {
+          id: 'grok',
+          health: { status: 'healthy' },
+          quotaBuckets: [{ usedPercent: 41 }]
+        }
+      ]
     });
   });
 

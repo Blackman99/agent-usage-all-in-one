@@ -42,6 +42,10 @@ export interface UsageApplicationOptions {
   startAtLoginManager?: StartAtLoginManager;
 }
 
+export interface RefreshOptions {
+  userInitiated?: boolean;
+}
+
 export class UsageApplication {
   readonly #repository: UsageRepository;
   readonly #connectors: Connector[];
@@ -70,15 +74,15 @@ export class UsageApplication {
     this.#startAtLoginManager = options.startAtLoginManager;
   }
 
-  refresh(): Promise<void> {
+  refresh(options: RefreshOptions = {}): Promise<void> {
     if (this.#refreshPromise) return this.#refreshPromise;
-    this.#refreshPromise = this.#performRefresh().finally(() => {
+    this.#refreshPromise = this.#performRefresh(options).finally(() => {
       this.#refreshPromise = null;
     });
     return this.#refreshPromise;
   }
 
-  async #performRefresh(): Promise<void> {
+  async #performRefresh(options: RefreshOptions): Promise<void> {
     if (this.#exchangeRateProvider) {
       try {
         for (const rate of await this.#exchangeRateProvider.readRates()) {
@@ -101,7 +105,11 @@ export class UsageApplication {
         }
         const now = this.#clock();
         const runtime = runtimeStates.get(connector.id);
-        if (runtime?.nextAllowedAt && new Date(runtime.nextAllowedAt).getTime() > now.getTime()) {
+        if (
+          !options.userInitiated &&
+          runtime?.nextAllowedAt &&
+          new Date(runtime.nextAllowedAt).getTime() > now.getTime()
+        ) {
           return;
         }
         const policy = this.#connectorPolicies[connector.id] ?? {
