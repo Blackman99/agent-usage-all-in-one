@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   ClaudeCodeConnector,
@@ -13,6 +16,20 @@ import {
   parseClaudeUsageScreen
 } from '../../src/connectors/claude-code/claude-usage-screen-client.js';
 import { parseClaudeOtlpMetrics } from '../../src/connectors/claude-code/claude-otlp.js';
+import { LocalTranscriptUsageClient } from '../../src/server/local-transcript-usage-client.js';
+
+const transcriptWorkspaces: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    transcriptWorkspaces.splice(0).map((workspace) =>
+      rm(workspace, {
+        force: true,
+        recursive: true
+      })
+    )
+  );
+});
 
 describe('Claude Code quota adapter', () => {
   it('preserves All models, Fable only, and future official labels dynamically', () => {
@@ -200,6 +217,74 @@ Resets Aug 31 at 11:59pm (Asia/Shanghai)`,
 });
 
 describe('ClaudeCodeConnector', () => {
+  it('automatically reads model usage and reported cost from local session transcripts', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-claude-transcript-'));
+    transcriptWorkspaces.push(workspace);
+    const transcript = JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-08-28T01:00:00.000Z',
+      sessionId: 'session-1',
+      requestId: 'request-1',
+      costUSD: 0.42,
+      message: {
+        id: 'message-1',
+        model: 'claude-fable-5',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 25,
+          cache_read_input_tokens: 400,
+          cache_creation_input_tokens: 50,
+          cache_creation: {
+            ephemeral_5m_input_tokens: 10,
+            ephemeral_1h_input_tokens: 40
+          }
+        }
+      }
+    });
+    await writeFile(join(workspace, 'session.jsonl'), `${transcript}\n${transcript}\n`);
+
+    const snapshot = await new ClaudeCodeConnector({
+      quotaClient: {
+        async readQuota() {
+          return [];
+        }
+      },
+      historyClient: new LocalTranscriptUsageClient({
+        provider: 'claude-code',
+        root: workspace,
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      }),
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        billingDomainId: 'subscription',
+        model: 'claude-fable-5',
+        observedAt: '2026-08-28T01:00:00.000Z',
+        inputTokens: 100,
+        outputTokens: 25,
+        cacheReadTokens: 400,
+        cacheWriteTokens: 50,
+        cacheWriteTokenBreakdown: { fiveMinute: 10, oneHour: 40 },
+        modelAttribution: 'known',
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
+        authority: 'local-observation'
+      })
+    ]);
+    expect(snapshot.costs).toEqual([
+      expect.objectContaining({
+        kind: 'reported-estimate',
+        amount: 0.42,
+        currency: 'USD',
+        model: 'claude-fable-5',
+        authority: 'local-observation'
+      })
+    ]);
+  });
+
   it('maps quota as experimental official-client data', async () => {
     const quotaClient: ClaudeQuotaClient = {
       async readQuota() {

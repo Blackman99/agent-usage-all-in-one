@@ -37,6 +37,10 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Unclassified usage**: Recorded Tokens that cannot be assigned honestly to
   both a known model and known categories. `all-models`, `unknown`, and absent
   model identifiers are unclassified and never enter model rankings.
+- **Reconciled remainder**: An estimate equal to an official account-wide total
+  minus the complete local model-attributed subset for the same Provider day.
+  It is explicitly derived, keeps `estimate` authority, and is never represented
+  as a source-reported total.
 - **Token semantics**: Source metadata declaring whether reasoning is included
   in output and whether cache reads and writes are included in input or are
   separate. Missing legacy metadata uses the historical interpretation:

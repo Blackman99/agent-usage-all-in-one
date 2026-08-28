@@ -2,7 +2,7 @@
 
 Runtime pricing is fixed in the repository and does not scrape these pages.
 
-## Anthropic Claude Fable 5 tracer
+## Anthropic Claude transcript models
 
 - [Claude models overview](https://platform.claude.com/docs/en/about-claude/models/overview)
   identifies the official API model id as `claude-fable-5`, lists general
@@ -13,11 +13,36 @@ Runtime pricing is fixed in the repository and does not scrape these pages.
   1-hour cache writes at $20/MTok, cache hits at $1/MTok, and output at
   $50/MTok. All values are USD.
 
-The initial catalog uses the standard public API baseline. It prices input,
-output, and cache-read Tokens. A Claude Code observation with cache-write Tokens
-is not priced because local telemetry does not prove whether the 5-minute or
-1-hour rate applies. Data-residency, batch, fast-mode, and partner-platform
-modifiers are outside this tracer and must not be inferred.
+- [Claude Sonnet 5](https://www.anthropic.com/news/claude-sonnet-5) records its
+  2026-06-30 availability and permanent $2 input / $10 output rate per million
+  Tokens.
+- [Claude Opus 5](https://www.anthropic.com/news/claude-opus-5) records its
+  2026-07-24 availability and $5 input / $25 output rate per million Tokens.
+- [Claude Opus 4.8](https://www.anthropic.com/news/claude-opus-4-8) records its
+  2026-05-28 availability and the standard $5 input / $25 output rate per
+  million Tokens. The API pricing table supplies its $6.25/MTok 5-minute cache
+  write, $10/MTok 1-hour cache write, and $0.50/MTok cache-read rates.
+
+The catalog uses the standard public API baseline. Claude transcript events
+retain the source's separate 5-minute and 1-hour cache-write Token counts, so
+the calculator can apply the published 1.25x and 2x input rates without guessing.
+Older events that expose only one combined cache-write total remain unpriced.
+Data-residency, batch, fast-mode, and partner-platform modifiers are outside
+this tracer and must not be inferred.
+
+## OpenAI Codex transcript models
+
+- [GPT-5.6 launch and price history](https://openai.com/index/gpt-5-6/) records
+  the 2026-07-09 launch prices for Sol, Terra, and Luna, the 2026-07-30 Terra
+  and Luna reductions, and the 2026-08-21 Sol reduction.
+- [GPT-5.6 Sol model page](https://developers.openai.com/api/docs/models/gpt-5.6-sol)
+  confirms the current $4 input, $0.40 cached-input, and $20 output rates per
+  million Tokens, the 1.25x cache-write rate, and the 2x input / 1.5x output
+  rule above 272K prompt Tokens.
+
+The catalog keeps each effective interval immutable and applies the 272K tier
+only to event-level transcript evidence. Terra and Luna use the same published
+cache and long-context multipliers with their model-specific base rates.
 
 ## OpenCode Go
 

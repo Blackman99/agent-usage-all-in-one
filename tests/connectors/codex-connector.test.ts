@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   CodexConnector,
@@ -12,8 +15,398 @@ import {
   StdioCodexAccountClient,
   type CodexAppServerProcess
 } from '../../src/connectors/codex/stdio-codex-account-client.js';
+import { LocalTranscriptUsageClient } from '../../src/server/local-transcript-usage-client.js';
+
+const transcriptWorkspaces: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    transcriptWorkspaces
+      .splice(0)
+      .map((workspace) => rm(workspace, { force: true, recursive: true }))
+  );
+});
 
 describe('CodexConnector', () => {
+  it('keeps official account totals and adds model usage from local rollouts for reconciliation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-transcript-'));
+    transcriptWorkspaces.push(workspace);
+    const tokenCount = JSON.stringify({
+      timestamp: '2026-08-28T01:00:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 100,
+            cached_input_tokens: 40,
+            cache_write_input_tokens: 10,
+            output_tokens: 20,
+            reasoning_output_tokens: 5,
+            total_tokens: 130
+          }
+        }
+      }
+    });
+    await writeFile(
+      join(workspace, 'rollout.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'session-1' }
+        }),
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:30.000Z',
+          type: 'turn_context',
+          payload: { model: 'gpt-5.6-sol' }
+        }),
+        tokenCount,
+        tokenCount
+      ].join('\n')
+    );
+    const client: CodexAccountClient = {
+      async readAccount() {
+        return accountPayload;
+      }
+    };
+    const historyClient = new LocalTranscriptUsageClient({
+      provider: 'codex',
+      root: workspace,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    const snapshot = await new CodexConnector(
+      client,
+      () => new Date('2026-08-28T02:00:00.000Z'),
+      historyClient
+    ).collect();
+
+    expect(snapshot.usage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'codex:daily:2026-08-27',
+          sourceReportedTotalTokens: 1250,
+          authority: 'official-account'
+        }),
+        expect.objectContaining({
+          billingDomainId: 'subscription',
+          model: 'gpt-5.6-sol',
+          sessionId: 'session-1',
+          inputTokens: 50,
+          outputTokens: 20,
+          reasoningTokens: 5,
+          cacheReadTokens: 40,
+          cacheWriteTokens: 10,
+          modelAttribution: 'known',
+          timePrecision: 'event',
+          usageScope: 'this-mac',
+          aggregationTemporality: 'delta',
+          authority: 'local-observation',
+          sourceReportedTotalTokens: 130
+        })
+      ])
+    );
+    expect(snapshot.usageReconciliation).toEqual({
+      authoritativeIdPrefix: 'codex-transcript:',
+      retiredIdPrefixes: []
+    });
+  });
+
+  it('falls back to local rollouts when the official Codex account adapter fails', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-fallback-'));
+    transcriptWorkspaces.push(workspace);
+    await writeFile(
+      join(workspace, 'rollout.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'session-fallback' }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        JSON.stringify({
+          timestamp: '2026-08-28T01:00:00.000Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: {
+                input_tokens: 80,
+                cached_input_tokens: 30,
+                output_tokens: 20,
+                total_tokens: 100
+              }
+            }
+          }
+        })
+      ].join('\n')
+    );
+    const historyClient = new LocalTranscriptUsageClient({
+      provider: 'codex',
+      root: workspace,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+    const connector = new CodexConnector(
+      {
+        async readAccount() {
+          throw Object.assign(new Error('private adapter detail'), {
+            code: 'app-server-timeout',
+            recovery: 'Retry automatically.'
+          });
+        }
+      },
+      () => new Date('2026-08-28T02:00:00.000Z'),
+      historyClient
+    );
+
+    const snapshot = await connector.collect();
+
+    expect(snapshot.quotaBuckets).toEqual([]);
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({ model: 'gpt-5.6-sol', sourceReportedTotalTokens: 100 })
+    ]);
+    expect(snapshot.warnings).toEqual([expect.objectContaining({ code: 'app-server-timeout' })]);
+  });
+
+  it('keeps model detail and reconciles an overlapping official day to its account total', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-account-reconcile-'));
+    transcriptWorkspaces.push(workspace);
+    await writeFile(
+      join(workspace, 'rollout.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'session-reconcile' }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        JSON.stringify({
+          timestamp: '2026-08-28T01:00:00.000Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: {
+                input_tokens: 100,
+                output_tokens: 20,
+                total_tokens: 120
+              }
+            }
+          }
+        })
+      ].join('\n')
+    );
+    const snapshot = await new CodexConnector(
+      {
+        async readAccount() {
+          return {
+            ...accountPayload,
+            tokenUsage: {
+              ...accountPayload.tokenUsage!,
+              dailyUsageBuckets: [{ startDate: '2026-08-28', tokens: 999 }]
+            }
+          };
+        }
+      },
+      () => new Date('2026-08-28T02:00:00.000Z'),
+      new LocalTranscriptUsageClient({
+        provider: 'codex',
+        root: workspace,
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      })
+    ).collect();
+
+    expect(snapshot.usage).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'codex:daily:2026-08-28', sourceReportedTotalTokens: 999 }),
+        expect.objectContaining({ model: 'gpt-5.6-sol', sourceReportedTotalTokens: 120 }),
+        expect.objectContaining({
+          id: 'codex-transcript:account-remainder:2026-08-28',
+          reconciledRemainderTokens: 879,
+          modelAttribution: 'unclassified',
+          authority: 'estimate'
+        })
+      ])
+    );
+    expect(
+      snapshot.usage.find(
+        (observation) => observation.id === 'codex-transcript:account-remainder:2026-08-28'
+      )
+    ).not.toHaveProperty('sourceReportedTotalTokens');
+  });
+
+  it('fails the local scan closed when Codex reports an impossible total', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-invalid-total-'));
+    transcriptWorkspaces.push(workspace);
+    await writeFile(
+      join(workspace, 'rollout.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'session-invalid' }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        JSON.stringify({
+          timestamp: '2026-08-28T01:00:00.000Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: { input_tokens: 100, output_tokens: 20, total_tokens: 1 }
+            }
+          }
+        })
+      ].join('\n')
+    );
+    const snapshot = await new CodexConnector(
+      {
+        async readAccount() {
+          return {
+            ...accountPayload,
+            tokenUsage: {
+              ...accountPayload.tokenUsage!,
+              dailyUsageBuckets: [{ startDate: '2026-08-28', tokens: 999 }]
+            }
+          };
+        }
+      },
+      () => new Date('2026-08-28T02:00:00.000Z'),
+      new LocalTranscriptUsageClient({
+        provider: 'codex',
+        root: workspace,
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      })
+    ).collect();
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        id: 'codex:daily:2026-08-28',
+        sourceReportedTotalTokens: 999
+      })
+    ]);
+    expect(snapshot.warnings).toEqual([
+      expect.objectContaining({ code: 'local-transcript-scan-incomplete' })
+    ]);
+  });
+
+  it('does not reconcile stored transcript rows after an incomplete local scan', async () => {
+    const connector = new CodexConnector(
+      {
+        async readAccount() {
+          return { ...accountPayload, tokenUsage: null };
+        }
+      },
+      () => new Date('2026-08-28T02:00:00.000Z'),
+      {
+        async readUsage() {
+          return {
+            usage: [
+              {
+                id: 'codex-transcript:partial',
+                billingDomainId: 'subscription',
+                model: 'gpt-5.6-sol',
+                observedAt: '2026-08-28T01:00:00.000Z',
+                inputTokens: 50,
+                outputTokens: 10,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                authority: 'local-observation' as const
+              }
+            ],
+            costs: [],
+            complete: false
+          };
+        }
+      }
+    );
+
+    const snapshot = await connector.collect();
+
+    expect(snapshot).not.toHaveProperty('usageReconciliation');
+    expect(snapshot.usage).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'codex-transcript:account-remainder:2026-08-28' })
+      ])
+    );
+  });
+
+  it('does not count parent history copied into a forked rollout', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-fork-'));
+    transcriptWorkspaces.push(workspace);
+    const usage = (timestamp: string, outputTokens: number) =>
+      JSON.stringify({
+        timestamp,
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: {
+              input_tokens: 100,
+              cached_input_tokens: 40,
+              output_tokens: outputTokens,
+              reasoning_output_tokens: 5
+            }
+          }
+        }
+      });
+    await writeFile(
+      join(workspace, 'parent.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T01:00:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'parent' }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        usage('2026-08-28T01:00:05.000Z', 20)
+      ].join('\n')
+    );
+    await writeFile(
+      join(workspace, 'fork.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T02:00:00.000Z',
+          type: 'session_meta',
+          payload: {
+            id: 'fork',
+            source: { subagent: { thread_spawn: { parent_thread_id: 'parent' } } }
+          }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        usage('2026-08-28T02:00:00.010Z', 20),
+        usage('2026-08-28T02:00:05.000Z', 30)
+      ].join('\n')
+    );
+    const historyClient = new LocalTranscriptUsageClient({
+      provider: 'codex',
+      root: workspace,
+      clock: () => new Date('2026-08-28T03:00:00.000Z')
+    });
+    const snapshot = await new CodexConnector(
+      {
+        async readAccount() {
+          return accountPayload;
+        }
+      },
+      () => new Date('2026-08-28T03:00:00.000Z'),
+      historyClient
+    ).collect();
+
+    const transcriptUsage = snapshot.usage.filter((observation) =>
+      observation.id.startsWith('codex-transcript:')
+    );
+    expect(transcriptUsage).toHaveLength(2);
+    expect(transcriptUsage.map((observation) => observation.sessionId).sort()).toEqual([
+      'fork',
+      'parent'
+    ]);
+    expect(
+      transcriptUsage.reduce((total, observation) => total + observation.outputTokens, 0)
+    ).toBe(50);
+  });
+
   it('maps dynamic official quota windows and total-token daily buckets without inventing token kinds', async () => {
     const client: CodexAccountClient = {
       async readAccount() {

@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   GrokBuildConnector,
@@ -15,6 +18,17 @@ import {
   parseGrokHeadlessResult,
   parseGrokOtlpMetrics
 } from '../../src/connectors/grok-build/grok-telemetry.js';
+import { LocalTranscriptUsageClient } from '../../src/server/local-transcript-usage-client.js';
+
+const transcriptWorkspaces: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    transcriptWorkspaces
+      .splice(0)
+      .map((workspace) => rm(workspace, { force: true, recursive: true }))
+  );
+});
 
 describe('Grok Build official billing adapter', () => {
   it('uses the official ACP billing capability without reading or forwarding OAuth tokens', async () => {
@@ -105,6 +119,85 @@ describe('Grok Build official billing adapter', () => {
 });
 
 describe('GrokBuildConnector', () => {
+  it('automatically reads model usage and reported cost from local session updates', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-grok-transcript-'));
+    transcriptWorkspaces.push(workspace);
+    const update = JSON.stringify({
+      timestamp: Date.parse('2026-08-28T01:00:00.000Z') / 1000,
+      params: {
+        sessionId: 'session-1',
+        _meta: { agentTimestampMs: Date.parse('2026-08-28T01:00:00.000Z') },
+        update: {
+          sessionUpdate: 'turn_completed',
+          prompt_id: 'prompt-1',
+          usage: {
+            inputTokens: 440,
+            outputTokens: 20,
+            cachedReadTokens: 300,
+            cacheCreationTokens: 40,
+            reasoningTokens: 5,
+            costUsdTicks: 4_200_000_000,
+            modelUsage: {
+              'grok-code-fast-1': {
+                inputTokens: 440,
+                outputTokens: 20,
+                cachedReadTokens: 300,
+                cacheCreationTokens: 40,
+                reasoningTokens: 5
+              }
+            }
+          }
+        }
+      }
+    });
+    await writeFile(join(workspace, 'updates.jsonl'), `${update}\n${update}\n`);
+
+    const snapshot = await new GrokBuildConnector({
+      billingClient: {
+        async readBilling() {
+          return billingFixture;
+        }
+      },
+      historyClient: new LocalTranscriptUsageClient({
+        provider: 'grok',
+        root: workspace,
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      }),
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        billingDomainId: 'grok-build-subscription',
+        model: 'grok-code-fast-1',
+        sessionId: 'session-1',
+        inputTokens: 100,
+        outputTokens: 20,
+        reasoningTokens: 5,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 40,
+        modelAttribution: 'known',
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
+        authority: 'local-observation'
+      })
+    ]);
+    expect(snapshot.costs).toEqual([
+      expect.objectContaining({
+        kind: 'reported-estimate',
+        amount: 0.42,
+        currency: 'USD',
+        model: 'grok-code-fast-1',
+        authority: 'local-observation'
+      })
+    ]);
+    expect(snapshot.usageReconciliation).toEqual({
+      authoritativeIdPrefix: 'grok-transcript:',
+      retiredIdPrefixes: ['grok-otel:', 'grok-headless:']
+    });
+  });
+
   it('maps the provider-native shared weekly pool without inventing a five-hour window', async () => {
     const billingClient: GrokBuildBillingClient = {
       async readBilling() {

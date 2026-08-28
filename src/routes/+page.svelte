@@ -834,7 +834,8 @@
     segment: UsageOverview['workbench']['trend']['buckets'][number]['segments'][number],
     metric: 'tokens' | 'retail-equivalent'
   ): number | null {
-    return metric === 'tokens' ? segment.recordedTokens : segment.retailEquivalent.amount;
+    if (metric === 'tokens') return segment.recordedTokens;
+    return segment.retailEquivalent.amount ?? segment.reportedEstimate?.amount ?? null;
   }
 
   function trendMaximum(
@@ -928,10 +929,14 @@
     segment: UsageOverview['workbench']['trend']['buckets'][number]['segments'][number],
     metric: 'tokens' | 'retail-equivalent'
   ): string {
+    const cost =
+      segment.retailEquivalent.amount !== null
+        ? segment.retailEquivalent
+        : (segment.reportedEstimate ?? segment.retailEquivalent);
     const value =
       metric === 'tokens'
         ? `${formatNumber(segment.recordedTokens)} ${t('tokens')}`
-        : formatMoney(segment.retailEquivalent.amount, segment.retailEquivalent.currency);
+        : formatMoney(cost.amount, cost.currency);
     const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
     const authorities =
       segment.authorities && segment.authorities.length > 0
@@ -1686,6 +1691,13 @@
                   <ol class="ranking-list">
                     {#each rankedModels(workbench, selectedTrendMetric) as model (model.id)}
                       {@const modelLogo = providerLogoSources(model.providerId)}
+                      {@const modelCost =
+                        model.retailEquivalent.amount !== null
+                          ? model.retailEquivalent
+                          : (model.reportedEstimate ?? model.retailEquivalent)}
+                      {@const modelCostIsReported =
+                        model.retailEquivalent.amount === null &&
+                        model.reportedEstimate?.amount != null}
                       <li>
                         <button
                           type="button"
@@ -1725,20 +1737,19 @@
                                 {formatReset(model.lastObservedAt)}
                               </small>
                               <small>
-                                {t('cost')}: {displayAuthorities(
-                                  model.retailEquivalent.authorities
-                                )} · {formatReset(model.retailEquivalent.observedAt)}
+                                {modelCostIsReported
+                                  ? t('providerReportedEstimate')
+                                  : t('apiRetailEquivalent')}: {displayAuthorities(
+                                  modelCost.authorities
+                                )} · {formatReset(modelCost.observedAt)}
                               </small>
                             </span>
                           </span>
                           <span class="ranking-value">
                             <strong>
-                              {model.retailEquivalent.amount === null
+                              {modelCost.amount === null
                                 ? t('notAvailable')
-                                : formatMoney(
-                                    model.retailEquivalent.amount,
-                                    model.retailEquivalent.comparisonCurrency
-                                  )}
+                                : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
                             </strong>
                           </span>
                           <span class="ranking-value">
@@ -1748,7 +1759,9 @@
                                 : formatPercent(
                                     selectedTrendMetric === 'tokens'
                                       ? model.tokenShare
-                                      : model.retailShare
+                                      : modelCostIsReported
+                                        ? model.reportedShare
+                                        : model.retailShare
                                   )}
                             </strong>
                           </span>
@@ -2196,12 +2209,17 @@
             <table class="model-trend-table" aria-label={t('modelTrend')}>
               <thead>
                 <tr
-                  ><th>{t('interval')}</th><th>{t('tokens')}</th><th>{t('apiRetailEquivalent')}</th
-                  ><th>{t('providerEvidence')}</th></tr
+                  ><th>{t('interval')}</th><th>{t('tokens')}</th><th>{t('cost')}</th><th
+                    >{t('providerEvidence')}</th
+                  ></tr
                 >
               </thead>
               <tbody>
                 {#each model.trend as bucket (bucket.start)}
+                  {@const bucketCost =
+                    bucket.retailEquivalent.status === 'available'
+                      ? bucket.retailEquivalent
+                      : (bucket.reportedEstimate ?? bucket.retailEquivalent)}
                   <tr>
                     <td>{bucket.label}</td>
                     {#if bucket.gap}
@@ -2209,19 +2227,16 @@
                     {:else}
                       <td>{formatNumber(bucket.tokenTotals.total)}</td>
                       <td>
-                        {bucket.retailEquivalent.status === 'available'
-                          ? formatMoney(
-                              bucket.retailEquivalent.amount,
-                              bucket.retailEquivalent.comparisonCurrency
-                            )
+                        {bucketCost.status === 'available'
+                          ? formatMoney(bucketCost.amount, bucketCost.comparisonCurrency)
                           : t('notAvailable')}
                       </td>
                       <td>
                         {displayAuthorities(bucket.authorities)} ·
                         {formatReset(bucket.lastObservedAt ?? null)}
-                        {#if bucket.retailEquivalent.status === 'available'}
-                          <br />{displayAuthorities(bucket.retailEquivalent.authorities)} ·
-                          {formatReset(bucket.retailEquivalent.observedAt ?? null)}
+                        {#if bucketCost.status === 'available'}
+                          <br />{displayAuthorities(bucketCost.authorities)} ·
+                          {formatReset(bucketCost.observedAt ?? null)}
                         {/if}
                       </td>
                     {/if}

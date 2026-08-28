@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { UsageApplication } from '../core/usage-application.js';
@@ -31,6 +31,10 @@ import { MacOsNotifier } from './macos-notifier.js';
 import { MacOsStartAtLoginManager } from './macos-start-at-login-manager.js';
 import { startLocalServer } from './local-server.js';
 import { PathDiscoveryProbe } from './path-discovery-probe.js';
+import {
+  LocalTranscriptUsageClient,
+  type LocalTranscriptProvider
+} from './local-transcript-usage-client.js';
 import { SqliteUsageRepository } from './sqlite-usage-repository.js';
 
 export async function runDaemon(home: string): Promise<void> {
@@ -46,15 +50,21 @@ export async function runDaemon(home: string): Promise<void> {
     repository,
     connectors: [
       ...(process.env.AGENT_USAGE_DEMO === '1' ? [createDemoConnector()] : []),
-      new CodexConnector(new StdioCodexAccountClient()),
-      new ClaudeCodeConnector({ quotaClient: new ScreenReaderClaudeQuotaClient() }),
+      new CodexConnector(new StdioCodexAccountClient(), undefined, localTranscriptClient('codex')),
+      new ClaudeCodeConnector({
+        quotaClient: new ScreenReaderClaudeQuotaClient(),
+        historyClient: localTranscriptClient('claude-code')
+      }),
       new OpenCodeGoConnector({
         accountClient: new OfficialOpenCodeGoClient({
           authReader: new OpenCodeAuthFileReader()
         }),
         localHistoryClient: new CliOpenCodeLocalHistoryClient()
       }),
-      new GrokBuildConnector({ billingClient: new StdioGrokBillingClient() }),
+      new GrokBuildConnector({
+        billingClient: new StdioGrokBillingClient(),
+        historyClient: localTranscriptClient('grok')
+      }),
       new XaiApiConnector({ accountClient: new XaiManagementApiClient({ secretStore }) })
     ],
     connectorDefinitions: defaultConnectorDefinitions,
@@ -96,8 +106,8 @@ export async function runDaemon(home: string): Promise<void> {
       }
     ]
   });
-  await application.refresh();
   await application.discoverConnectors();
+  await application.refresh();
   const server = await startLocalServer({
     application,
     staticDirectory: locateStaticDirectory()
@@ -124,6 +134,31 @@ export async function runDaemon(home: string): Promise<void> {
     process.once('SIGTERM', () => void stop());
     process.once('SIGINT', () => void stop());
   });
+}
+
+function localTranscriptClient(provider: LocalTranscriptProvider): LocalTranscriptUsageClient {
+  return new LocalTranscriptUsageClient({
+    provider,
+    root: localTranscriptRoot(provider)
+  });
+}
+
+function localTranscriptRoot(provider: LocalTranscriptProvider): string {
+  if (provider === 'codex') {
+    return join(resolveHomeOverride(process.env.CODEX_HOME, '.codex'), 'sessions');
+  }
+  if (provider === 'claude-code') {
+    return join(resolveHomeOverride(process.env.CLAUDE_CONFIG_DIR, '.claude'), 'projects');
+  }
+  return join(resolveHomeOverride(process.env.GROK_HOME, '.grok'), 'sessions');
+}
+
+function resolveHomeOverride(value: string | undefined, fallback: string): string {
+  const configured = value?.trim();
+  if (!configured) return join(homedir(), fallback);
+  if (configured === '~') return homedir();
+  if (configured.startsWith('~/')) return join(homedir(), configured.slice(2));
+  return isAbsolute(configured) ? configured : resolve(configured);
 }
 
 function createDemoConnector(): Connector {

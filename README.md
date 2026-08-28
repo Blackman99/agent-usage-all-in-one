@@ -62,13 +62,13 @@ agent-usage clear --yes
 
 ## Provider coverage
 
-| Provider / billing domain | Quota 与 reset                                                            | Token / history                     | Cost                                          | 数据等级与边界                                                    |
-| ------------------------- | ------------------------------------------------------------------------- | ----------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- |
-| Codex                     | 官方 app-server 能力可用时读取动态 bucket                                 | 官方账户能力可用时读取              | 未知，不显示为 0                              | official account；旧版本缺方法时按维度降级                        |
-| Claude Code               | 实验性官方客户端 `/usage` adapter；保留 All models、Fable only 等原始标签 | 用户显式开启的本地 OTLP             | 未知                                          | quota 为 experimental official client；Token 为 local observation |
-| OpenCode Go               | 官方 account-wide 5 小时、周、月窗口                                      | 官方 CLI/session export，本机范围   | provider 报告值或明确 estimate                | 账户 quota 与本机 history 永远分开标注                            |
-| Grok Build / SuperGrok    | 实验性官方客户端能力，可得共享周额度                                      | 用户显式开启的 OTel/headless 输出   | 未知                                          | 不虚构 5 小时 bucket；客户端能力缺失时保留本地历史                |
-| Grok · xAI API            | API 计费域无订阅 quota                                                    | 官方 Management API 按模型/时间聚合 | actual USD、balance、limit、invoice（可得时） | 需要独立 Management key；与 Build 订阅不相加                      |
+| Provider / billing domain | Quota 与 reset                                                            | Token / history                                        | Cost                                          | 数据等级与边界                                                    |
+| ------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------- |
+| Codex                     | 官方 app-server 能力可用时读取动态 bucket                                 | 自动读取本地 rollout；账户日汇总仅作无本地历史时的回退 | API 等价零售价                                | quota 为 official account；Token 为 this-Mac local observation    |
+| Claude Code               | 实验性官方客户端 `/usage` adapter；保留 All models、Fable only 等原始标签 | 自动读取本地 session transcript；OTLP 可选补充         | 客户端报告估算或 API 等价零售价               | quota 为 experimental official client；Token 为 local observation |
+| OpenCode Go               | 官方 account-wide 5 小时、周、月窗口                                      | 官方 CLI/session export，本机范围                      | provider 报告值或明确 estimate                | 账户 quota 与本机 history 永远分开标注                            |
+| Grok Build / SuperGrok    | 实验性官方客户端能力，可得共享周额度                                      | 自动读取本地 `updates.jsonl`；OTLP/headless 可选补充   | 客户端报告估算或 API 等价零售价               | 不虚构 5 小时 bucket；与 xAI API 始终隔离                         |
+| Grok · xAI API            | API 计费域无订阅 quota                                                    | 官方 Management API 按模型/时间聚合                    | actual USD、balance、limit、invoice（可得时） | 需要独立 Management key；与 Build 订阅不相加                      |
 
 每个数字都保留 data authority：`official-account`、`official-client`、`local-observation`、`estimate` 或 `unavailable`。实际费用、订阅费用和 API 等价估算是三个独立 cost kind；未知费用始终为 unknown，而不是 0。
 
@@ -76,7 +76,7 @@ agent-usage clear --yes
 
 - Codex、Claude Code、OpenCode Go 与 Grok 的官方客户端凭据只在原位置使用，不复制、不回显。
 - xAI Management key 是 Agent Usage 唯一创建的凭据，存储于 macOS Keychain；SQLite 只记录非敏感连接状态。
-- Claude/Grok telemetry 默认关闭，只有执行 `agent-usage telemetry-env --provider claude-code|grok` 并在相应 shell 中显式启用后才发送到本机 daemon。
+- Codex、Claude Code 与 Grok Build 的 Token 历史会从官方客户端写入的本地 session transcript 自动读取，不需要额外配置。可选 OTLP 仍默认关闭；显式执行 `agent-usage telemetry-env --provider claude-code|grok` 后才会发送到本机 daemon。
 - Dashboard session 使用一次性 launch token、HttpOnly cookie 与同源写操作保护；CLI 使用权限受限的本地 daemon state。
 
 ## 隐私、导出与保留

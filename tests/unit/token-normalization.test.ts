@@ -102,6 +102,27 @@ describe('token normalization', () => {
     });
   });
 
+  it('keeps a reconciled account remainder distinct from source-reported evidence', () => {
+    const normalized = normalizeTokenObservation(
+      observation({
+        model: null,
+        reconciledRemainderTokens: 879,
+        modelAttribution: 'unclassified',
+        usageScope: 'account-wide',
+        authority: 'estimate'
+      })
+    );
+
+    expect(normalized).toMatchObject({
+      recordedTokens: 879,
+      sourceReportedTotalTokens: null,
+      reconciledRemainderTokens: 879,
+      unclassifiedTokens: 879,
+      totalDerivation: 'reconciled-remainder',
+      authority: 'estimate'
+    });
+  });
+
   it('does not let an explicit attribution turn an aggregate placeholder into a model', () => {
     const normalized = normalizeTokenObservation(
       observation({

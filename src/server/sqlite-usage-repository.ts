@@ -15,6 +15,7 @@ import type {
   DataAuthority,
   ExchangeRateSnapshot,
   HistoryCost,
+  HistoryModelObservation,
   HistoryWindow,
   MonitoringSettings,
   PriceSnapshotReference,
@@ -53,6 +54,7 @@ interface ProviderRow {
 
 function additiveUsagePredicate(alias = ''): string {
   const prefix = alias ? `${alias}.` : '';
+  const outer = alias || 'usage_observations';
   return `NOT (
     ${prefix}aggregation_temporality = 'unknown'
     AND (
@@ -60,6 +62,39 @@ function additiveUsagePredicate(alias = ''): string {
       OR (
         ${prefix}provider_id = 'grok'
         AND (${prefix}id LIKE 'grok-otel:%' OR ${prefix}id LIKE 'grok-headless:%')
+      )
+    )
+    OR (
+      ${prefix}provider_id = 'codex'
+      AND (
+        (
+          ${prefix}id LIKE 'codex:daily:%'
+          AND EXISTS (
+            SELECT 1 FROM usage_observations codex_remainder
+            WHERE codex_remainder.provider_id = ${outer}.provider_id
+              AND codex_remainder.billing_domain_id = ${outer}.billing_domain_id
+              AND codex_remainder.id LIKE 'codex-transcript:account-remainder:%'
+              AND date(codex_remainder.observed_at) = date(${outer}.observed_at)
+          )
+        )
+        OR (
+          ${prefix}id LIKE 'codex-transcript:%'
+          AND ${prefix}id NOT LIKE 'codex-transcript:account-remainder:%'
+          AND EXISTS (
+            SELECT 1 FROM usage_observations codex_official
+            WHERE codex_official.provider_id = ${outer}.provider_id
+              AND codex_official.billing_domain_id = ${outer}.billing_domain_id
+              AND codex_official.id LIKE 'codex:daily:%'
+              AND date(codex_official.observed_at) = date(${outer}.observed_at)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM usage_observations codex_remainder
+            WHERE codex_remainder.provider_id = ${outer}.provider_id
+              AND codex_remainder.billing_domain_id = ${outer}.billing_domain_id
+              AND codex_remainder.id LIKE 'codex-transcript:account-remainder:%'
+              AND date(codex_remainder.observed_at) = date(${outer}.observed_at)
+          )
+        )
       )
     )
   )`;
@@ -150,6 +185,8 @@ interface UsageHistoryRow {
   reasoning_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cache_write_5m_tokens: number | null;
+  cache_write_1h_tokens: number | null;
   source_reported_total_tokens: number | null;
   unclassified_tokens: number;
   total_derivation: TokenTotalDerivation;
@@ -419,11 +456,12 @@ export class SqliteUsageRepository implements UsageRepository {
         `INSERT INTO usage_observations (
            provider_id, id, billing_domain_id, model, session_id, observed_at,
            total_tokens, input_tokens, output_tokens, reasoning_tokens,
-           cache_read_tokens, cache_write_tokens, authority,
+           cache_read_tokens, cache_write_tokens, cache_write_5m_tokens,
+           cache_write_1h_tokens, authority,
            source_reported_total_tokens, unclassified_tokens, total_derivation,
            reasoning_semantics, cache_read_semantics, cache_write_semantics,
            model_attribution, time_precision, usage_scope, aggregation_temporality
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            billing_domain_id = excluded.billing_domain_id,
            model = excluded.model,
@@ -435,6 +473,8 @@ export class SqliteUsageRepository implements UsageRepository {
            reasoning_tokens = excluded.reasoning_tokens,
            cache_read_tokens = excluded.cache_read_tokens,
            cache_write_tokens = excluded.cache_write_tokens,
+           cache_write_5m_tokens = excluded.cache_write_5m_tokens,
+           cache_write_1h_tokens = excluded.cache_write_1h_tokens,
            authority = excluded.authority,
            source_reported_total_tokens = excluded.source_reported_total_tokens,
            unclassified_tokens = excluded.unclassified_tokens,
@@ -449,7 +489,8 @@ export class SqliteUsageRepository implements UsageRepository {
       );
       const existingPricedUsageStatement = this.#database.prepare(
         `SELECT billing_domain_id, model, observed_at, total_tokens, input_tokens, output_tokens,
-                reasoning_tokens, cache_read_tokens, cache_write_tokens, unclassified_tokens,
+                reasoning_tokens, cache_read_tokens, cache_write_tokens, cache_write_5m_tokens,
+                cache_write_1h_tokens, unclassified_tokens,
                 reasoning_semantics, cache_read_semantics, cache_write_semantics, model_attribution,
                 time_precision, aggregation_temporality
          FROM usage_observations
@@ -479,6 +520,8 @@ export class SqliteUsageRepository implements UsageRepository {
           normalized.reasoningTokens,
           normalized.cacheReadTokens,
           normalized.cacheWriteTokens,
+          normalized.cacheWriteTokenBreakdown?.fiveMinute ?? null,
+          normalized.cacheWriteTokenBreakdown?.oneHour ?? null,
           normalized.authority,
           normalized.sourceReportedTotalTokens,
           normalized.unclassifiedTokens,
@@ -626,7 +669,8 @@ export class SqliteUsageRepository implements UsageRepository {
                 u.id, u.billing_domain_id, b.display_name AS billing_domain_display_name,
                 u.model, u.session_id, u.observed_at, u.authority,
                 u.total_tokens, u.input_tokens, u.output_tokens, u.reasoning_tokens,
-                u.cache_read_tokens, u.cache_write_tokens, u.source_reported_total_tokens,
+                u.cache_read_tokens, u.cache_write_tokens, u.cache_write_5m_tokens,
+                u.cache_write_1h_tokens, u.source_reported_total_tokens,
                 u.unclassified_tokens, u.total_derivation, u.model_attribution,
                 u.reasoning_semantics, u.cache_read_semantics, u.cache_write_semantics,
                 u.time_precision, u.usage_scope, u.aggregation_temporality
@@ -665,10 +709,19 @@ export class SqliteUsageRepository implements UsageRepository {
         reasoningTokens: Number(row.reasoning_tokens),
         cacheReadTokens: Number(row.cache_read_tokens),
         cacheWriteTokens: Number(row.cache_write_tokens),
+        cacheWriteTokenBreakdown:
+          row.cache_write_5m_tokens === null || row.cache_write_1h_tokens === null
+            ? null
+            : {
+                fiveMinute: Number(row.cache_write_5m_tokens),
+                oneHour: Number(row.cache_write_1h_tokens)
+              },
         sourceReportedTotalTokens:
           row.source_reported_total_tokens === null
             ? null
             : Number(row.source_reported_total_tokens),
+        reconciledRemainderTokens:
+          row.total_derivation === 'reconciled-remainder' ? Number(row.total_tokens) : null,
         tokenSemantics: {
           reasoning: row.reasoning_semantics,
           cacheRead: row.cache_read_semantics,
@@ -1415,7 +1468,8 @@ export class SqliteUsageRepository implements UsageRepository {
     const usage = this.#database
       .prepare(
         `SELECT id, model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
-                cache_read_tokens, cache_write_tokens, source_reported_total_tokens,
+                cache_read_tokens, cache_write_tokens, cache_write_5m_tokens,
+                cache_write_1h_tokens, source_reported_total_tokens,
                 unclassified_tokens, total_derivation, model_attribution, time_precision,
                 usage_scope, aggregation_temporality, reasoning_semantics,
                 cache_read_semantics, cache_write_semantics
@@ -1580,7 +1634,7 @@ export class SqliteUsageRepository implements UsageRepository {
           const priceEvidence = costs
             .filter(
               (cost) =>
-                cost.kind === 'retail-equivalent' &&
+                (cost.kind === 'retail-equivalent' || cost.kind === 'reported-estimate') &&
                 cost.usage_observation_id !== null &&
                 observationIds.has(cost.usage_observation_id)
             )
@@ -1696,6 +1750,8 @@ export class SqliteUsageRepository implements UsageRepository {
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
         cache_read_tokens INTEGER NOT NULL,
         cache_write_tokens INTEGER NOT NULL,
+        cache_write_5m_tokens INTEGER,
+        cache_write_1h_tokens INTEGER,
         authority TEXT NOT NULL,
         source_reported_total_tokens INTEGER,
         unclassified_tokens INTEGER NOT NULL DEFAULT 0,
@@ -1878,7 +1934,9 @@ export class SqliteUsageRepository implements UsageRepository {
       ['model_attribution', "TEXT NOT NULL DEFAULT 'known'"],
       ['time_precision', "TEXT NOT NULL DEFAULT 'unknown'"],
       ['usage_scope', "TEXT NOT NULL DEFAULT 'unknown'"],
-      ['aggregation_temporality', "TEXT NOT NULL DEFAULT 'unknown'"]
+      ['aggregation_temporality', "TEXT NOT NULL DEFAULT 'unknown'"],
+      ['cache_write_5m_tokens', 'INTEGER'],
+      ['cache_write_1h_tokens', 'INTEGER']
     ] as const) {
       if (!usageColumns.some((column) => column.name === name)) {
         this.#database.exec(`ALTER TABLE usage_observations ADD COLUMN ${name} ${definition}`);
@@ -2039,7 +2097,17 @@ function normalizeCostForPersistence(cost: CostRecord): CostRecord {
 }
 
 function serializePriceRates(priceSnapshot: CostRecord['priceSnapshot']): string | null {
-  return priceSnapshot?.ratesPerMillion ? JSON.stringify(priceSnapshot.ratesPerMillion) : null;
+  return priceSnapshot?.ratesPerMillion
+    ? JSON.stringify({
+        ...priceSnapshot.ratesPerMillion,
+        ...(priceSnapshot.cacheWriteRatesPerMillion
+          ? {
+              'cache-write-5m': priceSnapshot.cacheWriteRatesPerMillion.fiveMinute,
+              'cache-write-1h': priceSnapshot.cacheWriteRatesPerMillion.oneHour
+            }
+          : {})
+      })
+    : null;
 }
 
 function mapQuotaRow(row: QuotaRow): QuotaBucket {
@@ -2152,6 +2220,7 @@ function commaSeparatedValues<T extends string>(value: string | null): T[] {
 
 function priceSnapshotFromRow(row: CostRow): PriceSnapshotReference | null {
   const ratesPerMillion = parsePriceRates(row.price_snapshot_rates_json);
+  const cacheWriteRatesPerMillion = parseCacheWriteRates(row.price_snapshot_rates_json);
   if (
     !row.price_snapshot_id ||
     !row.price_snapshot_version ||
@@ -2171,9 +2240,28 @@ function priceSnapshotFromRow(row: CostRow): PriceSnapshotReference | null {
     effectiveUntil: row.price_snapshot_effective_until,
     currency: row.price_snapshot_currency,
     ratesPerMillion,
+    ...(cacheWriteRatesPerMillion ? { cacheWriteRatesPerMillion } : {}),
     ...(row.price_snapshot_source_url ? { sourceUrl: row.price_snapshot_source_url } : {}),
     ...(row.price_snapshot_context_tier ? { contextTier: row.price_snapshot_context_tier } : {})
   };
+}
+
+function parseCacheWriteRates(
+  value: string | null
+): PriceSnapshotReference['cacheWriteRatesPerMillion'] | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    return typeof parsed['cache-write-5m'] === 'number' &&
+      typeof parsed['cache-write-1h'] === 'number'
+      ? {
+          fiveMinute: parsed['cache-write-5m'],
+          oneHour: parsed['cache-write-1h']
+        }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parsePriceRates(value: string | null): PriceSnapshotReference['ratesPerMillion'] | null {
@@ -2452,7 +2540,18 @@ function buildTokenMoneyWorkbench(
         interval.tokenEvidence.recordedTokens,
         history.exchangeRates
       );
-      if (interval.tokenEvidence.observationCount === 0 && retailEquivalent.records === 0)
+      const reportedEstimate = buildWorkbenchMetric(
+        interval.costs,
+        'reported-estimate',
+        comparisonCurrency,
+        interval.tokenEvidence.recordedTokens,
+        history.exchangeRates
+      );
+      if (
+        interval.tokenEvidence.observationCount === 0 &&
+        retailEquivalent.records === 0 &&
+        reportedEstimate.records === 0
+      )
         return [];
       return [
         {
@@ -2469,6 +2568,11 @@ function buildTokenMoneyWorkbench(
           retailEquivalent: {
             status: retailEquivalent.status,
             amount: retailEquivalent.amount,
+            currency: comparisonCurrency
+          },
+          reportedEstimate: {
+            status: reportedEstimate.status,
+            amount: reportedEstimate.amount,
             currency: comparisonCurrency
           }
         }
@@ -2506,7 +2610,8 @@ function buildTokenMoneyWorkbench(
       buckets,
       comparisonCurrency,
       observationCount > 0 ? recordedTokens : null,
-      retailEquivalent
+      retailEquivalent,
+      reportedEstimate
     )
   };
 }
@@ -2634,13 +2739,21 @@ function buildWorkbenchModelRanking(
   buckets: UsageOverview['workbench']['trend']['buckets'],
   comparisonCurrency: string,
   recordedTokens: number | null,
-  totalRetailEquivalent: UsageOverview['workbench']['costs']['retailEquivalent']
+  totalRetailEquivalent: UsageOverview['workbench']['costs']['retailEquivalent'],
+  totalReportedEstimate: UsageOverview['workbench']['costs']['reportedEstimate']
 ): UsageOverview['workbench']['modelRanking'] {
   const entries = histories.flatMap(({ provider, domain, history, includedInHeadline }) =>
     history.models.map((model) => {
       const retailEquivalent = buildWorkbenchMetric(
         model.priceEvidence,
         'retail-equivalent',
+        comparisonCurrency,
+        model.tokenEvidence.recordedTokens,
+        history.exchangeRates
+      );
+      const reportedEstimate = buildWorkbenchMetric(
+        model.priceEvidence,
+        'reported-estimate',
         comparisonCurrency,
         model.tokenEvidence.recordedTokens,
         history.exchangeRates
@@ -2667,6 +2780,7 @@ function buildWorkbenchModelRanking(
             ? null
             : model.tokenTotals.total / recordedTokens,
         retailEquivalent,
+        reportedEstimate,
         retailShare:
           includedInHeadline &&
           retailEquivalent.status === 'available' &&
@@ -2675,6 +2789,15 @@ function buildWorkbenchModelRanking(
           totalRetailEquivalent.amount !== null &&
           totalRetailEquivalent.amount !== 0
             ? retailEquivalent.amount / totalRetailEquivalent.amount
+            : null,
+        reportedShare:
+          includedInHeadline &&
+          reportedEstimate.status === 'available' &&
+          reportedEstimate.amount !== null &&
+          totalReportedEstimate.status === 'available' &&
+          totalReportedEstimate.amount !== null &&
+          totalReportedEstimate.amount !== 0
+            ? reportedEstimate.amount / totalReportedEstimate.amount
             : null,
         authorities,
         lastObservedAt,
@@ -2700,6 +2823,13 @@ function buildWorkbenchModelRanking(
             tokenTotals.total,
             history.exchangeRates
           );
+          const intervalReported = buildWorkbenchMetric(
+            priceEvidence,
+            'reported-estimate',
+            comparisonCurrency,
+            tokenTotals.total,
+            history.exchangeRates
+          );
           return {
             start: bucket.start,
             end: bucket.end,
@@ -2720,6 +2850,14 @@ function buildWorkbenchModelRanking(
               pricingCoverage: intervalRetail.pricingCoverage,
               authorities: intervalRetail.authorities,
               observedAt: intervalRetail.observedAt
+            },
+            reportedEstimate: {
+              status: intervalReported.status,
+              amount: intervalReported.amount,
+              comparisonCurrency,
+              pricingCoverage: intervalReported.pricingCoverage,
+              authorities: intervalReported.authorities,
+              observedAt: intervalReported.observedAt
             }
           };
         })
@@ -2731,12 +2869,17 @@ function buildWorkbenchModelRanking(
       right.tokenTotals.total - left.tokenTotals.total || left.id.localeCompare(right.id)
   );
   const byRetailEquivalent = [...entries].sort((left, right) => {
-    const leftAvailable = left.retailEquivalent.status === 'available';
-    const rightAvailable = right.retailEquivalent.status === 'available';
+    const leftCost =
+      left.retailEquivalent.status === 'available' ? left.retailEquivalent : left.reportedEstimate;
+    const rightCost =
+      right.retailEquivalent.status === 'available'
+        ? right.retailEquivalent
+        : right.reportedEstimate;
+    const leftAvailable = leftCost.status === 'available';
+    const rightAvailable = rightCost.status === 'available';
     if (leftAvailable !== rightAvailable) return leftAvailable ? -1 : 1;
     if (leftAvailable && rightAvailable) {
-      const amountDifference =
-        (right.retailEquivalent.amount ?? 0) - (left.retailEquivalent.amount ?? 0);
+      const amountDifference = (rightCost.amount ?? 0) - (leftCost.amount ?? 0);
       if (amountDifference !== 0) return amountDifference;
     } else {
       const tokenDifference = right.tokenTotals.total - left.tokenTotals.total;
@@ -2942,6 +3085,7 @@ function mapHistoryModelObservation(
     authority: row.authority,
     timePrecision: row.time_precision,
     sourceReportedTotalTokens: row.source_reported_total_tokens,
+    cacheWriteTokenBreakdown: cacheWriteTokenBreakdownFromRow(row),
     recordedTokens: Number(row.total_tokens),
     classifiedTokens: Math.max(0, Number(row.total_tokens) - Number(row.unclassified_tokens)),
     unclassifiedTokens: Number(row.unclassified_tokens),
@@ -2964,6 +3108,17 @@ function mapHistoryModelObservation(
   };
 }
 
+function cacheWriteTokenBreakdownFromRow(
+  row: UsageHistoryRow
+): HistoryModelObservation['cacheWriteTokenBreakdown'] {
+  return row.cache_write_5m_tokens === null || row.cache_write_1h_tokens === null
+    ? null
+    : {
+        fiveMinute: Number(row.cache_write_5m_tokens),
+        oneHour: Number(row.cache_write_1h_tokens)
+      };
+}
+
 function mapUnclassifiedObservation(
   row: UsageHistoryRow
 ): BillingDomainOverview['history']['models'][number]['observations'][number] {
@@ -2974,6 +3129,7 @@ function mapUnclassifiedObservation(
     authority: row.authority,
     timePrecision: row.time_precision,
     sourceReportedTotalTokens: row.source_reported_total_tokens,
+    cacheWriteTokenBreakdown: cacheWriteTokenBreakdownFromRow(row),
     recordedTokens: Number(row.total_tokens),
     classifiedTokens: 0,
     unclassifiedTokens: Number(row.unclassified_tokens),
@@ -3291,6 +3447,10 @@ function pricingInputsChanged(
     Number(existing.reasoning_tokens) !== observation.reasoningTokens ||
     Number(existing.cache_read_tokens) !== observation.cacheReadTokens ||
     Number(existing.cache_write_tokens) !== observation.cacheWriteTokens ||
+    (existing.cache_write_5m_tokens === null ? null : Number(existing.cache_write_5m_tokens)) !==
+      (observation.cacheWriteTokenBreakdown?.fiveMinute ?? null) ||
+    (existing.cache_write_1h_tokens === null ? null : Number(existing.cache_write_1h_tokens)) !==
+      (observation.cacheWriteTokenBreakdown?.oneHour ?? null) ||
     Number(existing.unclassified_tokens) !== observation.unclassifiedTokens ||
     existing.reasoning_semantics !== observation.tokenSemantics.reasoning ||
     existing.cache_read_semantics !== observation.tokenSemantics.cacheRead ||

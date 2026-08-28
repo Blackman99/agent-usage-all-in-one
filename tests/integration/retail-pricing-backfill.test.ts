@@ -72,6 +72,36 @@ describe('retained retail-equivalent backfill', () => {
     });
     immutable.close();
   });
+
+  it('persists Claude cache-write TTL evidence for restart backfill and immutable price snapshots', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-claude-ttl-backfill-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const seed = new SqliteUsageRepository(databasePath);
+    seed.saveSnapshot(claudeSnapshot());
+    expect(seed.getRetailPricingBackfillSnapshots()[0].usage[0]).toMatchObject({
+      cacheWriteTokens: 30_000,
+      cacheWriteTokenBreakdown: { fiveMinute: 10_000, oneHour: 20_000 }
+    });
+    seed.close();
+
+    const restarted = new SqliteUsageRepository(databasePath);
+    const restartedApplication = application(restarted);
+    const provider = (await restartedApplication.getOverview({ window: '30d', timeZone: 'UTC' }))
+      .providers[0];
+    const cost = provider.billingDomains[0].history.costs.find(
+      (candidate) => candidate.kind === 'retail-equivalent'
+    );
+    expect(cost).toMatchObject({
+      amount: 0.507,
+      priceSnapshots: [
+        expect.objectContaining({
+          cacheWriteRatesPerMillion: { fiveMinute: 2.5, oneHour: 4 }
+        })
+      ]
+    });
+    restarted.close();
+  });
 });
 
 function application(
@@ -117,6 +147,40 @@ function snapshot(usageObservations: UsageObservation[]): ConnectorSnapshot {
     billingDomains: [{ id: 'xai-api', displayName: 'xAI API' }],
     quotaBuckets: [],
     usage: usageObservations,
+    costs: [],
+    observedAt: NOW.toISOString()
+  };
+}
+
+function claudeSnapshot(): ConnectorSnapshot {
+  return {
+    provider: { id: 'claude-code', displayName: 'Claude Code' },
+    billingDomains: [{ id: 'subscription', displayName: 'Claude subscription' }],
+    quotaBuckets: [],
+    usage: [
+      {
+        id: 'claude-cache-write',
+        billingDomainId: 'subscription',
+        model: 'claude-sonnet-5',
+        observedAt: '2026-08-28T01:00:00.000Z',
+        inputTokens: 100_000,
+        outputTokens: 20_000,
+        reasoningTokens: 0,
+        cacheReadTokens: 10_000,
+        cacheWriteTokens: 30_000,
+        cacheWriteTokenBreakdown: { fiveMinute: 10_000, oneHour: 20_000 },
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        modelAttribution: 'known',
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
+        authority: 'local-observation'
+      }
+    ],
     costs: [],
     observedAt: NOW.toISOString()
   };

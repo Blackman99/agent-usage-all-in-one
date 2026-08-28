@@ -48,7 +48,8 @@ describe('API retail-equivalent pricing', () => {
             reasoning: null,
             'cache-read': 1,
             'cache-write': null
-          }
+          },
+          cacheWriteRatesPerMillion: { fiveMinute: 12.5, oneHour: 20 }
         },
         lineItems: [
           { tokenKind: 'input', tokens: 100_000, ratePerMillion: 10, amount: 1 },
@@ -103,6 +104,32 @@ describe('API retail-equivalent pricing', () => {
     ]);
   });
 
+  it('prices Claude cache writes from transcript-provided 5-minute and 1-hour token splits', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'sonnet-cache-write',
+          model: 'claude-sonnet-5',
+          cacheWriteTokens: 30_000,
+          cacheWriteTokenBreakdown: { fiveMinute: 10_000, oneHour: 20_000 }
+        })
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.costs[0]).toMatchObject({
+      amount: 0.507,
+      pricedTokens: 160_000,
+      priceSnapshot: {
+        cacheWriteRatesPerMillion: { fiveMinute: 2.5, oneHour: 4 }
+      },
+      lineItems: expect.arrayContaining([
+        { tokenKind: 'cache-write', tokens: 10_000, ratePerMillion: 2.5, amount: 0.025 },
+        { tokenKind: 'cache-write', tokens: 20_000, ratePerMillion: 4, amount: 0.08 }
+      ])
+    });
+  });
+
   it('scopes aliases by Provider and billing domain', () => {
     const wrongProvider = deriveRetailEquivalentCosts(
       snapshot(observation(), { providerId: 'grok' })
@@ -119,24 +146,105 @@ describe('API retail-equivalent pricing', () => {
   });
 
   it('records the reviewed official source and context tier in the fixed catalog', () => {
-    expect(ANTHROPIC_PRICING_CATALOG).toMatchObject({
-      version: '2026-08-28',
-      entries: [
+    expect(ANTHROPIC_PRICING_CATALOG.version).toBe('2026-08-28');
+    expect(
+      ANTHROPIC_PRICING_CATALOG.entries.find((entry) => entry.canonicalModel === 'claude-fable-5')
+    ).toMatchObject({
+      providerId: 'claude-code',
+      billingDomainId: 'subscription',
+      canonicalModel: 'claude-fable-5',
+      aliases: ['Claude Fable 5'],
+      currency: 'USD',
+      effectiveFrom: '2026-06-09T00:00:00.000Z',
+      effectiveUntil: null,
+      contextTier: 'standard-api',
+      source: {
+        url: 'https://platform.claude.com/docs/en/about-claude/pricing',
+        retrievedAt: '2026-08-28'
+      }
+    });
+    expect(ANTHROPIC_PRICING_CATALOG.entries.map((entry) => entry.canonicalModel).sort()).toEqual([
+      'claude-fable-5',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-8',
+      'claude-opus-5',
+      'claude-sonnet-5'
+    ]);
+  });
+
+  it('prices the exact Claude Haiku transcript model identifier', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(observation({ id: 'haiku', model: 'claude-haiku-4-5-20251001' })),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.costs[0]).toMatchObject({
+      amount: 0.201,
+      priceSnapshot: { id: 'anthropic-haiku-4.5-2025-10-01' }
+    });
+  });
+
+  it.each([
+    ['claude-sonnet-5', 0.402, 'anthropic-sonnet-5-2026-06-30'],
+    ['claude-opus-4-8', 1.005, 'anthropic-opus-4.8-2026-05-28'],
+    ['claude-opus-5', 1.005, 'anthropic-opus-5-2026-07-24']
+  ])(
+    'prices current Claude transcript model %s when cache-write duration is unambiguous',
+    (model, amount, priceId) => {
+      const result = deriveRetailEquivalentCosts(
+        snapshot(observation({ id: model, model })),
+        OFFICIAL_PRICING_CATALOG
+      );
+
+      expect(result.costs[0]).toMatchObject({
+        amount,
+        model,
+        priceSnapshot: { id: priceId }
+      });
+    }
+  );
+
+  it.each([
+    ['gpt-5.6-sol', 0.804, 'openai-gpt-5.6-sol-standard-2026-08-21'],
+    ['gpt-5.6-terra', 0.442, 'openai-gpt-5.6-terra-standard-2026-07-30'],
+    ['gpt-5.6-luna', 0.0442, 'openai-gpt-5.6-luna-standard-2026-07-30']
+  ])('prices current Codex transcript model %s', (model, amount, priceId) => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(observation({ id: model, model }), {
+        providerId: 'codex',
+        domainId: 'subscription',
+        domainName: 'Codex subscription'
+      }),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.costs[0]).toMatchObject({
+      amount,
+      model,
+      priceSnapshot: { id: priceId }
+    });
+  });
+
+  it('selects the long-context Codex tier from event-level prompt evidence', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'sol-long',
+          model: 'gpt-5.6-sol',
+          inputTokens: 300_000
+        }),
         {
-          providerId: 'claude-code',
-          billingDomainId: 'subscription',
-          canonicalModel: 'claude-fable-5',
-          aliases: ['Claude Fable 5'],
-          currency: 'USD',
-          effectiveFrom: '2026-06-09T00:00:00.000Z',
-          effectiveUntil: null,
-          contextTier: 'standard-api',
-          source: {
-            url: 'https://platform.claude.com/docs/en/about-claude/pricing',
-            retrievedAt: '2026-08-28'
-          }
+          providerId: 'codex',
+          domainId: 'subscription',
+          domainName: 'Codex subscription'
         }
-      ]
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.costs[0]).toMatchObject({
+      amount: 3.008,
+      priceSnapshot: { contextTier: 'prompt-above-272k' }
     });
   });
 

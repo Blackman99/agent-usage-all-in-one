@@ -6,6 +6,7 @@ import type {
   ConnectorSnapshot,
   QuotaBucket
 } from '../../core/types.js';
+import type { TranscriptUsageClient } from '../../server/local-transcript-usage-client.js';
 
 const centSchema = z.object({ val: z.number().default(0) }).passthrough();
 const usagePeriodSchema = z
@@ -44,6 +45,7 @@ export interface GrokBuildBillingClient {
 
 export interface GrokBuildConnectorOptions {
   billingClient: GrokBuildBillingClient;
+  historyClient?: TranscriptUsageClient;
   clock?: () => Date;
 }
 
@@ -52,10 +54,12 @@ export class GrokBuildConnector implements Connector {
   readonly displayName = 'Grok';
   readonly consentId = 'grok';
   readonly #billingClient: GrokBuildBillingClient;
+  readonly #historyClient?: TranscriptUsageClient;
   readonly #clock: () => Date;
 
   constructor(options: GrokBuildConnectorOptions) {
     this.#billingClient = options.billingClient;
+    this.#historyClient = options.historyClient;
     this.#clock = options.clock ?? (() => new Date());
   }
 
@@ -77,17 +81,37 @@ export class GrokBuildConnector implements Connector {
     } catch (error) {
       warnings.push(safeFailure(error));
     }
+    const history = this.#historyClient
+      ? await this.#historyClient.readUsage()
+      : { usage: [], costs: [], complete: true };
+    if (!history.complete) warnings.push(incompleteTranscriptFailure());
 
     return {
       provider: { id: this.id, displayName: this.displayName },
       billingDomains: [grokBuildBillingDomain()],
       quotaBuckets,
-      usage: [],
-      costs: [],
+      usage: history.usage,
+      ...(history.usage.length > 0 && history.complete
+        ? {
+            usageReconciliation: {
+              authoritativeIdPrefix: 'grok-transcript:',
+              retiredIdPrefixes: ['grok-otel:', 'grok-headless:']
+            }
+          }
+        : {}),
+      costs: history.costs,
       warnings,
       observedAt
     };
   }
+}
+
+function incompleteTranscriptFailure(): ConnectorFailure {
+  return {
+    code: 'local-transcript-scan-incomplete',
+    message: 'Some local Grok history could not be read.',
+    recovery: 'Agent Usage will retry automatically without removing stored history.'
+  };
 }
 
 export function grokBuildBillingDomain(): { id: string; displayName: string } {

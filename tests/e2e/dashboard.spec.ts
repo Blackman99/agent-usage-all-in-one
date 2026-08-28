@@ -1008,6 +1008,8 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
   await expect(grokRow.locator('img')).toHaveCount(0);
   await expect(grokRow).toContainText('Separate domain · not included in headline');
+  await expect(grokRow).toContainText('Provider-reported estimate');
+  await expect(grokRow).toContainText('$3.00');
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
 
   await ranking.getByRole('button', { name: 'Day', exact: true }).click();
@@ -1728,7 +1730,7 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
     ['codex', 'Codex', 'subscription', 'Subscription', 'shared-model', 500, null],
     ['claude-code', 'Claude Code', 'subscription', 'Subscription', 'fable-model', 400, 4],
     ['opencode-go', 'OpenCode Go', 'subscription', 'Subscription', 'open-model', 400, 2],
-    ['grok', 'Grok', 'xai-api', 'xAI API', 'shared-model', 300, 3],
+    ['grok', 'Grok', 'xai-api', 'xAI API', 'shared-model', 300, null],
     ['codex', 'Codex', 'subscription', 'Subscription', 'model-four', 200, null],
     ['codex', 'Codex', 'subscription', 'Subscription', 'model-five', 100, null]
   ] as const;
@@ -1775,6 +1777,22 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
         conversionUnavailableReasons: [],
         exchangeRates: []
       };
+      const reportedEstimate = {
+        ...retailEquivalent,
+        purpose: 'reported-estimate',
+        status: providerId === 'grok' ? 'available' : 'unavailable',
+        amount: providerId === 'grok' ? (currency === 'USD' ? 3 : 21.6) : null,
+        nativeAmounts:
+          providerId === 'grok'
+            ? [{ currency: 'USD', amount: 3, records: 1, knownRecords: 1 }]
+            : [],
+        authorities: providerId === 'grok' ? ['local-observation'] : [],
+        records: providerId === 'grok' ? 1 : 0,
+        knownRecords: providerId === 'grok' ? 1 : 0,
+        amountCoverage: providerId === 'grok' ? 1 : null,
+        pricingCoverage: null,
+        pricedTokens: 0
+      };
       return {
         id,
         providerId,
@@ -1787,7 +1805,8 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
         tokenEvidence,
         tokenShare: billingDomainId === 'xai-api' ? null : tokens / 2900,
         retailEquivalent,
-        retailShare: amount === null || billingDomainId === 'xai-api' ? null : amount / 9,
+        reportedEstimate,
+        retailShare: amount === null ? null : amount / 9,
         authorities: ['local-observation'],
         lastObservedAt: '2026-08-28T00:30:00.000Z',
         observations: [

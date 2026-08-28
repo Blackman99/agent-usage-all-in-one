@@ -52,7 +52,8 @@ export interface QuotaForecast {
 export type ReasoningTokenSemantics = 'included-in-output' | 'separate';
 export type CacheTokenSemantics = 'included-in-input' | 'separate';
 export type TokenTimePrecision = 'event' | 'hour' | 'day' | 'billing-period' | 'unknown';
-export type TokenTotalDerivation = 'source-reported' | 'categorized' | 'legacy-total';
+export type TokenTotalDerivation =
+  'source-reported' | 'reconciled-remainder' | 'categorized' | 'legacy-total';
 export type TokenModelAttribution = 'known' | 'unclassified';
 export type TokenUsageScope = 'account-wide' | 'this-mac' | 'unknown';
 export type TokenAggregationTemporality = 'delta' | 'cumulative' | 'unknown';
@@ -74,7 +75,12 @@ export interface UsageObservation {
   reasoningTokens?: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  cacheWriteTokenBreakdown?: {
+    fiveMinute: number;
+    oneHour: number;
+  } | null;
   sourceReportedTotalTokens?: number | null;
+  reconciledRemainderTokens?: number | null;
   tokenSemantics?: TokenSemantics;
   modelAttribution?: TokenModelAttribution;
   timePrecision?: TokenTimePrecision;
@@ -86,6 +92,8 @@ export interface UsageObservation {
 export interface NormalizedUsageObservation extends UsageObservation {
   reasoningTokens: number;
   sourceReportedTotalTokens: number | null;
+  reconciledRemainderTokens: number | null;
+  cacheWriteTokenBreakdown: { fiveMinute: number; oneHour: number } | null;
   tokenSemantics: TokenSemantics;
   modelAttribution: TokenModelAttribution;
   timePrecision: TokenTimePrecision;
@@ -117,6 +125,10 @@ export interface PriceSnapshotReference {
   effectiveUntil: string | null;
   currency: string;
   ratesPerMillion: Record<RetailTokenKind, number | null>;
+  cacheWriteRatesPerMillion?: {
+    fiveMinute: number;
+    oneHour: number;
+  };
   sourceUrl?: string;
   contextTier?: string;
 }
@@ -266,6 +278,7 @@ export interface HistoryModelObservation {
   authority: DataAuthority;
   timePrecision: TokenTimePrecision;
   sourceReportedTotalTokens: number | null;
+  cacheWriteTokenBreakdown: { fiveMinute: number; oneHour: number } | null;
   recordedTokens: number;
   classifiedTokens: number;
   unclassifiedTokens: number;
@@ -487,6 +500,11 @@ export interface WorkbenchTrendSegment {
     amount: number | null;
     currency: string;
   };
+  reportedEstimate: {
+    status: WorkbenchMoneyMetric['status'];
+    amount: number | null;
+    currency: string;
+  };
 }
 
 export interface WorkbenchTrendBucket {
@@ -567,6 +585,11 @@ export interface WorkbenchModelTrendBucket {
     'status' | 'amount' | 'comparisonCurrency' | 'pricingCoverage'
   > &
     Partial<Pick<WorkbenchMoneyMetric, 'authorities' | 'observedAt'>>;
+  reportedEstimate: Pick<
+    WorkbenchMoneyMetric,
+    'status' | 'amount' | 'comparisonCurrency' | 'pricingCoverage'
+  > &
+    Partial<Pick<WorkbenchMoneyMetric, 'authorities' | 'observedAt'>>;
 }
 
 export interface WorkbenchModelEntry {
@@ -581,7 +604,9 @@ export interface WorkbenchModelEntry {
   tokenEvidence: TokenEvidence;
   tokenShare: number | null;
   retailEquivalent: WorkbenchMoneyMetric;
+  reportedEstimate: WorkbenchMoneyMetric;
   retailShare: number | null;
+  reportedShare: number | null;
   authorities: DataAuthority[];
   lastObservedAt: string | null;
   observations: HistoryModelObservation[];

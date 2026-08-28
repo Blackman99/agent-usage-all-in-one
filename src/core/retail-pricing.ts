@@ -20,6 +20,10 @@ export interface RetailPriceCatalogEntry {
   contextTier: string;
   contextRule?: RetailPriceContextRule;
   ratesPerMillion: Record<RetailTokenKind, number | null>;
+  cacheWriteRatesPerMillion?: {
+    fiveMinute: number;
+    oneHour: number;
+  };
   source: {
     title: string;
     url: string;
@@ -88,14 +92,102 @@ export const ANTHROPIC_PRICING_CATALOG: RetailPriceCatalog = {
         // Anthropic publishes different 5-minute and 1-hour write rates.
         'cache-write': null
       },
+      cacheWriteRatesPerMillion: { fiveMinute: 12.5, oneHour: 20 },
       source: {
         title: 'Anthropic Claude API pricing',
         url: 'https://platform.claude.com/docs/en/about-claude/pricing',
         retrievedAt: '2026-08-28'
       }
-    }
+    },
+    anthropicEntry({
+      id: 'anthropic-sonnet-5-2026-06-30',
+      priceVersion: 'anthropic-2026-06-30',
+      model: 'claude-sonnet-5',
+      aliases: ['Claude Sonnet 5', 'claude-sonnet-5[1m]'],
+      effectiveFrom: '2026-06-30T00:00:00.000Z',
+      input: 2,
+      output: 10,
+      cacheRead: 0.2,
+      sourceUrl: 'https://www.anthropic.com/news/claude-sonnet-5'
+    }),
+    anthropicEntry({
+      id: 'anthropic-opus-5-2026-07-24',
+      priceVersion: 'anthropic-2026-07-24',
+      model: 'claude-opus-5',
+      aliases: ['Claude Opus 5', 'claude-opus-5[1m]'],
+      effectiveFrom: '2026-07-24T00:00:00.000Z',
+      input: 5,
+      output: 25,
+      cacheRead: 0.5,
+      sourceUrl: 'https://www.anthropic.com/news/claude-opus-5'
+    }),
+    anthropicEntry({
+      id: 'anthropic-opus-4.8-2026-05-28',
+      priceVersion: 'anthropic-2026-05-28',
+      model: 'claude-opus-4-8',
+      aliases: ['Claude Opus 4.8'],
+      effectiveFrom: '2026-05-28T00:00:00.000Z',
+      input: 5,
+      output: 25,
+      cacheRead: 0.5,
+      sourceUrl: 'https://www.anthropic.com/news/claude-opus-4-8'
+    }),
+    anthropicEntry({
+      id: 'anthropic-haiku-4.5-2025-10-01',
+      priceVersion: 'anthropic-2025-10-01',
+      model: 'claude-haiku-4-5-20251001',
+      aliases: ['Claude Haiku 4.5', 'claude-haiku-4-5'],
+      effectiveFrom: '2025-10-01T00:00:00.000Z',
+      input: 1,
+      output: 5,
+      cacheRead: 0.1,
+      sourceUrl: 'https://platform.claude.com/docs/en/about-claude/pricing'
+    })
   ]
 };
+
+function anthropicEntry(options: {
+  id: string;
+  priceVersion: string;
+  model: string;
+  aliases: string[];
+  effectiveFrom: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  sourceUrl: string;
+}): RetailPriceCatalogEntry {
+  return {
+    id: options.id,
+    priceVersion: options.priceVersion,
+    providerId: 'claude-code',
+    billingDomainId: 'subscription',
+    canonicalModel: options.model,
+    aliases: options.aliases,
+    currency: 'USD',
+    effectiveFrom: options.effectiveFrom,
+    effectiveUntil: null,
+    contextTier: 'standard-api',
+    contextRule: { kind: 'fixed' },
+    ratesPerMillion: {
+      input: options.input,
+      output: options.output,
+      reasoning: null,
+      'cache-read': options.cacheRead,
+      // Claude transcripts preserve total cache writes but pricing differs by cache lifetime.
+      'cache-write': null
+    },
+    cacheWriteRatesPerMillion: {
+      fiveMinute: options.input * 1.25,
+      oneHour: options.input * 2
+    },
+    source: {
+      title: 'Anthropic Claude API pricing',
+      url: options.sourceUrl,
+      retrievedAt: '2026-08-28'
+    }
+  };
+}
 
 const OPENCODE_GO_SOURCE = {
   title: 'OpenCode Go model pricing',
@@ -105,6 +197,11 @@ const OPENCODE_GO_SOURCE = {
 const XAI_PRICING_SOURCE = {
   title: 'xAI API model pricing',
   url: 'https://docs.x.ai/developers/pricing',
+  retrievedAt: '2026-08-28'
+};
+const OPENAI_GPT_56_SOURCE = {
+  title: 'OpenAI GPT-5.6 pricing',
+  url: 'https://openai.com/index/gpt-5-6/',
   retrievedAt: '2026-08-28'
 };
 const OPEN_CODE_GO_SOURCE_PATH = 'packages/web/src/content/docs/go.mdx';
@@ -224,6 +321,18 @@ export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
   version: '2026-08-28',
   entries: [
     ...ANTHROPIC_PRICING_CATALOG.entries,
+    ...openAiGpt56Entries('gpt-5.6-sol', [
+      ['2026-07-09T00:00:00.000Z', '2026-08-21T00:00:00.000Z', 5, 30],
+      ['2026-08-21T00:00:00.000Z', null, 4, 20]
+    ]),
+    ...openAiGpt56Entries('gpt-5.6-terra', [
+      ['2026-07-09T00:00:00.000Z', '2026-07-30T00:00:00.000Z', 2.5, 15],
+      ['2026-07-30T00:00:00.000Z', null, 2, 12]
+    ]),
+    ...openAiGpt56Entries('gpt-5.6-luna', [
+      ['2026-07-09T00:00:00.000Z', '2026-07-30T00:00:00.000Z', 1, 6],
+      ['2026-07-30T00:00:00.000Z', null, 0.2, 1.2]
+    ]),
     ...OPEN_CODE_FLAT_MODELS.map(([model, input, output, cacheRead, cacheWrite]) =>
       openCodeGoEntry(model, 'standard', input, output, cacheRead, cacheWrite ?? null, {
         kind: 'fixed'
@@ -317,6 +426,51 @@ export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
     })
   ]
 };
+
+type OpenAiPricePeriod = [
+  effectiveFrom: string,
+  effectiveUntil: string | null,
+  input: number,
+  output: number
+];
+
+function openAiGpt56Entries(
+  model: string,
+  periods: OpenAiPricePeriod[]
+): RetailPriceCatalogEntry[] {
+  return periods.flatMap(([effectiveFrom, effectiveUntil, input, output]) => {
+    const versionDate = effectiveFrom.slice(0, 10);
+    const entry = (tier: 'standard' | 'prompt-above-272k'): RetailPriceCatalogEntry => {
+      const long = tier === 'prompt-above-272k';
+      const tierInput = long ? input * 2 : input;
+      const tierOutput = long ? output * 1.5 : output;
+      return {
+        id: `openai-${model}-${tier}-${versionDate}`,
+        priceVersion: `openai-gpt-5.6-${versionDate}`,
+        providerId: 'codex',
+        billingDomainId: 'subscription',
+        canonicalModel: model,
+        aliases: [],
+        currency: 'USD',
+        effectiveFrom,
+        effectiveUntil,
+        contextTier: tier,
+        contextRule: long
+          ? { kind: 'prompt-tokens', minimumExclusive: 272_000 }
+          : { kind: 'prompt-tokens', maximumInclusive: 272_000 },
+        ratesPerMillion: {
+          input: tierInput,
+          output: tierOutput,
+          reasoning: tierOutput,
+          'cache-read': tierInput * 0.1,
+          'cache-write': tierInput * 1.25
+        },
+        source: OPENAI_GPT_56_SOURCE
+      };
+    };
+    return [entry('standard'), entry('prompt-above-272k')];
+  });
+}
 
 function openCodeGoEntry(
   model: string,
@@ -464,12 +618,35 @@ function priceObservation(
     {
       tokenKind: 'cache-read',
       tokens: normalized.tokenSemantics.cacheRead === 'separate' ? normalized.cacheReadTokens : 0
-    },
-    {
-      tokenKind: 'cache-write',
-      tokens: normalized.tokenSemantics.cacheWrite === 'separate' ? normalized.cacheWriteTokens : 0
     }
   ];
+  const cacheWriteTokens =
+    normalized.tokenSemantics.cacheWrite === 'separate' ? normalized.cacheWriteTokens : 0;
+  const exactCacheWriteItems =
+    cacheWriteTokens > 0 && normalized.cacheWriteTokenBreakdown && entry.cacheWriteRatesPerMillion
+      ? [
+          {
+            tokenKind: 'cache-write' as const,
+            tokens: normalized.cacheWriteTokenBreakdown.fiveMinute,
+            ratePerMillion: entry.cacheWriteRatesPerMillion.fiveMinute
+          },
+          {
+            tokenKind: 'cache-write' as const,
+            tokens: normalized.cacheWriteTokenBreakdown.oneHour,
+            ratePerMillion: entry.cacheWriteRatesPerMillion.oneHour
+          }
+        ].filter((item) => item.tokens > 0)
+      : null;
+  if (
+    cacheWriteTokens > 0 &&
+    entry.ratesPerMillion['cache-write'] === null &&
+    !exactCacheWriteItems
+  ) {
+    return unavailable('pricing-tier-ambiguous');
+  }
+  if (cacheWriteTokens > 0 && !exactCacheWriteItems) {
+    billableTokens.push({ tokenKind: 'cache-write', tokens: cacheWriteTokens });
+  }
   const nonZero = billableTokens.filter((item) => item.tokens > 0);
   if (nonZero.some((item) => entry.ratesPerMillion[item.tokenKind] === null)) {
     return unavailable(
@@ -484,6 +661,14 @@ function priceObservation(
       amount: preciseMoney((item.tokens * ratePerMillion) / 1_000_000)
     };
   });
+  if (exactCacheWriteItems) {
+    lineItems.push(
+      ...exactCacheWriteItems.map((item) => ({
+        ...item,
+        amount: preciseMoney((item.tokens * item.ratePerMillion) / 1_000_000)
+      }))
+    );
+  }
   const pricedTokens = lineItems.reduce((total, item) => total + item.tokens, 0);
   if (pricedTokens !== normalized.recordedTokens) return unavailable('token-kinds-incomplete');
   const amount = preciseMoney(lineItems.reduce((total, item) => total + item.amount, 0));
@@ -511,6 +696,9 @@ function priceObservation(
         effectiveUntil: entry.effectiveUntil,
         currency: entry.currency,
         ratesPerMillion: { ...entry.ratesPerMillion },
+        ...(entry.cacheWriteRatesPerMillion
+          ? { cacheWriteRatesPerMillion: { ...entry.cacheWriteRatesPerMillion } }
+          : {}),
         sourceUrl: entry.source.url,
         contextTier: entry.contextTier
       }

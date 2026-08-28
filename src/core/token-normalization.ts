@@ -19,6 +19,24 @@ export function normalizeTokenObservation(
   const reasoningTokens = tokenCount(observation.reasoningTokens ?? 0, 'reasoningTokens');
   const cacheReadTokens = tokenCount(observation.cacheReadTokens, 'cacheReadTokens');
   const cacheWriteTokens = tokenCount(observation.cacheWriteTokens, 'cacheWriteTokens');
+  const cacheWriteTokenBreakdown = observation.cacheWriteTokenBreakdown
+    ? {
+        fiveMinute: tokenCount(
+          observation.cacheWriteTokenBreakdown.fiveMinute,
+          'cacheWriteTokenBreakdown.fiveMinute'
+        ),
+        oneHour: tokenCount(
+          observation.cacheWriteTokenBreakdown.oneHour,
+          'cacheWriteTokenBreakdown.oneHour'
+        )
+      }
+    : null;
+  if (
+    cacheWriteTokenBreakdown &&
+    cacheWriteTokenBreakdown.fiveMinute + cacheWriteTokenBreakdown.oneHour !== cacheWriteTokens
+  ) {
+    throw new Error('cacheWriteTokenBreakdown must equal cacheWriteTokens');
+  }
   const tokenSemantics = observation.tokenSemantics ?? LEGACY_TOKEN_SEMANTICS;
   const categorizedTokens =
     inputTokens +
@@ -30,14 +48,31 @@ export function normalizeTokenObservation(
     observation.sourceReportedTotalTokens,
     'sourceReportedTotalTokens'
   );
+  const reconciledRemainderTokens = nullableTokenCount(
+    observation.reconciledRemainderTokens,
+    'reconciledRemainderTokens'
+  );
+  if (sourceReportedTotalTokens !== null && reconciledRemainderTokens !== null) {
+    throw new Error(
+      'sourceReportedTotalTokens and reconciledRemainderTokens are mutually exclusive'
+    );
+  }
   if (sourceReportedTotalTokens !== null && sourceReportedTotalTokens < categorizedTokens) {
     throw new Error(
       'sourceReportedTotalTokens must be greater than or equal to categorized tokens'
     );
   }
+  if (reconciledRemainderTokens !== null && categorizedTokens !== 0) {
+    throw new Error('reconciledRemainderTokens must not contain categorized tokens');
+  }
   const totalDerivation =
-    sourceReportedTotalTokens !== null ? ('source-reported' as const) : ('categorized' as const);
-  const recordedTokens = sourceReportedTotalTokens ?? categorizedTokens;
+    sourceReportedTotalTokens !== null
+      ? ('source-reported' as const)
+      : reconciledRemainderTokens !== null
+        ? ('reconciled-remainder' as const)
+        : ('categorized' as const);
+  const recordedTokens =
+    sourceReportedTotalTokens ?? reconciledRemainderTokens ?? categorizedTokens;
   const inferredModelAttribution = inferModelAttribution(observation.model);
   const modelAttribution =
     inferredModelAttribution === 'unclassified'
@@ -55,7 +90,9 @@ export function normalizeTokenObservation(
     reasoningTokens,
     cacheReadTokens,
     cacheWriteTokens,
+    cacheWriteTokenBreakdown,
     sourceReportedTotalTokens,
+    reconciledRemainderTokens,
     tokenSemantics,
     modelAttribution,
     timePrecision: observation.timePrecision ?? 'unknown',
