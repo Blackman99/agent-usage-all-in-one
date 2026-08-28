@@ -300,6 +300,8 @@ test('renders Codex quota without duplicating Token detail and keeps the actiona
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Codex' });
   await expect(provider.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible();
+  await expect(page.locator('.risk-banner')).toHaveCount(0);
+  await expect(page.getByText('Connection needs attention')).toHaveCount(0);
   await expect(provider.getByText('5 hour', { exact: true })).toBeVisible();
   await expect(provider.getByText('Week', { exact: true })).toBeVisible();
   await expectQuotaShowsOnlyReset(provider, 2);
@@ -775,14 +777,11 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expectProviderHasNoTokenDetail(provider);
   await expect(page.getByRole('heading', { name: 'Recent usage summary' })).toHaveCount(0);
   const risk = page.getByRole('region', { name: 'Capacity outlook' });
-  await expect(risk).toContainText('20% remaining');
-  await expect(risk).toContainText('Official account');
-  await expect(risk).toContainText('Aug 28');
+  await expect(risk).toHaveCount(0);
   await expect(page.getByText('Recommended agent')).toHaveCount(0);
   await expect(page.getByText('Advice only · never switches agents')).toHaveCount(0);
 
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await expect(risk).toHaveCount(0);
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByRole('heading', { name: 'Tokens & model costs' })).toBeVisible();
   await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('700');
@@ -1013,12 +1012,17 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   expect(darkBackground.image).toBe('none');
   expect(darkBackground.value).not.toBe(lightBackground.value);
   expect(darkBackground.color).not.toBe(lightBackground.color);
-  expect(
-    await page
-      .locator('picture[data-provider-logo="opencode-go"] img')
-      .first()
-      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
-  ).toBe('/brands/opencode-dark.svg');
+  await expect
+    .poll(() =>
+      page
+        .locator('picture[data-provider-logo="opencode-go"] img')
+        .first()
+        .evaluate((image) => {
+          const source = (image as HTMLImageElement).currentSrc;
+          return source ? new URL(source).pathname : '';
+        })
+    )
+    .toBe('/brands/opencode-dark.svg');
   expect(externalRequests).toEqual([]);
 });
 

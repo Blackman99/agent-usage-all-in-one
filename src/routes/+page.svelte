@@ -816,50 +816,6 @@
       : (candidates?.[0] ?? null);
   }
 
-  function actionableRisk(
-    currentOverview: UsageOverview,
-    report: DoctorReport | null,
-    currentLocale: Locale
-  ): { title: string; detail: string; target: string | null } | null {
-    const degradedConnector = report?.connectors.find(
-      (diagnostic) => diagnostic.status === 'degraded'
-    );
-    if (degradedConnector) {
-      return {
-        title: `${degradedConnector.id} · ${translate(currentLocale, 'connectionNeedsAttention')}`,
-        detail:
-          diagnosticRecovery(degradedConnector) ?? translate(currentLocale, 'reviewInSettings'),
-        target: `diagnostic:${degradedConnector.id}`
-      };
-    }
-    const staleDomain = currentOverview.providers
-      .flatMap((provider) => provider.billingDomains.map((domain) => ({ provider, domain })))
-      .find(({ provider, domain }) => (domain.freshness ?? provider.freshness).status === 'stale');
-    if (staleDomain) {
-      return {
-        title: `${staleDomain.provider.displayName} · ${staleDomain.domain.displayName} · ${translate(currentLocale, 'stale')}`,
-        detail: translate(currentLocale, 'reviewInSettings'),
-        target: diagnosticTargetForProvider(report, staleDomain.provider.id, staleDomain.domain.id)
-      };
-    }
-    const constrained = currentOverview.riskSummary?.mostConstrained;
-    if (
-      constrained &&
-      (constrained.remainingPercent <= 20 || constrained.forecast?.willLastUntilReset === false)
-    ) {
-      return {
-        title: `${constrained.displayName} · ${constrained.label}`,
-        detail: `${formatNumber(constrained.remainingPercent)}% ${translate(currentLocale, 'remaining')} · ${authorityLabel(constrained.authority ?? 'unavailable')} · ${formatReset(constrained.observedAt ?? null)}`,
-        target: diagnosticTargetForProvider(
-          report,
-          constrained.providerId,
-          constrained.billingDomainId
-        )
-      };
-    }
-    return null;
-  }
-
   function formatMoney(amount: number | null, currency: string): string {
     if (amount === null) return '—';
     return new Intl.NumberFormat(locale, {
@@ -1052,7 +1008,6 @@
     {:else if overviewError && !overview}
       <div class="state error" role="alert">{t('error')}</div>
     {:else if overview}
-      {@const risk = actionableRisk(overview, diagnostics, locale)}
       {@const overviewTokenEvidence = overviewTokenDisplayEvidence(overview)}
       {#if refreshError}
         <div class="inline-error" role="status">{t('refreshUnavailable')}</div>
@@ -1089,15 +1044,6 @@
           role="tabpanel"
           aria-labelledby="agent-usage-tab"
         >
-          {#if risk}
-            <section class="risk-banner" aria-label={t('riskOverview')}>
-              <div>
-                <strong>{risk.title}</strong>
-                <span>{risk.detail}</span>
-              </div>
-              <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
-            </section>
-          {/if}
           <section class="providers" aria-label={t('providersLabel')}>
             {#each displayProviders(overview, connectors) as provider (provider.id)}
               {@const logo = providerLogoSources(provider.id)}
@@ -2644,30 +2590,6 @@
     color: #eef2ff;
   }
 
-  .risk-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    margin-bottom: 18px;
-    padding: 12px 14px;
-    border: 1px solid var(--warning-border);
-    border-radius: 13px;
-    background: var(--warning-bg);
-    color: var(--warning-text);
-  }
-
-  .risk-banner > div {
-    display: grid;
-    gap: 4px;
-  }
-
-  .risk-banner span {
-    color: var(--warning-text);
-    font-size: 0.74rem;
-  }
-
-  .risk-banner button,
   .degraded button {
     min-height: 32px;
     padding: 0 11px;
@@ -3617,7 +3539,6 @@
     color: var(--text);
   }
 
-  .risk-banner span,
   .degraded code {
     color: var(--warning-text);
   }
@@ -3645,7 +3566,6 @@
   .ranking-value small,
   .unclassified-usage > strong,
   .unclassified-usage > span,
-  .risk-banner span,
   .privacy-section > div > p:not(.eyebrow),
   .privacy-section small,
   .diagnostics-grid span,
