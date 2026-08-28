@@ -1,7 +1,8 @@
 # Issue Tracker Convention
 
-This repository uses local Markdown as its issue tracker because it has no
-configured remote tracker.
+New public work uses GitHub Issues in `Blackman99/agent-usage-all-in-one`.
+Historical local Markdown tickets remain the durable record for pre-publication
+efforts:
 
 - Each effort is stored under `.scratch/<effort-slug>/`.
 - The effort specification is `.scratch/<effort-slug>/spec.md`.
@@ -11,6 +12,5 @@ configured remote tracker.
 - Specifications and tickets are repository artifacts and remain versioned.
 - Do not combine multiple tickets into one file.
 
-If a remote tracker is configured later, record an explicit migration decision
-before publishing new work there. Existing local ticket identifiers remain
-stable historical references.
+ADR 010 records the migration decision. Do not recreate historical tickets on
+GitHub; cite their stable local identifiers when later work depends on them.

@@ -834,8 +834,7 @@
     segment: UsageOverview['workbench']['trend']['buckets'][number]['segments'][number],
     metric: 'tokens' | 'retail-equivalent'
   ): number | null {
-    if (metric === 'tokens') return segment.recordedTokens;
-    return segment.retailEquivalent.amount ?? segment.reportedEstimate?.amount ?? null;
+    return metric === 'tokens' ? segment.recordedTokens : segment.retailEquivalent.amount;
   }
 
   function trendMaximum(
@@ -929,14 +928,10 @@
     segment: UsageOverview['workbench']['trend']['buckets'][number]['segments'][number],
     metric: 'tokens' | 'retail-equivalent'
   ): string {
-    const cost =
-      segment.retailEquivalent.amount !== null
-        ? segment.retailEquivalent
-        : (segment.reportedEstimate ?? segment.retailEquivalent);
     const value =
       metric === 'tokens'
         ? `${formatNumber(segment.recordedTokens)} ${t('tokens')}`
-        : formatMoney(cost.amount, cost.currency);
+        : formatMoney(segment.retailEquivalent.amount, segment.retailEquivalent.currency);
     const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
     const authorities =
       segment.authorities && segment.authorities.length > 0
@@ -976,9 +971,7 @@
     metric: 'tokens' | 'retail-equivalent'
   ) {
     const ids =
-      metric === 'tokens'
-        ? workbench.modelRanking.byTokens
-        : workbench.modelRanking.byRetailEquivalent;
+      metric === 'tokens' ? workbench.modelRanking.byTokens : workbench.modelRanking.byCost;
     return ids.flatMap((id) => {
       const entry = workbench.modelRanking.entries.find((candidate) => candidate.id === id);
       return entry ? [entry] : [];
@@ -1012,6 +1005,7 @@
 
 <svelte:head>
   <title>Agent Usage</title>
+  <link rel="icon" href="/brand/agent-usage-logo.svg" />
   <meta
     name="description"
     content="A private local dashboard for coding-agent quota, token, and cost usage."
@@ -1022,12 +1016,13 @@
 
 {#key locale}
   <main class="shell" inert={settingsOpen || selectedModelEntry !== null}>
-    <header>
-      <div>
-        <p class="eyebrow">{t('eyebrow')}</p>
-        <h1>{t('title')}</h1>
-        <p class="subtitle">{t('subtitle')}</p>
-      </div>
+    <header class="product-banner">
+      <img
+        class="product-banner-art"
+        src="/brand/agent-usage-banner.svg"
+        alt="Agent Usage — one local view for quota, tokens, and equivalent API cost"
+      />
+      <h1 class="visually-hidden">{t('title')}</h1>
       <div class="header-actions">
         <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
           {t('settings')}
@@ -2220,6 +2215,9 @@
                     bucket.retailEquivalent.status === 'available'
                       ? bucket.retailEquivalent
                       : (bucket.reportedEstimate ?? bucket.retailEquivalent)}
+                  {@const bucketCostIsReported =
+                    bucket.retailEquivalent.status !== 'available' &&
+                    bucket.reportedEstimate?.status === 'available'}
                   <tr>
                     <td>{bucket.label}</td>
                     {#if bucket.gap}
@@ -2235,7 +2233,11 @@
                         {displayAuthorities(bucket.authorities)} ·
                         {formatReset(bucket.lastObservedAt ?? null)}
                         {#if bucketCost.status === 'available'}
-                          <br />{displayAuthorities(bucketCost.authorities)} ·
+                          <br />{bucketCostIsReported
+                            ? t('providerReportedEstimate')
+                            : t('apiRetailEquivalent')} · {displayAuthorities(
+                            bucketCost.authorities
+                          )} ·
                           {formatReset(bucketCost.observedAt ?? null)}
                         {/if}
                       </td>
@@ -2306,11 +2308,28 @@
   }
 
   header {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 32px;
     margin-bottom: 42px;
+  }
+
+  .product-banner-art {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid #263556;
+    border-radius: 28px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .eyebrow,
@@ -2329,14 +2348,6 @@
     font-weight: 620;
     letter-spacing: -0.065em;
     line-height: 0.92;
-  }
-
-  .subtitle {
-    max-width: 540px;
-    margin: 20px 0 0;
-    color: #a9b0bf;
-    font-size: 1.02rem;
-    line-height: 1.6;
   }
 
   button {
@@ -2359,7 +2370,9 @@
   .header-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 8px;
+    margin-top: 16px;
   }
 
   .locale-toggle,
@@ -3940,7 +3953,6 @@
   .domain-tabs button,
   .eyebrow,
   .section-label,
-  .subtitle,
   .usage-toolbar p,
   .usage-headline > span,
   .usage-headline > small,

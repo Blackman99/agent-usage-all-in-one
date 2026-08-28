@@ -629,6 +629,7 @@ export interface WorkbenchUnclassifiedUsage {
 
 export interface WorkbenchModelRanking {
   byTokens: string[];
+  byCost: string[];
   byRetailEquivalent: string[];
   entries: WorkbenchModelEntry[];
   unclassified: WorkbenchUnclassifiedUsage[];

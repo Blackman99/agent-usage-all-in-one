@@ -79,7 +79,10 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Model ranking identity**: The tuple of Provider, billing domain, and model.
   Matching model names from different identities remain separate ranking rows.
 - **Model ranking**: The selected-window Top 5 known model identities, ordered
-  deterministically by recorded Tokens or available API retail equivalent.
+  deterministically by recorded Tokens or explicitly labelled cost evidence.
+  Cost order prefers available API retail equivalent and otherwise uses a
+  Provider/client-reported estimate without relabelling its purpose. A strict
+  API retail-equivalent order remains separately available in the read model.
   Unclassified usage remains visible beside the ranking and never occupies it.
 - **Trend gap**: An hourly or daily interval with no Token observation. It stays
   visibly discontinuous; cost evidence does not fabricate a Token observation.

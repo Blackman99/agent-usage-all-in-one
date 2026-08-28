@@ -148,7 +148,7 @@ describe('local transcript source reconciliation', () => {
     expect(model?.retailEquivalent.status).toBe('unavailable');
     expect(model?.reportedEstimate).toMatchObject({ status: 'available', amount: 0.0191 });
     expect(model?.reportedShare).toBe(1);
-    expect(overview.workbench.modelRanking.byRetailEquivalent[0]).toBe(model?.id);
+    expect(overview.workbench.modelRanking.byCost[0]).toBe(model?.id);
     expect(model?.trend.find((bucket) => !bucket.gap)?.reportedEstimate).toMatchObject({
       status: 'available',
       amount: 0.0191

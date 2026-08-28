@@ -1,7 +1,25 @@
 {
   "name": "agent-usage-all-in-one",
   "version": "0.1.0",
-  "private": true,
+  "description": "Local-first quota, token, and equivalent API cost dashboard for coding agents.",
+  "license": "MIT",
+  "author": "Agent Usage contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Blackman99/agent-usage-all-in-one.git"
+  },
+  "homepage": "https://github.com/Blackman99/agent-usage-all-in-one#readme",
+  "bugs": {
+    "url": "https://github.com/Blackman99/agent-usage-all-in-one/issues"
+  },
+  "keywords": [
+    "codex",
+    "claude-code",
+    "opencode",
+    "grok",
+    "token-usage",
+    "developer-tools"
+  ],
   "type": "module",
   "bin": {
     "agent-usage": "dist/cli.js"
@@ -10,8 +28,18 @@
     "dist",
     "README.md",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_LICENSES.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md",
+    "docs/open-source.md",
+    "static/brand"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=24"
   },
@@ -25,6 +53,10 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:package": "node scripts/package-smoke.mjs",
+    "licenses:generate": "node scripts/generate-third-party-licenses.mjs",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm build && changeset publish",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -36,6 +68,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.1",
     "@eslint/js": "latest",
     "@playwright/test": "latest",
     "@sveltejs/adapter-static": "latest",

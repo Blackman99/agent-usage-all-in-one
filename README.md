@@ -1,4 +1,10 @@
+![Agent Usage banner](static/brand/agent-usage-banner.svg)
+
 # Agent Usage
+
+[![CI](https://github.com/Blackman99/agent-usage-all-in-one/actions/workflows/ci.yml/badge.svg)](https://github.com/Blackman99/agent-usage-all-in-one/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/agent-usage-all-in-one.svg)](https://www.npmjs.com/package/agent-usage-all-in-one)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Agent Usage 是一个 macOS 优先、完全本地运行的 coding-agent 用量中心。一次启动即可统一查看 Codex、Claude Code、OpenCode Go 与 Grok 的额度、刷新时间、Token、费用、历史、预测和诊断；它只给出建议，不会自动切换 agent。
 
@@ -33,7 +39,14 @@ pnpm dev
 
 ## 安装与启动
 
-要求 macOS 与 Node.js 24 或更高版本。P0 tarball 可按以下方式安装：
+要求 macOS 与 Node.js 24 或更高版本。发布版可直接安装：
+
+```bash
+npm install --global agent-usage-all-in-one
+agent-usage
+```
+
+从源码构建 tarball：
 
 ```bash
 pnpm install
@@ -122,4 +135,8 @@ Agent Usage is a private local macOS dashboard and CLI for Codex, Claude Code, O
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). 贡献指南见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，
+安全报告见 [`SECURITY.md`](SECURITY.md)，完整依赖许可证与改编说明见
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)、
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和
+[`docs/open-source.md`](docs/open-source.md)。

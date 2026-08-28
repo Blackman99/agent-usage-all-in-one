@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Usage logo</title>
+  <desc id="desc">Four agent nodes orbit a rising usage meter.</desc>
+  <defs>
+    <linearGradient id="bg" x1="12" y1="8" x2="116" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18264d"/>
+      <stop offset="1" stop-color="#090d18"/>
+    </linearGradient>
+    <linearGradient id="meter" x1="42" y1="94" x2="88" y2="34" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7c8dff"/>
+      <stop offset="1" stop-color="#69e4c6"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#bg)"/>
+  <circle cx="64" cy="64" r="43" fill="none" stroke="#7180ad" stroke-opacity=".38" stroke-width="3" stroke-dasharray="7 8"/>
+  <circle cx="64" cy="21" r="7" fill="#f19a6b"/>
+  <circle cx="107" cy="64" r="7" fill="#8d9cff"/>
+  <circle cx="64" cy="107" r="7" fill="#71d8b8"/>
+  <circle cx="21" cy="64" r="7" fill="#e4e8f3"/>
+  <rect x="39" y="70" width="10" height="24" rx="5" fill="url(#meter)" opacity=".72"/>
+  <rect x="59" y="53" width="10" height="41" rx="5" fill="url(#meter)" opacity=".88"/>
+  <rect x="79" y="34" width="10" height="60" rx="5" fill="url(#meter)"/>
+</svg>

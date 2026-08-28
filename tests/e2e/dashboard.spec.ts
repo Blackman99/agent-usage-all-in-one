@@ -94,6 +94,10 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   });
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.goto(freshLaunch.stdout.trim());
+  await expect(page.locator('.product-banner-art')).toHaveAttribute(
+    'src',
+    '/brand/agent-usage-banner.svg'
+  );
 
   const mainViews = page.getByRole('tablist', { name: 'Main views' });
   const agentUsageTab = mainViews.getByRole('tab', { name: 'Agent usage' });
@@ -1894,6 +1898,7 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
   );
   return {
     byTokens: entries.slice(0, 5).map((entry) => entry.id),
+    byCost: [entries[1], entries[3], entries[2], entries[0], entries[4]].map((entry) => entry.id),
     byRetailEquivalent: [entries[1], entries[3], entries[2], entries[0], entries[4]].map(
       (entry) => entry.id
     ),

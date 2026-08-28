@@ -2869,6 +2869,20 @@ function buildWorkbenchModelRanking(
       right.tokenTotals.total - left.tokenTotals.total || left.id.localeCompare(right.id)
   );
   const byRetailEquivalent = [...entries].sort((left, right) => {
+    const leftAvailable = left.retailEquivalent.status === 'available';
+    const rightAvailable = right.retailEquivalent.status === 'available';
+    if (leftAvailable !== rightAvailable) return leftAvailable ? -1 : 1;
+    if (leftAvailable && rightAvailable) {
+      const amountDifference =
+        (right.retailEquivalent.amount ?? 0) - (left.retailEquivalent.amount ?? 0);
+      if (amountDifference !== 0) return amountDifference;
+    } else {
+      const tokenDifference = right.tokenTotals.total - left.tokenTotals.total;
+      if (tokenDifference !== 0) return tokenDifference;
+    }
+    return left.id.localeCompare(right.id);
+  });
+  const byCost = [...entries].sort((left, right) => {
     const leftCost =
       left.retailEquivalent.status === 'available' ? left.retailEquivalent : left.reportedEstimate;
     const rightCost =
@@ -2913,6 +2927,7 @@ function buildWorkbenchModelRanking(
     );
   return {
     byTokens: byTokens.slice(0, 5).map((entry) => entry.id),
+    byCost: byCost.slice(0, 5).map((entry) => entry.id),
     byRetailEquivalent: byRetailEquivalent.slice(0, 5).map((entry) => entry.id),
     entries: byTokens,
     unclassified
