@@ -66,6 +66,7 @@
     document.documentElement.lang = locale;
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     selectedWindow = storedWindow();
+    selectedCurrency = storedCurrency();
     await Promise.all([
       refresh(),
       loadConnectors(),
@@ -633,6 +634,11 @@
   async function selectCurrency(currency: 'CNY' | 'USD'): Promise<void> {
     if (selectedCurrency === currency) return;
     selectedCurrency = currency;
+    try {
+      localStorage.setItem('agent-usage:comparison-currency', currency);
+    } catch {
+      // A disabled local preference store must not block usage queries.
+    }
     loading = true;
     await loadOverview();
   }
@@ -643,6 +649,15 @@
       return stored === '24h' || stored === '7d' || stored === '30d' ? stored : '7d';
     } catch {
       return '7d';
+    }
+  }
+
+  function storedCurrency(): 'CNY' | 'USD' {
+    try {
+      const stored = localStorage.getItem('agent-usage:comparison-currency');
+      return stored === 'USD' || stored === 'CNY' ? stored : 'CNY';
+    } catch {
+      return 'CNY';
     }
   }
 
@@ -769,9 +784,15 @@
 
   function diagnosticTargetForProvider(
     report: DoctorReport | null,
-    providerId: string
+    providerId: string,
+    billingDomainId?: string
   ): string | null {
-    const diagnostic = report?.connectors.find((candidate) => candidate.providerId === providerId);
+    const candidates = report?.connectors.filter(
+      (candidate) => candidate.providerId === providerId
+    );
+    const diagnostic =
+      candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ??
+      candidates?.[0];
     return diagnostic ? `diagnostic:${diagnostic.id}` : null;
   }
 
@@ -798,7 +819,11 @@
       return {
         title: `${staleProvider.displayName} · ${translate(currentLocale, 'stale')}`,
         detail: translate(currentLocale, 'reviewInSettings'),
-        target: diagnosticTargetForProvider(report, staleProvider.id)
+        target: diagnosticTargetForProvider(
+          report,
+          staleProvider.id,
+          activeBillingDomain(staleProvider, selectedBillingDomains[staleProvider.id]).id
+        )
       };
     }
     const constrained = currentOverview.riskSummary?.mostConstrained;
@@ -809,7 +834,11 @@
       return {
         title: `${constrained.displayName} · ${constrained.label}`,
         detail: `${formatNumber(constrained.remainingPercent)}% ${translate(currentLocale, 'remaining')}`,
-        target: diagnosticTargetForProvider(report, constrained.providerId)
+        target: diagnosticTargetForProvider(
+          report,
+          constrained.providerId,
+          constrained.billingDomainId
+        )
       };
     }
     return null;
@@ -908,7 +937,33 @@
         ? `${formatNumber(segment.recordedTokens)} ${t('tokens')}`
         : formatMoney(segment.retailEquivalent.amount, segment.retailEquivalent.currency);
     const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
-    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}: ${value} · ${t('timePrecision')}: ${precision}`;
+    const authorities =
+      segment.authorities && segment.authorities.length > 0
+        ? segment.authorities.map(authorityLabel).join(' + ')
+        : authorityLabel('unavailable');
+    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}: ${value} · ${t('timePrecision')}: ${precision} · ${t('source')}: ${authorities} · ${formatReset(segment.lastObservedAt ?? null)}`;
+  }
+
+  function overviewTokenDisplayEvidence(currentOverview: UsageOverview): {
+    authorities: DataAuthority[];
+    lastObservedAt: string | null;
+  } {
+    const histories = currentOverview.providers.flatMap((provider) =>
+      provider.billingDomains.map((domain) => domain.history)
+    );
+    const authorities = [
+      ...new Set(histories.flatMap((history) => history.authorities ?? []))
+    ].sort();
+    const lastObservedAt = histories
+      .flatMap((history) => (history.lastObservedAt ? [history.lastObservedAt] : []))
+      .sort((left, right) => right.localeCompare(left))[0];
+    return { authorities, lastObservedAt: lastObservedAt ?? null };
+  }
+
+  function displayAuthorities(authorities: DataAuthority[] | undefined): string {
+    return authorities && authorities.length > 0
+      ? authorities.map(authorityLabel).join(' + ')
+      : authorityLabel('unavailable');
   }
 
   function rankedModels(
@@ -988,6 +1043,7 @@
       <div class="state error" role="alert">{t('error')}</div>
     {:else if overview}
       {@const risk = actionableRisk(overview, diagnostics, locale)}
+      {@const overviewTokenEvidence = overviewTokenDisplayEvidence(overview)}
       {#if refreshError}
         <div class="inline-error" role="status">{t('refreshUnavailable')}</div>
       {/if}
@@ -1036,6 +1092,10 @@
                     t('unknown')}
                 {/if}
               </small>
+              <small>
+                {t('source')}: {displayAuthorities(overviewTokenEvidence.authorities)} ·
+                {formatReset(overviewTokenEvidence.lastObservedAt)}
+              </small>
             </article>
             <article>
               <span>{t('apiRetailEquivalent')}</span>
@@ -1051,6 +1111,11 @@
                 {t('pricingCoverage')}:
                 {formatPercent(summary.apiRetailEquivalent.pricingCoverage)}
               </small>
+              <small>
+                {t('source')}: {displayAuthorities(
+                  overview.workbench.costs.retailEquivalent.authorities
+                )} · {formatReset(overview.workbench.costs.retailEquivalent.observedAt)}
+              </small>
             </article>
             <article>
               <span>{t('mostConstrained')}</span>
@@ -1064,6 +1129,8 @@
                   {formatNumber(summary.mostConstrained.remainingPercent)}% {t('remaining')} ·
                   {formatRelativeReset(summary.mostConstrained.resetsAt)} ·
                   {formatReset(summary.mostConstrained.resetsAt)}
+                  · {authorityLabel(summary.mostConstrained.authority ?? 'unavailable')} ·
+                  {formatReset(summary.mostConstrained.observedAt ?? null)}
                 {:else}
                   {t('notAvailable')}
                 {/if}
@@ -1087,6 +1154,10 @@
                   <b aria-label={tokenValueLabel(contribution.recordedTokens)}
                     >{formatCompactNumber(contribution.recordedTokens)}</b
                   >
+                  <small>
+                    {displayAuthorities(contribution.authorities)} ·
+                    {formatReset(contribution.lastObservedAt ?? null)}
+                  </small>
                 </span>
               {/each}
             </div>
@@ -1141,8 +1212,13 @@
                 <code>{providerHealthRecovery(provider)}</code>
                 <button
                   on:click={() =>
-                    openSettings(diagnosticTargetForProvider(diagnostics, provider.id))}
-                  >{t('reviewInSettings')}</button
+                    openSettings(
+                      diagnosticTargetForProvider(
+                        diagnostics,
+                        provider.id,
+                        activeBillingDomain(provider, selectedBillingDomains[provider.id]).id
+                      )
+                    )}>{t('reviewInSettings')}</button
                 >
               </div>
             {/if}
@@ -1363,44 +1439,47 @@
                     .map(aggregationTemporalityLabel)
                     .join(' + ') || t('unknown')}
                 </p>
-                <dl class="tokens">
-                  <div>
-                    <dt>{t('total')}</dt>
-                    <dd aria-label={tokenValueLabel(history.tokenTotals.total)}>
-                      {formatCompactNumber(history.tokenTotals.total)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('input')}</dt>
-                    <dd aria-label={tokenValueLabel(history.tokenTotals.input)}>
-                      {formatCompactNumber(history.tokenTotals.input)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('output')}</dt>
-                    <dd aria-label={tokenValueLabel(history.tokenTotals.output)}>
-                      {formatCompactNumber(history.tokenTotals.output)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('reasoning')}</dt>
-                    <dd aria-label={tokenValueLabel(history.tokenTotals.reasoning ?? 0)}>
-                      {formatCompactNumber(history.tokenTotals.reasoning ?? 0)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('cacheRead')}</dt>
-                    <dd aria-label={tokenValueLabel(history.tokenTotals.cacheRead)}>
-                      {formatCompactNumber(history.tokenTotals.cacheRead)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>{t('cacheWrite')}</dt>
-                    <dd aria-label={tokenValueLabel(history.tokenTotals.cacheWrite)}>
-                      {formatCompactNumber(history.tokenTotals.cacheWrite)}
-                    </dd>
-                  </div>
-                </dl>
+                <div class="token-total">
+                  <span>{t('total')}</span>
+                  <strong aria-label={tokenValueLabel(history.tokenTotals.total)}>
+                    {formatCompactNumber(history.tokenTotals.total)}
+                  </strong>
+                </div>
+                <details class="token-breakdown">
+                  <summary>{t('tokenBreakdown')}</summary>
+                  <dl class="tokens">
+                    <div>
+                      <dt>{t('input')}</dt>
+                      <dd aria-label={tokenValueLabel(history.tokenTotals.input)}>
+                        {formatCompactNumber(history.tokenTotals.input)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('output')}</dt>
+                      <dd aria-label={tokenValueLabel(history.tokenTotals.output)}>
+                        {formatCompactNumber(history.tokenTotals.output)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('reasoning')}</dt>
+                      <dd aria-label={tokenValueLabel(history.tokenTotals.reasoning ?? 0)}>
+                        {formatCompactNumber(history.tokenTotals.reasoning ?? 0)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('cacheRead')}</dt>
+                      <dd aria-label={tokenValueLabel(history.tokenTotals.cacheRead)}>
+                        {formatCompactNumber(history.tokenTotals.cacheRead)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('cacheWrite')}</dt>
+                      <dd aria-label={tokenValueLabel(history.tokenTotals.cacheWrite)}>
+                        {formatCompactNumber(history.tokenTotals.cacheWrite)}
+                      </dd>
+                    </div>
+                  </dl>
+                </details>
               {:else}
                 {@const telemetryCommand = tokenTelemetryCommand(provider.id, domain.id)}
                 <div class="token-unavailable">
@@ -1504,21 +1583,37 @@
                   <div>
                     <strong>{t('topModels')}</strong>
                     {#each history.models.slice(0, 3) as model (model.model)}
-                      <span
-                        >{model.model}<b aria-label={tokenValueLabel(model.tokenTotals.total)}
+                      <span>
+                        {model.model}<b aria-label={tokenValueLabel(model.tokenTotals.total)}
                           >{formatCompactNumber(model.tokenTotals.total)}</b
-                        ></span
-                      >
+                        >
+                        <small>
+                          {displayAuthorities(
+                            model.observations?.map((observation) => observation.authority) ??
+                              history.authorities
+                          )} · {formatReset(
+                            model.observations
+                              ?.map((observation) => observation.observedAt)
+                              .sort((left, right) => right.localeCompare(left))[0] ??
+                              history.lastObservedAt ??
+                              null
+                          )}
+                        </small>
+                      </span>
                     {/each}
                   </div>
                   <div>
                     <strong>{t('topDays')}</strong>
                     {#each history.days.slice(-3).reverse() as day (day.day)}
-                      <span
-                        >{day.day}<b aria-label={tokenValueLabel(day.tokenTotals.total)}
+                      <span>
+                        {day.day}<b aria-label={tokenValueLabel(day.tokenTotals.total)}
                           >{formatCompactNumber(day.tokenTotals.total)}</b
-                        ></span
-                      >
+                        >
+                        <small>
+                          {displayAuthorities(day.authorities)} ·
+                          {formatReset(day.lastObservedAt ?? null)}
+                        </small>
+                      </span>
                     {/each}
                   </div>
                 </div>
@@ -1570,6 +1665,10 @@
                   ? t('precisionHour')
                   : t('precisionDay')}</small
               >
+              <small>
+                {t('source')}: {displayAuthorities(overviewTokenEvidence.authorities)} ·
+                {formatReset(overviewTokenEvidence.lastObservedAt)}
+              </small>
             </article>
             {#each workbenchMetrics(workbench) as item (item.id)}
               <article data-testid={`workbench-${item.id}`}>
@@ -1742,6 +1841,10 @@
                         <strong>{model.model}</strong>
                         <small>{model.providerDisplayName} · {model.billingDomainDisplayName}</small
                         >
+                        <small>
+                          {displayAuthorities(model.authorities)} ·
+                          {formatReset(model.lastObservedAt)}
+                        </small>
                       </span>
                     </span>
                     <span class="ranking-value">
@@ -1760,6 +1863,10 @@
                           : t('notAvailable')}
                       </strong>
                       <small>{t('retailShare')}: {formatPercent(model.retailShare)}</small>
+                      <small>
+                        {displayAuthorities(model.retailEquivalent.authorities)} ·
+                        {formatReset(model.retailEquivalent.observedAt)}
+                      </small>
                     </span>
                   </button>
                 </li>
@@ -1775,6 +1882,9 @@
                       >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
                     >
                     <small>{formatPercent(item.tokenShare)}</small>
+                    <small>
+                      {displayAuthorities(item.authorities)} · {formatReset(item.lastObservedAt)}
+                    </small>
                   </span>
                 {/each}
               </div>
@@ -1849,6 +1959,15 @@
                     </label>
                   {/if}
                   <div class="connection-actions">
+                    {#if connector.state === 'connected' && connector.credentialOwner === 'agent-usage'}
+                      <button
+                        class="primary-action"
+                        disabled={pendingConnectorId === connector.id ||
+                          !secretInputs[connector.id]}
+                        on:click={() => configureConnector(connector.id, 'connect')}
+                        >{t('replaceCredential')}</button
+                      >
+                    {/if}
                     {#if connector.state === 'discovered' || connector.state === 'skipped'}
                       <button
                         class="primary-action"
@@ -2032,6 +2151,10 @@
               <b>{formatPercent(model.retailEquivalent.pricingCoverage)}</b></span
             >
           </div>
+          <p class="model-detail-evidence">
+            {t('source')}: {displayAuthorities(model.authorities)} ·
+            {formatReset(model.lastObservedAt)}
+          </p>
 
           <dl class="model-token-breakdown">
             <div>
@@ -2121,7 +2244,7 @@
               <thead>
                 <tr
                   ><th>{t('interval')}</th><th>{t('tokens')}</th><th>{t('apiRetailEquivalent')}</th
-                  ></tr
+                  ><th>{t('providerEvidence')}</th></tr
                 >
               </thead>
               <tbody>
@@ -2129,7 +2252,7 @@
                   <tr>
                     <td>{bucket.label}</td>
                     {#if bucket.gap}
-                      <td colspan="2">{t('gap')}</td>
+                      <td colspan="3">{t('gap')}</td>
                     {:else}
                       <td>{formatNumber(bucket.tokenTotals.total)}</td>
                       <td>
@@ -2139,6 +2262,14 @@
                               bucket.retailEquivalent.comparisonCurrency
                             )
                           : t('notAvailable')}
+                      </td>
+                      <td>
+                        {displayAuthorities(bucket.authorities)} ·
+                        {formatReset(bucket.lastObservedAt ?? null)}
+                        {#if bucket.retailEquivalent.status === 'available'}
+                          <br />{displayAuthorities(bucket.retailEquivalent.authorities)} ·
+                          {formatReset(bucket.retailEquivalent.observedAt ?? null)}
+                        {/if}
                       </td>
                     {/if}
                   </tr>
@@ -3141,6 +3272,42 @@
     font-size: 0.72rem;
   }
 
+  .token-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid rgba(122, 136, 164, 0.12);
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.018);
+  }
+
+  .token-total span,
+  .token-breakdown summary {
+    color: #858e9e;
+    font-size: 0.68rem;
+  }
+
+  .token-total strong {
+    color: #e6eaf1;
+    font-size: 1.18rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .token-breakdown {
+    margin-top: 8px;
+  }
+
+  .token-breakdown summary {
+    width: fit-content;
+    cursor: pointer;
+  }
+
+  .token-breakdown .tokens {
+    margin-top: 8px;
+  }
+
   .token-unavailable {
     display: grid;
     gap: 7px;
@@ -3397,8 +3564,8 @@
   }
 
   .history-rankings span {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
     color: #858e9e;
     font-size: 0.68rem;
@@ -3407,6 +3574,12 @@
   .history-rankings b {
     color: #d9deea;
     font-variant-numeric: tabular-nums;
+  }
+
+  .history-rankings small {
+    grid-column: 1 / -1;
+    color: #717b8c;
+    font-size: 0.6rem;
   }
 
   .tokens div {
@@ -3582,6 +3755,12 @@
   .model-detail-summary b {
     color: #e0e5ed;
     font-variant-numeric: tabular-nums;
+  }
+
+  .model-detail-evidence {
+    margin: -14px 0 0;
+    color: #8e98a8;
+    font-size: 0.7rem;
   }
 
   .model-token-breakdown {

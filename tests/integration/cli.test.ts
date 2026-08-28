@@ -154,7 +154,7 @@ describe('agent-usage CLI', () => {
       '0/100 classified; 100 unclassified; precision day; scope account-wide'
     );
     expect(textStatus.stdout).toContain(
-      'Summary (24h): 100 recorded tokens; API retail equivalent 4 USD; 0/100 classified'
+      'Summary (24h): 100 recorded tokens (source official-account at 2026-08-28T00:00:00.000Z); API retail equivalent 4 USD (source estimate at 2026-08-28T00:00:00.000Z); 0/100 classified'
     );
     expect(textStatus.stdout).toContain('actual 1 USD');
     expect(textStatus.stdout).toContain('actual unknown');

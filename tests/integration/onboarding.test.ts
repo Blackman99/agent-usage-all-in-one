@@ -159,6 +159,65 @@ describe('provider discovery and onboarding', () => {
     });
     repository.close();
   });
+
+  it('refreshes after every recovery action and replaces a connected managed credential', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-recovery-refresh-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const secretStore = new MemorySecretStore();
+    let collections = 0;
+    const application = new UsageApplication({
+      repository,
+      connectors: [
+        {
+          id: 'always-on',
+          async collect() {
+            collections += 1;
+            return {
+              provider: { id: 'always-on', displayName: 'Always on' },
+              billingDomains: [{ id: 'local', displayName: 'Local' }],
+              quotaBuckets: [],
+              usage: [],
+              costs: [],
+              observedAt: '2026-08-28T02:00:00.000Z'
+            };
+          }
+        }
+      ],
+      connectorDefinitions: [definitions.find((definition) => definition.id === 'managed-test')!],
+      discoveryProbe: {
+        async inspect() {
+          return {
+            installed: true,
+            binaryPath: '/usr/local/bin/managed-test',
+            officialCredentialPresent: false
+          };
+        }
+      },
+      secretStore,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await application.discoverConnectors();
+    await application.configureConnector('managed-test', {
+      action: 'connect',
+      secret: 'first-managed-secret'
+    });
+    await application.configureConnector('managed-test', {
+      action: 'connect',
+      secret: 'replacement-managed-secret'
+    });
+    expect(await application.configureConnector('managed-test', { action: 'retry' })).toMatchObject(
+      {
+        state: 'connected'
+      }
+    );
+    await application.configureConnector('managed-test', { action: 'skip' });
+
+    expect(collections).toBe(4);
+    expect(secretStore.values.get('connector:managed-test')).toBe('replacement-managed-secret');
+    repository.close();
+  });
 });
 
 const definitions: ConnectorDefinition[] = [

@@ -163,6 +163,15 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   expect(requestCounts.overview).toBeGreaterThan(beforeAction.overview);
   expect(requestCounts.doctor).toBeGreaterThan(beforeAction.doctor);
 
+  await xaiApi.getByRole('button', { name: 'Manage connection' }).click();
+  const xaiSettings = page.getByTestId('settings-connector-xai-api');
+  await xaiSettings
+    .getByRole('textbox', { name: /Management API key/ })
+    .fill('browser-replacement-key');
+  await xaiSettings.getByRole('button', { name: 'Replace credential' }).click();
+  expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-replacement-key' });
+  await page.getByRole('button', { name: 'Close settings' }).click();
+
   const openCode = page.getByTestId('connector-opencode-go');
   await openCode.getByRole('button', { name: 'Skip' }).click();
   await expect(openCode.getByText('Skipped')).toBeVisible();
@@ -455,6 +464,43 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-28T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [
+          {
+            id: 'grok',
+            providerId: 'grok',
+            billingDomainId: 'grok-build-subscription',
+            status: 'degraded',
+            category: 'unsupported',
+            message: 'Build usage unavailable.',
+            recovery: 'Open Grok Build and run /usage.',
+            affectedCoverage: ['quota'],
+            lastAttemptAt: '2026-08-28T02:00:00.000Z',
+            lastSuccessAt: null
+          },
+          {
+            id: 'xai-api',
+            providerId: 'grok',
+            billingDomainId: 'xai-api',
+            status: 'degraded',
+            category: 'unauthorized',
+            message: 'xAI API key rejected.',
+            recovery: 'Replace the xAI API key.',
+            affectedCoverage: ['tokens', 'actual-cost'],
+            lastAttemptAt: '2026-08-28T02:00:00.000Z',
+            lastSuccessAt: null
+          }
+        ],
+        providers: []
+      })
+    });
+  });
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -523,11 +569,16 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expect(provider).toContainText(/Scope:\s*This Mac only/);
   await expect(provider).toContainText(/Precision:\s*Event/);
   await expect(provider).toContainText(/Aggregation:\s*Delta/);
+  await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeHidden();
+  await provider.getByText('Token breakdown', { exact: true }).click();
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
   await expect(
     provider.getByText('Open Grok Build and run /usage, then retry refresh.')
   ).toBeVisible();
   await provider.getByRole('tab', { name: 'xAI API' }).click();
+  await provider.getByRole('button', { name: 'Review in settings' }).click();
+  await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
+  await page.getByRole('button', { name: 'Close settings' }).click();
   await expect(provider.getByText('1,742')).toBeVisible();
   await expect(provider).toContainText(/Scope:\s*Account-wide/);
   await expect(provider).toContainText(/Precision:\s*Billing period/);
@@ -707,6 +758,9 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(page.getByText('Advice only · never switches agents')).toHaveCount(0);
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByRole('heading', { name: 'Token & money workbench' })).toBeVisible();
+  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText(
+    'Source: Official account'
+  );
   await expect(workbench.getByTestId('workbench-actual')).toContainText('CN¥18.00');
   await expect(workbench.getByTestId('workbench-reported-estimate')).toContainText('CN¥0.03');
   await expect(workbench.getByTestId('workbench-retail-equivalent')).toContainText('CN¥9.00');
@@ -721,6 +775,11 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(trendTable).toContainText('Billing period');
   await page.reload();
   await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
+  await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
+  await expect(workbench.getByRole('button', { name: 'USD' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
   await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('3,000');
 });
 
@@ -771,6 +830,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(rows).toHaveCount(5);
   await expect(rows.first()).toContainText('shared-model');
   await expect(rows.first()).toContainText('Codex · Subscription');
+  await expect(rows.first()).toContainText('Local observation');
   await expect(rows.first()).toContainText('Unavailable');
   await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/openai.svg');
   await expect(ranking.getByText('Unclassified usage')).toBeVisible();
@@ -800,6 +860,9 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(detail).toContainText('2026-08-01 · Official fixture pricing');
   await expect(detail).toContainText('Local observation · Event');
   await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Gap');
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText(
+    'Local observation'
+  );
   await page.keyboard.press('Escape');
   await expect(detail).toBeHidden();
   await expect(fableRow).toBeFocused();
@@ -1476,6 +1539,8 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
           end: `2026-08-${String(index + 2).padStart(2, '0')}T00:00:00.000Z`,
           label: `Bucket ${index + 1}`,
           gap: index > 0,
+          authorities: index === 0 ? ['local-observation'] : [],
+          lastObservedAt: index === 0 ? '2026-08-28T00:30:00.000Z' : null,
           tokenTotals:
             index === 0 ? tokenTotals : { ...tokenTotals, total: 0, input: 0, output: 0 },
           retailEquivalent: {

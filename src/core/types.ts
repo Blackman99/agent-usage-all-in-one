@@ -267,6 +267,8 @@ export interface HistoryDay {
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
   costs: HistoryCost[];
+  authorities?: DataAuthority[];
+  lastObservedAt?: string | null;
 }
 
 export interface HistoryInterval {
@@ -277,6 +279,8 @@ export interface HistoryInterval {
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
   costs: HistoryCost[];
+  authorities?: DataAuthority[];
+  lastObservedAt?: string | null;
 }
 
 export interface HistoryCost {
@@ -460,6 +464,8 @@ export interface WorkbenchTrendSegment {
   recordedTokens: number;
   observationCount: number;
   timePrecisions: TokenTimePrecision[];
+  authorities?: DataAuthority[];
+  lastObservedAt?: string | null;
   retailEquivalent: {
     status: WorkbenchMoneyMetric['status'];
     amount: number | null;
@@ -500,10 +506,13 @@ export interface WorkbenchModelTrendBucket {
   label: string;
   gap: boolean;
   tokenTotals: TokenTotals;
+  authorities?: DataAuthority[];
+  lastObservedAt?: string | null;
   retailEquivalent: Pick<
     WorkbenchMoneyMetric,
     'status' | 'amount' | 'comparisonCurrency' | 'pricingCoverage'
-  >;
+  > &
+    Partial<Pick<WorkbenchMoneyMetric, 'authorities' | 'observedAt'>>;
 }
 
 export interface WorkbenchModelEntry {
@@ -551,6 +560,8 @@ export interface GlobalUsageContribution {
   billingDomainDisplayName: string;
   recordedTokens: number;
   tokenEvidence: TokenEvidence;
+  authorities?: DataAuthority[];
+  lastObservedAt?: string | null;
 }
 
 export interface GlobalUsageSummary {

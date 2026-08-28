@@ -1403,13 +1403,17 @@ export class SqliteUsageRepository implements UsageRepository {
         tokens: ReturnType<typeof zeroTokenTotals>;
         evidence: MutableTokenEvidence;
         costs: CostRow[];
+        authorities: Set<DataAuthority>;
+        lastObservedAt: string | null;
       }
     >();
     const intervals = buildHistoryIntervals(normalized).map((interval) => ({
       ...interval,
       tokens: zeroTokenTotals(),
       evidence: emptyTokenEvidence(),
-      costs: [] as CostRow[]
+      costs: [] as CostRow[],
+      authorities: new Set<DataAuthority>(),
+      lastObservedAt: null as string | null
     }));
     for (const row of usage) {
       authorities.add(row.authority);
@@ -1437,15 +1441,25 @@ export class SqliteUsageRepository implements UsageRepository {
       const daily = byDay.get(day) ?? {
         tokens: zeroTokenTotals(),
         evidence: emptyTokenEvidence(),
-        costs: []
+        costs: [],
+        authorities: new Set<DataAuthority>(),
+        lastObservedAt: null
       };
       addUsageRow(daily.tokens, row);
       addTokenEvidence(daily.evidence, row);
+      daily.authorities.add(row.authority);
+      if (!daily.lastObservedAt || row.observed_at > daily.lastObservedAt) {
+        daily.lastObservedAt = row.observed_at;
+      }
       byDay.set(day, daily);
       const interval = intervals[historyIntervalIndex(row.observed_at, normalized)];
       if (interval) {
         addUsageRow(interval.tokens, row);
         addTokenEvidence(interval.evidence, row);
+        interval.authorities.add(row.authority);
+        if (!interval.lastObservedAt || row.observed_at > interval.lastObservedAt) {
+          interval.lastObservedAt = row.observed_at;
+        }
       }
     }
     for (const cost of costs) {
@@ -1453,7 +1467,9 @@ export class SqliteUsageRepository implements UsageRepository {
       const daily = byDay.get(day) ?? {
         tokens: zeroTokenTotals(),
         evidence: emptyTokenEvidence(),
-        costs: []
+        costs: [],
+        authorities: new Set<DataAuthority>(),
+        lastObservedAt: null
       };
       if (cost.kind !== 'subscription' && cost.kind !== 'legacy-unknown') {
         daily.costs.push(cost);
@@ -1529,7 +1545,9 @@ export class SqliteUsageRepository implements UsageRepository {
           day,
           tokenTotals: daily.tokens,
           tokenEvidence: finishTokenEvidence(daily.evidence),
-          costs: summarizeCosts(daily.costs, daily.tokens.total)
+          costs: summarizeCosts(daily.costs, daily.tokens.total),
+          authorities: [...daily.authorities].sort(),
+          lastObservedAt: daily.lastObservedAt
         })),
       intervals: intervals.map((interval) => ({
         start: interval.start.toISOString(),
@@ -1538,7 +1556,9 @@ export class SqliteUsageRepository implements UsageRepository {
         gap: interval.evidence.observationCount === 0,
         tokenTotals: interval.tokens,
         tokenEvidence: finishTokenEvidence(interval.evidence),
-        costs: summarizeCosts(interval.costs, interval.tokens.total)
+        costs: summarizeCosts(interval.costs, interval.tokens.total),
+        authorities: [...interval.authorities].sort(),
+        lastObservedAt: interval.lastObservedAt
       })),
       costs: summarizeCosts(costs, tokenTotals.total),
       exchangeRates: [...exchangeRates.values()],
@@ -2139,7 +2159,9 @@ function buildGlobalSummary(
         billingDomainId: domain.id,
         billingDomainDisplayName: domain.displayName,
         recordedTokens: domain.history.tokenTotals.total,
-        tokenEvidence: domainEvidence
+        tokenEvidence: domainEvidence,
+        authorities: domain.history.authorities ?? [],
+        lastObservedAt: domain.history.lastObservedAt ?? null
       });
     }
   }
@@ -2213,6 +2235,8 @@ function buildTokenMoneyWorkbench(
           recordedTokens: interval.tokenEvidence.recordedTokens,
           observationCount: interval.tokenEvidence.observationCount,
           timePrecisions: interval.tokenEvidence.timePrecisions,
+          authorities: interval.authorities ?? [],
+          lastObservedAt: interval.lastObservedAt ?? null,
           retailEquivalent: {
             status: retailEquivalent.status,
             amount: retailEquivalent.amount,
@@ -2431,11 +2455,20 @@ function buildWorkbenchModelRanking(
             label: bucket.label,
             gap: observations.length === 0,
             tokenTotals,
+            authorities: [
+              ...new Set(observations.map((observation) => observation.authority))
+            ].sort(),
+            lastObservedAt:
+              [...observations].sort((left, right) =>
+                right.observedAt.localeCompare(left.observedAt)
+              )[0]?.observedAt ?? null,
             retailEquivalent: {
               status: intervalRetail.status,
               amount: intervalRetail.amount,
               comparisonCurrency,
-              pricingCoverage: intervalRetail.pricingCoverage
+              pricingCoverage: intervalRetail.pricingCoverage,
+              authorities: intervalRetail.authorities,
+              observedAt: intervalRetail.observedAt
             }
           };
         })

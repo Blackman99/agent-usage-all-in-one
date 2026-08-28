@@ -391,14 +391,36 @@ function formatOverview(overview: UsageOverview): string {
 
 function formatGlobalSummary(overview: UsageOverview): string {
   const summary = overview.globalSummary;
+  const tokenAuthorities = [
+    ...new Set(
+      overview.providers.flatMap((provider) =>
+        provider.billingDomains.flatMap((domain) => domain.history.authorities ?? [])
+      )
+    )
+  ].sort();
+  const tokenObservedAt = overview.providers
+    .flatMap((provider) =>
+      provider.billingDomains.flatMap((domain) =>
+        domain.history.lastObservedAt ? [domain.history.lastObservedAt] : []
+      )
+    )
+    .sort((left, right) => right.localeCompare(left))[0];
+  const tokenEvidence = formatEvidence(
+    tokenAuthorities.join('+') || 'unavailable',
+    tokenObservedAt
+  );
   const tokens =
     summary.recordedTokens === null
       ? 'recorded tokens unavailable'
-      : `${summary.recordedTokens} recorded tokens`;
+      : `${summary.recordedTokens} recorded tokens (${tokenEvidence})`;
+  const retailMetric = overview.workbench.costs.retailEquivalent;
   const retail =
     summary.apiRetailEquivalent.status === 'available' &&
     summary.apiRetailEquivalent.amount !== null
-      ? `${summary.apiRetailEquivalent.amount} ${summary.apiRetailEquivalent.currency}`
+      ? `${summary.apiRetailEquivalent.amount} ${summary.apiRetailEquivalent.currency} (${formatEvidence(
+          retailMetric.authorities.join('+') || 'unavailable',
+          retailMetric.observedAt
+        )})`
       : 'unavailable';
   const constrained = summary.mostConstrained
     ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label} (${summary.mostConstrained.remainingPercent}% remaining)`

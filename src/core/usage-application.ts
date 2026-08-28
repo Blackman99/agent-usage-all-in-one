@@ -629,7 +629,12 @@ export class UsageApplication {
       const prior = this.#repository.getConnectorStatuses().find((status) => status.id === id);
       this.#repository.saveConnectorStatus({
         id,
-        state: inspection.installed ? 'discovered' : 'not-installed',
+        state:
+          inspection.installed && prior?.state === 'connected'
+            ? 'connected'
+            : inspection.installed
+              ? 'discovered'
+              : 'not-installed',
         installed: inspection.installed,
         binaryPath: inspection.binaryPath,
         officialCredentialPresent: inspection.officialCredentialPresent,
@@ -659,7 +664,7 @@ export class UsageApplication {
       });
     }
 
-    if (input.action === 'connect') await this.refresh({ userInitiated: true });
+    await this.refresh({ userInitiated: true });
 
     const status = (await this.getConnectorStatuses()).find((candidate) => candidate.id === id);
     if (!status) throw new Error(`Connector status disappeared: ${id}`);
