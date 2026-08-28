@@ -40,8 +40,9 @@ shows only its own update indicator and completed sections remain usable.
 
 Transcript scans use a persistent, path-redacted file index. Historical retail
 pricing is recalculated only when the pricing catalog version changes. SQLite
-time/provider/model indexes are created in the background after the listener is
-ready. Settings includes an explicitly confirmed
+time/provider/model indexes and retention compaction run in a worker after
+provider collection, while price backfill processes bounded pages. Settings
+includes an explicitly confirmed
 **Hard rebuild all data** action for troubleshooting. It ignores these caches, can
 use substantial resources, and may take a long time without blocking the web UI.
 

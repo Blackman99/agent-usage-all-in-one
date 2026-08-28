@@ -105,6 +105,68 @@ describe('retained retail-equivalent backfill', () => {
     restarted.close();
   });
 
+  it('backfills every observation across bounded pricing pages', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-paged-price-backfill-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    repository.saveSnapshot(
+      snapshot(
+        Array.from({ length: 251 }, (_, index) =>
+          usage(`paged-${String(index).padStart(3, '0')}`, '2026-08-28T01:00:00.000Z')
+        )
+      )
+    );
+
+    await application(repository).startBackgroundProcessing();
+
+    const database = new DatabaseSync(databasePath);
+    const result = database
+      .prepare("SELECT COUNT(*) AS count FROM cost_records WHERE kind = 'retail-equivalent'")
+      .get() as { count: number };
+    expect(Number(result.count)).toBe(251);
+    database.close();
+    repository.close();
+  });
+
+  it('leaves an incomplete catalog marker so startup retries a failed hard backfill', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retry-price-backfill-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    repository.saveSnapshot(snapshot([usage('retry-priced-event', '2026-08-28T01:00:00.000Z')]));
+    repository.saveApplicationState(
+      'retail-pricing-catalog-version',
+      OFFICIAL_PRICING_CATALOG.version
+    );
+    const saveDerivedCosts = repository.saveDerivedCosts.bind(repository);
+    repository.saveDerivedCosts = () => {
+      throw new Error('simulated pricing interruption');
+    };
+
+    const failed = application(repository);
+    await failed.startHardRebuild();
+    expect(failed.getProcessingStatus().modules.pricing.state).toBe('failed');
+    expect(repository.getApplicationState('retail-pricing-catalog-version')).toMatch(
+      /^rebuilding:/
+    );
+
+    repository.saveDerivedCosts = saveDerivedCosts;
+    const retried = application(repository);
+    await retried.startBackgroundProcessing();
+    expect(retried.getProcessingStatus().modules.pricing.state).toBe('ready');
+    expect(repository.getApplicationState('retail-pricing-catalog-version')).toBe(
+      OFFICIAL_PRICING_CATALOG.version
+    );
+    const database = new DatabaseSync(databasePath);
+    const result = database
+      .prepare("SELECT COUNT(*) AS count FROM cost_records WHERE kind = 'retail-equivalent'")
+      .get() as { count: number };
+    expect(Number(result.count)).toBe(1);
+    database.close();
+    repository.close();
+  });
+
   it('preserves immutable retail costs whose raw observations were already compacted', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-compacted-price-'));
     workspaces.push(workspace);

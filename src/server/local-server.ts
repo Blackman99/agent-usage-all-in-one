@@ -115,7 +115,10 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
           sendJson(response, 401, { error: 'api-token-required' });
           return;
         }
-        options.application.ingestTelemetry('claude-code', await readJsonBody(request, 1_000_000));
+        await options.application.ingestTelemetry(
+          'claude-code',
+          await readJsonBody(request, 1_000_000)
+        );
         sendJson(response, 200, { partialSuccess: {} });
         return;
       }
@@ -130,7 +133,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
         const payload = contentType.includes('application/json')
           ? JSON.parse(body.toString('utf8'))
           : decodeOtlpMetricsProtobuf(body);
-        options.application.ingestTelemetry('grok', payload);
+        await options.application.ingestTelemetry('grok', payload);
         sendOtlpProtobuf(response, 200);
         return;
       }

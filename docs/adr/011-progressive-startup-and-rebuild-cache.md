@@ -24,7 +24,11 @@ Local transcript clients persist a versioned file index keyed by a hash of the
 source path plus size and modification time. The cache never stores the original
 personal path. Retail backfill records the completed pricing-catalog version.
 Explicit time/provider/model indexes are created by a background module only
-after the loopback listener is ready.
+after the loopback listener is ready. Write-heavy maintenance is serialized
+behind provider collection: pricing backfill reads and writes bounded pages with
+an event-loop yield between pages, while index creation and retention compaction
+run together in a SQLite worker thread. This keeps cached HTTP reads responsive
+and prevents maintenance from racing connector snapshot writes.
 
 A hard rebuild is an asynchronous, explicitly confirmed operation. It ignores the
 transcript index, removes only derived retail-equivalent costs, recalculates them,

@@ -63,6 +63,9 @@ describe('UsageApplication', () => {
       }
     });
     expect(await application.getOverview()).toMatchObject({ providers: [] });
+    database = new DatabaseSync(databasePath);
+    expect(indexNames()).not.toContain('usage_provider_model_time_idx');
+    database.close();
 
     releaseCollection();
     await processing;
@@ -76,6 +79,7 @@ describe('UsageApplication', () => {
     });
     database = new DatabaseSync(databasePath);
     expect(indexNames()).toContain('usage_provider_model_time_idx');
+    expect(indexNames()).toContain('usage_provider_time_id_idx');
     database.close();
     repository.close();
   });
@@ -112,6 +116,84 @@ describe('UsageApplication', () => {
     await Promise.all([incremental, hardRebuild]);
 
     expect(modes).toEqual(['incremental', 'hard-rebuild']);
+    repository.close();
+  });
+
+  it('runs a queued hard collection even when the incremental refresh rejects', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-failed-incremental-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const getConnectorRuntimeStates = repository.getConnectorRuntimeStates.bind(repository);
+    let runtimeReads = 0;
+    repository.getConnectorRuntimeStates = () => {
+      runtimeReads += 1;
+      if (runtimeReads === 1) throw new Error('incremental preflight failed');
+      return getConnectorRuntimeStates();
+    };
+    const modes: string[] = [];
+    const connector: Connector = {
+      id: 'mode-aware',
+      async collect(request) {
+        modes.push(request?.mode ?? 'incremental');
+        return {
+          provider: { id: 'mode-aware', displayName: 'Mode Aware' },
+          billingDomains: [{ id: 'subscription', displayName: 'Subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-28T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({ repository, connectors: [connector] });
+
+    const incremental = application.refresh();
+    const hardRebuild = application.startHardRebuild();
+
+    await expect(incremental).rejects.toThrow('incremental preflight failed');
+    await expect(hardRebuild).resolves.toBeUndefined();
+    expect(modes).toEqual(['hard-rebuild']);
+    repository.close();
+  });
+
+  it('serializes manual compaction and connector snapshot writes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-maintenance-queue-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let releaseMaintenance!: () => void;
+    const maintenanceGate = new Promise<void>((resolve) => {
+      releaseMaintenance = resolve;
+    });
+    const getRetentionStatus = repository.getRetentionStatus.bind(repository);
+    repository.maintainUsageHistory = async () => {
+      await maintenanceGate;
+      return getRetentionStatus();
+    };
+    const collected: string[] = [];
+    const connector: Connector = {
+      id: 'queued-writer',
+      async collect() {
+        collected.push('collected');
+        return {
+          provider: { id: 'queued-writer', displayName: 'Queued Writer' },
+          billingDomains: [{ id: 'subscription', displayName: 'Subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-28T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({ repository, connectors: [connector] });
+
+    const compaction = application.compactRetention();
+    const refresh = application.refresh({ userInitiated: true });
+    await new Promise((resolveWait) => setTimeout(resolveWait, 0));
+    expect(collected).toEqual([]);
+
+    releaseMaintenance();
+    await Promise.all([compaction, refresh]);
+    expect(collected).toEqual(['collected']);
     repository.close();
   });
 

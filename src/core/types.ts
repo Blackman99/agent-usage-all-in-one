@@ -407,6 +407,17 @@ export interface RetentionStatus {
   lastCompactedAt: string | null;
 }
 
+export interface RetailPricingBackfillCursor {
+  providerId: string;
+  observedAt: string;
+  observationId: string;
+}
+
+export interface RetailPricingBackfillPage {
+  snapshots: ConnectorSnapshot[];
+  nextCursor: RetailPricingBackfillCursor | null;
+}
+
 export interface ProviderOverview {
   id: string;
   displayName: string;
@@ -792,11 +803,17 @@ export interface UsageRepository {
   saveConnectorStatus(status: ConnectorStatusRecord): void;
   getConnectorStatuses(): ConnectorStatusRecord[];
   getRetailPricingBackfillSnapshots?(): ConnectorSnapshot[];
+  getRetailPricingBackfillPage?(
+    cursor: RetailPricingBackfillCursor | null,
+    limit: number
+  ): RetailPricingBackfillPage;
   saveDerivedCosts?(providerId: string, costs: CostRecord[]): void;
   deleteDerivedRetailCosts?(): void;
+  deleteDerivedRetailCostsAsync?(): Promise<void>;
   getApplicationState?(key: string): string | null;
   saveApplicationState?(key: string, value: string): void;
   ensureQueryIndexes?(): Promise<void> | void;
+  maintainUsageHistory?(now: Date): Promise<RetentionStatus>;
   close(): void;
 }
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -74,8 +75,23 @@ describe('CodexConnector', () => {
     await writeFile(cachePath, JSON.stringify(corrupted));
     const restarted = await new LocalTranscriptUsageClient(options).readUsage();
 
+    const recoveredCache = JSON.parse(await readFile(cachePath, 'utf8')) as {
+      files: Array<{
+        records: Array<{ observation: { inputTokens?: number } }>;
+        recordsDigest: string;
+      }>;
+    };
+    delete recoveredCache.files[0].records[0].observation.inputTokens;
+    recoveredCache.files[0].recordsDigest = createHash('sha256')
+      .update(JSON.stringify(recoveredCache.files[0].records))
+      .digest('hex')
+      .slice(0, 24);
+    await writeFile(cachePath, JSON.stringify(recoveredCache));
+    const structurallyRecovered = await new LocalTranscriptUsageClient(options).readUsage();
+
     expect(first.usage).toHaveLength(1);
     expect(restarted).toEqual(first);
+    expect(structurallyRecovered).toEqual(first);
     expect(restarted.usage[0].model).toBe('gpt-5.6-sol');
     expect(persisted).not.toContain(workspace);
     expect(JSON.parse(persisted)).toMatchObject({ version: 1, files: [expect.any(Object)] });

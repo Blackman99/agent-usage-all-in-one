@@ -302,7 +302,7 @@ describe('retail-equivalent application tracer', () => {
       clock: () => NOW
     });
 
-    application.ingestTelemetry('claude-pricing-telemetry', {});
+    await application.ingestTelemetry('claude-pricing-telemetry', {});
 
     expect((await application.getOverview({ window: '24h' })).globalSummary).toMatchObject({
       apiRetailEquivalent: { status: 'available', amount: 1, pricingCoverage: 1 }

@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import type { CollectionRequest, CostRecord, UsageObservation } from '../core/types.js';
+import { normalizeTokenObservation } from '../core/token-normalization.js';
 
 export type LocalTranscriptProvider = 'claude-code' | 'codex' | 'grok';
 
@@ -220,28 +221,71 @@ function isParsedTranscriptRecord(value: unknown): value is ParsedTranscriptReco
   const observation = asObject(record?.observation);
   if (!record || !observation) return false;
   const authority = observation.authority;
-  const numericFields = [
+  const requiredTokenFields = [
     'inputTokens',
     'outputTokens',
-    'reasoningTokens',
     'cacheReadTokens',
     'cacheWriteTokens'
   ];
-  return (
+  const optionalTokenFields = [
+    'reasoningTokens',
+    'sourceReportedTotalTokens',
+    'reconciledRemainderTokens'
+  ];
+  const cacheWriteTokenBreakdown = asObject(observation.cacheWriteTokenBreakdown);
+  const tokenSemantics = asObject(observation.tokenSemantics);
+  const structurallyValid =
     typeof record.dedupeKey === 'string' &&
     (record.reportedCostUsd === null || finiteNonNegative(record.reportedCostUsd) !== null) &&
     typeof observation.id === 'string' &&
     typeof observation.billingDomainId === 'string' &&
     (observation.model === null || typeof observation.model === 'string') &&
+    (observation.sessionId === undefined ||
+      observation.sessionId === null ||
+      typeof observation.sessionId === 'string') &&
     typeof observation.observedAt === 'string' &&
     Number.isFinite(Date.parse(observation.observedAt)) &&
-    numericFields.every(
-      (field) => observation[field] === undefined || finiteNonNegative(observation[field]) !== null
+    requiredTokenFields.every((field) => nonNegativeSafeInteger(observation[field])) &&
+    optionalTokenFields.every(
+      (field) =>
+        observation[field] === undefined ||
+        observation[field] === null ||
+        nonNegativeSafeInteger(observation[field])
     ) &&
+    (observation.cacheWriteTokenBreakdown === undefined ||
+      observation.cacheWriteTokenBreakdown === null ||
+      (cacheWriteTokenBreakdown !== null &&
+        nonNegativeSafeInteger(cacheWriteTokenBreakdown.fiveMinute) &&
+        nonNegativeSafeInteger(cacheWriteTokenBreakdown.oneHour))) &&
+    (observation.tokenSemantics === undefined ||
+      (tokenSemantics !== null &&
+        ['included-in-output', 'separate'].includes(String(tokenSemantics.reasoning)) &&
+        ['included-in-input', 'separate'].includes(String(tokenSemantics.cacheRead)) &&
+        ['included-in-input', 'separate'].includes(String(tokenSemantics.cacheWrite)))) &&
+    (observation.modelAttribution === undefined ||
+      ['known', 'unclassified'].includes(String(observation.modelAttribution))) &&
+    (observation.timePrecision === undefined ||
+      ['event', 'hour', 'day', 'billing-period', 'unknown'].includes(
+        String(observation.timePrecision)
+      )) &&
+    (observation.usageScope === undefined ||
+      ['account-wide', 'this-mac', 'unknown'].includes(String(observation.usageScope))) &&
+    (observation.aggregationTemporality === undefined ||
+      ['delta', 'cumulative', 'unknown'].includes(String(observation.aggregationTemporality))) &&
     ['official-account', 'official-client', 'local-observation', 'estimate'].includes(
       String(authority)
-    )
-  );
+    );
+  if (!structurallyValid) return false;
+  try {
+    normalizeTokenObservation(observation as unknown as UsageObservation);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nonNegativeSafeInteger(value: unknown): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 function parseGrokTranscriptLine(line: string): ParsedTranscriptRecord[] {

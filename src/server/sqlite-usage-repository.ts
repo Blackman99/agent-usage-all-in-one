@@ -24,6 +24,8 @@ import type {
   QuotaBucket,
   QuotaForecast,
   RetailPriceLineItem,
+  RetailPricingBackfillCursor,
+  RetailPricingBackfillPage,
   RetentionStatus,
   TokenEvidence,
   TokenAggregationTemporality,
@@ -45,6 +47,8 @@ const QUERY_INDEXES_SQL = `
     ON usage_observations(observed_at);
   CREATE INDEX IF NOT EXISTS usage_provider_domain_time_idx
     ON usage_observations(provider_id, billing_domain_id, observed_at);
+  CREATE INDEX IF NOT EXISTS usage_provider_time_id_idx
+    ON usage_observations(provider_id, observed_at, id);
   CREATE INDEX IF NOT EXISTS usage_provider_model_time_idx
     ON usage_observations(provider_id, model, observed_at);
   CREATE INDEX IF NOT EXISTS cost_observed_at_idx
@@ -56,9 +60,100 @@ const QUERY_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS quota_provider_bucket_time_idx
     ON quota_observations(provider_id, bucket_id, observed_at);
 `;
+const DELETE_DERIVED_RETAIL_COSTS_SQL = `
+  DELETE FROM cost_records
+  WHERE kind = 'retail-equivalent'
+    AND usage_observation_id IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM usage_observations usage
+      WHERE usage.provider_id = cost_records.provider_id
+        AND usage.id = cost_records.usage_observation_id
+    )
+`;
 const { DatabaseSync } = createRequire(import.meta.url)(
   'node:sqlite'
 ) as typeof import('node:sqlite');
+
+interface DatabaseWorkerRequest {
+  databasePath: string;
+  operation: 'indexes' | 'delete-derived-costs' | 'retention';
+  indexesSql?: string;
+  aggregateSql?: string;
+  deleteDerivedCostsSql?: string;
+  cutoff?: string;
+  now?: string;
+}
+
+async function runDatabaseWorker<T>(workerData: DatabaseWorkerRequest): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const worker = new Worker(
+      `
+        const { parentPort, workerData } = require('node:worker_threads');
+        const { DatabaseSync } = require('node:sqlite');
+        let database;
+        try {
+          database = new DatabaseSync(workerData.databasePath);
+          database.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
+          if (workerData.operation === 'indexes') {
+            database.exec(workerData.indexesSql);
+            parentPort.postMessage({ ok: true, data: null });
+          } else if (workerData.operation === 'delete-derived-costs') {
+            database.prepare(workerData.deleteDerivedCostsSql).run();
+            parentPort.postMessage({ ok: true, data: null });
+          } else if (workerData.operation === 'retention') {
+            database.exec(workerData.indexesSql);
+            database.exec('BEGIN IMMEDIATE');
+            try {
+              database.prepare(workerData.aggregateSql).run(workerData.cutoff);
+              database.prepare('DELETE FROM usage_observations WHERE observed_at < ?')
+                .run(workerData.cutoff);
+              database.prepare(
+                'INSERT INTO retention_state (id, last_compacted_at) VALUES (1, ?) ' +
+                'ON CONFLICT(id) DO UPDATE SET last_compacted_at = excluded.last_compacted_at'
+              ).run(workerData.now);
+              database.exec('COMMIT');
+            } catch (error) {
+              database.exec('ROLLBACK');
+              throw error;
+            }
+            const raw = database.prepare(
+              'SELECT COUNT(*) AS count, MIN(observed_at) AS oldest FROM usage_observations'
+            ).get();
+            const aggregates = database.prepare(
+              'SELECT COUNT(*) AS count FROM daily_usage_aggregates'
+            ).get();
+            const state = database.prepare(
+              'SELECT last_compacted_at FROM retention_state WHERE id = 1'
+            ).get();
+            parentPort.postMessage({
+              ok: true,
+              data: {
+                rawRetentionDays: 90,
+                rawObservations: Number(raw.count),
+                oldestRawObservedAt: raw.oldest,
+                dailyAggregates: Number(aggregates.count),
+                lastCompactedAt: state?.last_compacted_at ?? null
+              }
+            });
+          }
+        } catch (error) {
+          parentPort.postMessage({
+            ok: false,
+            message: error instanceof Error ? error.message : String(error)
+          });
+        } finally {
+          database?.close();
+        }
+      `,
+      { eval: true, workerData }
+    );
+    worker.once('message', (message: { ok: boolean; data?: T; message?: string }) => {
+      if (message.ok) resolve(message.data as T);
+      else reject(new Error(message.message ?? 'SQLite background maintenance failed'));
+    });
+    worker.once('error', reject);
+  });
+}
 
 interface ProviderRow {
   id: string;
@@ -103,6 +198,28 @@ function additiveUsagePredicate(alias = ''): string {
     )
   )`;
 }
+
+const RETENTION_AGGREGATE_SQL = `
+  INSERT INTO daily_usage_aggregates (
+    provider_id, billing_domain_id, day_utc, model, authority,
+    total_tokens, input_tokens, output_tokens, reasoning_tokens,
+    cache_read_tokens, cache_write_tokens, source_count
+  )
+  SELECT provider_id, billing_domain_id, substr(observed_at, 1, 10), model, authority,
+         SUM(total_tokens), SUM(input_tokens), SUM(output_tokens), SUM(reasoning_tokens),
+         SUM(cache_read_tokens), SUM(cache_write_tokens), COUNT(*)
+  FROM usage_observations
+  WHERE observed_at < ? AND ${additiveUsagePredicate()}
+  GROUP BY provider_id, billing_domain_id, substr(observed_at, 1, 10), model, authority
+  ON CONFLICT(provider_id, billing_domain_id, day_utc, model, authority) DO UPDATE SET
+    total_tokens = excluded.total_tokens,
+    input_tokens = excluded.input_tokens,
+    output_tokens = excluded.output_tokens,
+    reasoning_tokens = excluded.reasoning_tokens,
+    cache_read_tokens = excluded.cache_read_tokens,
+    cache_write_tokens = excluded.cache_write_tokens,
+    source_count = excluded.source_count
+`;
 
 interface QuotaRow {
   id: string;
@@ -213,6 +330,62 @@ interface PricingBackfillRow extends UsageHistoryRow {
   reasoning_semantics: TokenSemantics['reasoning'];
   cache_read_semantics: TokenSemantics['cacheRead'];
   cache_write_semantics: TokenSemantics['cacheWrite'];
+}
+
+function pricingBackfillSnapshots(rows: PricingBackfillRow[]): ConnectorSnapshot[] {
+  const snapshots = new Map<string, ConnectorSnapshot>();
+  for (const row of rows) {
+    const snapshot = snapshots.get(row.provider_id) ?? {
+      provider: { id: row.provider_id, displayName: row.provider_display_name },
+      billingDomains: [],
+      quotaBuckets: [],
+      usage: [],
+      costs: [],
+      observedAt: row.observed_at
+    };
+    if (!snapshot.billingDomains.some((domain) => domain.id === row.billing_domain_id)) {
+      snapshot.billingDomains.push({
+        id: row.billing_domain_id,
+        displayName: row.billing_domain_display_name
+      });
+    }
+    snapshot.usage.push({
+      id: row.id,
+      billingDomainId: row.billing_domain_id,
+      model: row.model_attribution === 'known' ? row.model : null,
+      sessionId: row.session_id,
+      observedAt: row.observed_at,
+      inputTokens: Number(row.input_tokens),
+      outputTokens: Number(row.output_tokens),
+      reasoningTokens: Number(row.reasoning_tokens),
+      cacheReadTokens: Number(row.cache_read_tokens),
+      cacheWriteTokens: Number(row.cache_write_tokens),
+      cacheWriteTokenBreakdown:
+        row.cache_write_5m_tokens === null || row.cache_write_1h_tokens === null
+          ? null
+          : {
+              fiveMinute: Number(row.cache_write_5m_tokens),
+              oneHour: Number(row.cache_write_1h_tokens)
+            },
+      sourceReportedTotalTokens:
+        row.source_reported_total_tokens === null ? null : Number(row.source_reported_total_tokens),
+      reconciledRemainderTokens:
+        row.total_derivation === 'reconciled-remainder' ? Number(row.total_tokens) : null,
+      tokenSemantics: {
+        reasoning: row.reasoning_semantics,
+        cacheRead: row.cache_read_semantics,
+        cacheWrite: row.cache_write_semantics
+      },
+      modelAttribution: row.model_attribution,
+      timePrecision: row.time_precision,
+      usageScope: row.usage_scope,
+      aggregationTemporality: row.aggregation_temporality,
+      authority: row.authority
+    });
+    if (row.observed_at > snapshot.observedAt) snapshot.observedAt = row.observed_at;
+    snapshots.set(row.provider_id, snapshot);
+  }
+  return [...snapshots.values()];
 }
 
 interface MutableTokenEvidence {
@@ -688,61 +861,51 @@ export class SqliteUsageRepository implements UsageRepository {
          ORDER BY u.provider_id, u.observed_at, u.id`
       )
       .all() as unknown as PricingBackfillRow[];
-    const snapshots = new Map<string, ConnectorSnapshot>();
-    for (const row of rows) {
-      const snapshot = snapshots.get(row.provider_id) ?? {
-        provider: { id: row.provider_id, displayName: row.provider_display_name },
-        billingDomains: [],
-        quotaBuckets: [],
-        usage: [],
-        costs: [],
-        observedAt: row.observed_at
-      };
-      if (!snapshot.billingDomains.some((domain) => domain.id === row.billing_domain_id)) {
-        snapshot.billingDomains.push({
-          id: row.billing_domain_id,
-          displayName: row.billing_domain_display_name
-        });
-      }
-      snapshot.usage.push({
-        id: row.id,
-        billingDomainId: row.billing_domain_id,
-        model: row.model_attribution === 'known' ? row.model : null,
-        sessionId: row.session_id,
-        observedAt: row.observed_at,
-        inputTokens: Number(row.input_tokens),
-        outputTokens: Number(row.output_tokens),
-        reasoningTokens: Number(row.reasoning_tokens),
-        cacheReadTokens: Number(row.cache_read_tokens),
-        cacheWriteTokens: Number(row.cache_write_tokens),
-        cacheWriteTokenBreakdown:
-          row.cache_write_5m_tokens === null || row.cache_write_1h_tokens === null
-            ? null
-            : {
-                fiveMinute: Number(row.cache_write_5m_tokens),
-                oneHour: Number(row.cache_write_1h_tokens)
-              },
-        sourceReportedTotalTokens:
-          row.source_reported_total_tokens === null
-            ? null
-            : Number(row.source_reported_total_tokens),
-        reconciledRemainderTokens:
-          row.total_derivation === 'reconciled-remainder' ? Number(row.total_tokens) : null,
-        tokenSemantics: {
-          reasoning: row.reasoning_semantics,
-          cacheRead: row.cache_read_semantics,
-          cacheWrite: row.cache_write_semantics
-        },
-        modelAttribution: row.model_attribution,
-        timePrecision: row.time_precision,
-        usageScope: row.usage_scope,
-        aggregationTemporality: row.aggregation_temporality,
-        authority: row.authority
-      });
-      if (row.observed_at > snapshot.observedAt) snapshot.observedAt = row.observed_at;
-      snapshots.set(row.provider_id, snapshot);
-    }
-    return [...snapshots.values()];
+    return pricingBackfillSnapshots(rows);
+  }
+
+  getRetailPricingBackfillPage(
+    cursor: RetailPricingBackfillCursor | null,
+    limit: number
+  ): RetailPricingBackfillPage {
+    const pageSize = Math.max(1, Math.min(1_000, Math.trunc(limit)));
+    const cursorPredicate = cursor ? 'AND (u.provider_id, u.observed_at, u.id) > (?, ?, ?)' : '';
+    const rows = this.#database
+      .prepare(
+        `SELECT u.provider_id, p.display_name AS provider_display_name,
+                u.id, u.billing_domain_id, b.display_name AS billing_domain_display_name,
+                u.model, u.session_id, u.observed_at, u.authority,
+                u.total_tokens, u.input_tokens, u.output_tokens, u.reasoning_tokens,
+                u.cache_read_tokens, u.cache_write_tokens, u.cache_write_5m_tokens,
+                u.cache_write_1h_tokens, u.source_reported_total_tokens,
+                u.unclassified_tokens, u.total_derivation, u.model_attribution,
+                u.reasoning_semantics, u.cache_read_semantics, u.cache_write_semantics,
+                u.time_precision, u.usage_scope, u.aggregation_temporality
+         FROM usage_observations u
+         JOIN providers p ON p.id = u.provider_id
+         JOIN billing_domains b
+           ON b.provider_id = u.provider_id AND b.id = u.billing_domain_id
+         WHERE ${additiveUsagePredicate('u')}
+           ${cursorPredicate}
+         ORDER BY u.provider_id, u.observed_at, u.id
+         LIMIT ?`
+      )
+      .all(
+        ...(cursor ? [cursor.providerId, cursor.observedAt, cursor.observationId] : []),
+        pageSize
+      ) as unknown as PricingBackfillRow[];
+    const last = rows.at(-1);
+    return {
+      snapshots: pricingBackfillSnapshots(rows),
+      nextCursor:
+        rows.length === pageSize && last
+          ? {
+              providerId: last.provider_id,
+              observedAt: last.observed_at,
+              observationId: last.id
+            }
+          : null
+    };
   }
 
   saveDerivedCosts(providerId: string, costs: CostRecord[]): void {
@@ -1079,29 +1242,7 @@ export class SqliteUsageRepository implements UsageRepository {
     const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
     this.#database.exec('BEGIN IMMEDIATE');
     try {
-      this.#database
-        .prepare(
-          `INSERT INTO daily_usage_aggregates (
-             provider_id, billing_domain_id, day_utc, model, authority,
-             total_tokens, input_tokens, output_tokens, reasoning_tokens,
-             cache_read_tokens, cache_write_tokens, source_count
-           )
-           SELECT provider_id, billing_domain_id, substr(observed_at, 1, 10), model, authority,
-                  SUM(total_tokens), SUM(input_tokens), SUM(output_tokens), SUM(reasoning_tokens),
-                  SUM(cache_read_tokens), SUM(cache_write_tokens), COUNT(*)
-           FROM usage_observations
-           WHERE observed_at < ? AND ${additiveUsagePredicate()}
-           GROUP BY provider_id, billing_domain_id, substr(observed_at, 1, 10), model, authority
-           ON CONFLICT(provider_id, billing_domain_id, day_utc, model, authority) DO UPDATE SET
-             total_tokens = excluded.total_tokens,
-             input_tokens = excluded.input_tokens,
-             output_tokens = excluded.output_tokens,
-             reasoning_tokens = excluded.reasoning_tokens,
-             cache_read_tokens = excluded.cache_read_tokens,
-             cache_write_tokens = excluded.cache_write_tokens,
-             source_count = excluded.source_count`
-        )
-        .run(cutoff);
+      this.#database.prepare(RETENTION_AGGREGATE_SQL).run(cutoff);
       this.#database.prepare('DELETE FROM usage_observations WHERE observed_at < ?').run(cutoff);
       this.#database
         .prepare(
@@ -1155,18 +1296,15 @@ export class SqliteUsageRepository implements UsageRepository {
   }
 
   deleteDerivedRetailCosts(): void {
-    this.#database
-      .prepare(
-        `DELETE FROM cost_records
-         WHERE kind = 'retail-equivalent'
-           AND usage_observation_id IS NOT NULL
-           AND EXISTS (
-             SELECT 1 FROM usage_observations usage
-             WHERE usage.provider_id = cost_records.provider_id
-               AND usage.id = cost_records.usage_observation_id
-           )`
-      )
-      .run();
+    this.#database.prepare(DELETE_DERIVED_RETAIL_COSTS_SQL).run();
+  }
+
+  async deleteDerivedRetailCostsAsync(): Promise<void> {
+    await runDatabaseWorker<void>({
+      databasePath: this.#databasePath,
+      operation: 'delete-derived-costs',
+      deleteDerivedCostsSql: DELETE_DERIVED_RETAIL_COSTS_SQL
+    });
   }
 
   getApplicationState(key: string): string | null {
@@ -1186,33 +1324,22 @@ export class SqliteUsageRepository implements UsageRepository {
   }
 
   async ensureQueryIndexes(): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const worker = new Worker(
-        `
-          const { parentPort, workerData } = require('node:worker_threads');
-          const { DatabaseSync } = require('node:sqlite');
-          try {
-            const database = new DatabaseSync(workerData.databasePath);
-            database.exec(workerData.sql);
-            database.close();
-            parentPort.postMessage({ ok: true });
-          } catch (error) {
-            parentPort.postMessage({
-              ok: false,
-              message: error instanceof Error ? error.message : String(error)
-            });
-          }
-        `,
-        {
-          eval: true,
-          workerData: { databasePath: this.#databasePath, sql: QUERY_INDEXES_SQL }
-        }
-      );
-      worker.once('message', (message: { ok: boolean; message?: string }) => {
-        if (message.ok) resolve();
-        else reject(new Error(message.message ?? 'Unable to create usage query indexes'));
-      });
-      worker.once('error', reject);
+    await runDatabaseWorker<void>({
+      databasePath: this.#databasePath,
+      operation: 'indexes',
+      indexesSql: QUERY_INDEXES_SQL
+    });
+  }
+
+  async maintainUsageHistory(now: Date): Promise<RetentionStatus> {
+    const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    return runDatabaseWorker<RetentionStatus>({
+      databasePath: this.#databasePath,
+      operation: 'retention',
+      indexesSql: QUERY_INDEXES_SQL,
+      aggregateSql: RETENTION_AGGREGATE_SQL,
+      cutoff,
+      now: now.toISOString()
     });
   }
 

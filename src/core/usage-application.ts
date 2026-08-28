@@ -75,6 +75,7 @@ export class UsageApplication {
   #refreshMode: CollectionMode | null = null;
   #backgroundPromise: Promise<void> | null = null;
   #queuedHardRebuildPromise: Promise<void> | null = null;
+  #databaseWriteQueue: Promise<void> = Promise.resolve();
   #processingStatus: ProcessingStatus;
 
   constructor(options: UsageApplicationOptions) {
@@ -94,26 +95,52 @@ export class UsageApplication {
     this.#processingStatus = createProcessingStatus(this.#clock().toISOString(), false);
   }
 
-  #backfillRetailCosts(force = false): void {
+  async #backfillRetailCosts(mode: CollectionMode): Promise<void> {
     if (
       !this.#priceCatalog ||
-      !this.#repository.getRetailPricingBackfillSnapshots ||
+      (!this.#repository.getRetailPricingBackfillPage &&
+        !this.#repository.getRetailPricingBackfillSnapshots) ||
       !this.#repository.saveDerivedCosts
     ) {
       return;
     }
     const catalogVersionKey = 'retail-pricing-catalog-version';
     if (
-      !force &&
+      mode === 'incremental' &&
       this.#repository.getApplicationState?.(catalogVersionKey) === this.#priceCatalog.version
     ) {
       return;
     }
-    if (force) this.#repository.deleteDerivedRetailCosts?.();
     const calculatedAt = this.#clock().toISOString();
-    for (const snapshot of this.#repository.getRetailPricingBackfillSnapshots()) {
-      const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
-      if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
+    if (mode === 'hard-rebuild') {
+      this.#repository.saveApplicationState?.(catalogVersionKey, `rebuilding:${calculatedAt}`);
+      if (this.#repository.deleteDerivedRetailCostsAsync) {
+        await this.#repository.deleteDerivedRetailCostsAsync();
+      } else {
+        this.#repository.deleteDerivedRetailCosts?.();
+      }
+    }
+    if (this.#repository.getRetailPricingBackfillPage) {
+      let cursor = null;
+      do {
+        const page = this.#repository.getRetailPricingBackfillPage(cursor, 250);
+        for (const snapshot of page.snapshots) {
+          const costs = deriveRetailEquivalentCosts(
+            snapshot,
+            this.#priceCatalog,
+            calculatedAt
+          ).costs;
+          if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
+        }
+        cursor = page.nextCursor;
+        if (cursor) await yieldToEventLoop();
+      } while (cursor);
+    } else {
+      for (const snapshot of this.#repository.getRetailPricingBackfillSnapshots?.() ?? []) {
+        const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
+        if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
+        await yieldToEventLoop();
+      }
     }
     this.#repository.saveApplicationState?.(catalogVersionKey, this.#priceCatalog.version);
   }
@@ -123,18 +150,21 @@ export class UsageApplication {
   }
 
   startBackgroundProcessing(): Promise<void> {
-    return this.#startProcessing(false);
+    return this.#startProcessing('incremental');
   }
 
   startHardRebuild(): Promise<void> {
-    return this.#startProcessing(true);
+    return this.#startProcessing('hard-rebuild');
   }
 
-  #startProcessing(forceRebuild: boolean): Promise<void> {
+  #startProcessing(mode: CollectionMode): Promise<void> {
     if (this.#backgroundPromise) {
-      if (forceRebuild && !this.#processingStatus.hardRebuild) {
+      if (mode === 'hard-rebuild' && !this.#processingStatus.hardRebuild) {
         this.#queuedHardRebuildPromise ??= this.#backgroundPromise
-          .then(() => this.#startProcessing(true))
+          .then(
+            () => this.#startProcessing('hard-rebuild'),
+            () => this.#startProcessing('hard-rebuild')
+          )
           .finally(() => {
             this.#queuedHardRebuildPromise = null;
           });
@@ -142,28 +172,30 @@ export class UsageApplication {
       }
       return this.#backgroundPromise;
     }
-    this.#processingStatus = createProcessingStatus(this.#clock().toISOString(), forceRebuild);
-    this.#backgroundPromise = this.#runProcessing(forceRebuild).finally(() => {
+    this.#processingStatus = createProcessingStatus(
+      this.#clock().toISOString(),
+      mode === 'hard-rebuild'
+    );
+    this.#backgroundPromise = this.#runProcessing(mode).finally(() => {
       this.#backgroundPromise = null;
     });
     return this.#backgroundPromise;
   }
 
-  async #runProcessing(forceRebuild: boolean): Promise<void> {
+  async #runProcessing(mode: CollectionMode): Promise<void> {
     await this.#runModule('discovery', () => this.discoverConnectors().then(() => undefined));
-    await Promise.all([
-      this.#runModule('usage', () =>
-        this.refresh({
-          userInitiated: forceRebuild,
-          mode: forceRebuild ? 'hard-rebuild' : 'incremental'
-        })
-      ),
-      this.#runModule('retention', async () => {
+    await this.#runModule('usage', () =>
+      this.refresh({ userInitiated: mode === 'hard-rebuild', mode })
+    );
+    await this.#runModule('pricing', () =>
+      this.#queueDatabaseWrite(async () => {
         await this.#repository.ensureQueryIndexes?.();
-        await this.compactRetention();
+        await this.#backfillRetailCosts(mode);
       })
-    ]);
-    await this.#runModule('pricing', async () => this.#backfillRetailCosts(forceRebuild));
+    );
+    await this.#runModule('retention', async () => {
+      await this.compactRetention();
+    });
   }
 
   async #runModule(id: ProcessingModuleId, action: () => Promise<void>): Promise<void> {
@@ -186,15 +218,20 @@ export class UsageApplication {
     const requestedMode = options.mode ?? 'incremental';
     if (this.#refreshPromise) {
       if (requestedMode === 'hard-rebuild' && this.#refreshMode !== 'hard-rebuild') {
-        return this.#refreshPromise.then(() => this.refresh(options));
+        return this.#refreshPromise.then(
+          () => this.refresh(options),
+          () => this.refresh(options)
+        );
       }
       return this.#refreshPromise;
     }
     this.#refreshMode = requestedMode;
-    this.#refreshPromise = this.#performRefresh(options).finally(() => {
-      this.#refreshPromise = null;
-      this.#refreshMode = null;
-    });
+    this.#refreshPromise = this.#queueDatabaseWrite(() => this.#performRefresh(options)).finally(
+      () => {
+        this.#refreshPromise = null;
+        this.#refreshMode = null;
+      }
+    );
     return this.#refreshPromise;
   }
 
@@ -587,7 +624,13 @@ export class UsageApplication {
   }
 
   async compactRetention(): Promise<RetentionStatus> {
-    return this.#repository.compactUsageHistory(this.#clock());
+    return this.#queueDatabaseWrite(async () => {
+      if (this.#repository.maintainUsageHistory) {
+        return this.#repository.maintainUsageHistory(this.#clock());
+      }
+      await this.#repository.ensureQueryIndexes?.();
+      return this.#repository.compactUsageHistory(this.#clock());
+    });
   }
 
   async clearData(input: {
@@ -617,7 +660,7 @@ export class UsageApplication {
     return { usageCleared: true, productSecretsDeleted };
   }
 
-  ingestTelemetry(id: string, payload: unknown): void {
+  async ingestTelemetry(id: string, payload: unknown): Promise<void> {
     const ingestor = this.#telemetryIngestors.find((candidate) => candidate.id === id);
     if (!ingestor) throw new Error(`Unknown telemetry source: ${id}`);
     if (ingestor.consentId) {
@@ -630,7 +673,18 @@ export class UsageApplication {
     if (snapshot.usage.length === 0 && snapshot.costs.length === 0) {
       throw new Error('Telemetry payload contained no supported metrics');
     }
-    this.#repository.saveSnapshot(this.#withRetailCosts(snapshot), { preserveFailure: true });
+    await this.#queueDatabaseWrite(() => {
+      this.#repository.saveSnapshot(this.#withRetailCosts(snapshot), { preserveFailure: true });
+    });
+  }
+
+  #queueDatabaseWrite<T>(action: () => T | Promise<T>): Promise<T> {
+    const result = this.#databaseWriteQueue.then(action, action);
+    this.#databaseWriteQueue = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
 
   #withRetailCosts(snapshot: ConnectorSnapshot): ConnectorSnapshot {
@@ -804,6 +858,10 @@ function createProcessingStatus(startedAt: string, hardRebuild: boolean): Proces
       retention: module()
     }
   };
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function providerForConnector(id: string, definitions: ConnectorDefinition[]): string {
