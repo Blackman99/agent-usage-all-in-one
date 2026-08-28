@@ -80,7 +80,7 @@ export async function runDaemon(home: string): Promise<void> {
     connectorPolicies: Object.fromEntries(
       ['codex', 'claude-code', 'opencode-go', 'grok', 'xai-api'].map((id) => [
         id,
-        { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: 20_000 }
+        { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: id === 'claude-code' ? 25_000 : 20_000 }
       ])
     ),
     telemetryIngestors: [

@@ -1,4 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { open } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { z } from 'zod';
 
@@ -32,6 +35,7 @@ export interface StdioGrokBillingClientOptions {
   command?: string;
   timeoutMs?: number;
   spawnProcess?: (command: string, arguments_: string[]) => GrokBillingProcess;
+  readUnifiedLog?: () => Promise<string>;
 }
 
 export class GrokBillingAdapterError extends Error {
@@ -62,6 +66,7 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
   readonly #command: string;
   readonly #timeoutMs: number;
   readonly #spawnProcess: NonNullable<StdioGrokBillingClientOptions['spawnProcess']>;
+  readonly #readUnifiedLog: NonNullable<StdioGrokBillingClientOptions['readUnifiedLog']>;
 
   constructor(options: StdioGrokBillingClientOptions = {}) {
     this.#command = options.command ?? 'grok';
@@ -72,6 +77,12 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
         spawn(command, arguments_, {
           stdio: ['pipe', 'pipe', 'pipe']
         }) as ChildProcessWithoutNullStreams);
+    this.#readUnifiedLog =
+      options.readUnifiedLog ??
+      (() =>
+        readLogTail(
+          join(process.env.GROK_HOME ?? join(homedir(), '.grok'), 'logs', 'unified.jsonl')
+        ));
   }
 
   async readBilling(): Promise<GrokBuildBilling> {
@@ -79,6 +90,8 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
     try {
       process = this.#spawnProcess(this.#command, ['agent', '--no-leader', 'stdio']);
     } catch (error) {
+      const fallback = await this.#readLogFallback();
+      if (fallback) return fallback;
       throw unavailableError(error);
     }
 
@@ -102,7 +115,7 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
         );
       }
 
-      const result = await peer.request('x.ai/billing');
+      const result = await peer.request('x.ai/billing', {});
       const billing = grokBillingResponseSchema.safeParse(result);
       if (!billing.success) {
         throw new GrokBillingAdapterError(
@@ -114,6 +127,8 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
       }
       return billing.data;
     } catch (error) {
+      const fallback = await this.#readLogFallback();
+      if (fallback) return fallback;
       if (error instanceof GrokBillingAdapterError) throw error;
       if (error instanceof JsonRpcError && error.code === -32601) {
         throw new GrokBillingAdapterError(
@@ -135,6 +150,60 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
     } finally {
       peer.close();
     }
+  }
+
+  async #readLogFallback(): Promise<GrokBuildBilling | null> {
+    try {
+      return parseLatestBillingLog(await this.#readUnifiedLog());
+    } catch {
+      return null;
+    }
+  }
+}
+
+function parseLatestBillingLog(text: string): GrokBuildBilling | null {
+  const lines = text.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    let record: unknown;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const entry = z
+      .object({
+        ts: z.string(),
+        msg: z.string(),
+        ctx: z.unknown()
+      })
+      .safeParse(record);
+    if (!entry.success || entry.data.msg !== 'billing: fetched credits config') continue;
+    const billing = grokBillingResponseSchema.safeParse({
+      ...(typeof entry.data.ctx === 'object' && entry.data.ctx !== null ? entry.data.ctx : {}),
+      sourceObservedAt: entry.data.ts
+    });
+    if (billing.success) return billing.data;
+  }
+  return null;
+}
+
+async function readLogTail(path: string): Promise<string> {
+  const maximumBytes = 2 * 1024 * 1024;
+  const handle = await open(path, 'r');
+  try {
+    const stats = await handle.stat();
+    const length = Math.min(stats.size, maximumBytes);
+    const start = Math.max(0, stats.size - length);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, start);
+    const text = buffer.toString('utf8');
+    if (start === 0) return text;
+    const firstNewline = text.indexOf('\n');
+    return firstNewline === -1 ? '' : text.slice(firstNewline + 1);
+  } finally {
+    await handle.close();
   }
 }
 

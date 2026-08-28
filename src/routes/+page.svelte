@@ -386,19 +386,22 @@
         costs: [],
         balances: [],
         invoices: [],
-        history: fallbackHistory(provider.tokenTotals, []),
+        history: fallbackHistory(provider.tokenTotals, [], provider.tokenAuthority),
         forecasts: []
       }
     );
   }
 
   function activeHistory(domain: BillingDomainOverview): BillingHistory {
-    return domain.history ?? fallbackHistory(domain.tokenTotals, domain.costs);
+    return (
+      domain.history ?? fallbackHistory(domain.tokenTotals, domain.costs, domain.tokenAuthority)
+    );
   }
 
   function fallbackHistory(
     tokenTotals: ProviderOverview['tokenTotals'],
-    costs: BillingDomainOverview['costs']
+    costs: BillingDomainOverview['costs'],
+    tokenAuthority: BillingDomainOverview['tokenAuthority']
   ): BillingHistory {
     return {
       window: selectedWindow,
@@ -421,8 +424,20 @@
         observedAt: cost.observedAt
       })),
       exchangeRates: [],
+      authorities: tokenAuthority === 'mixed' ? undefined : tokenAuthority ? [tokenAuthority] : [],
       lastObservedAt: null
     };
+  }
+
+  function historyTokenAuthority(
+    history: BillingHistory,
+    fallback: BillingDomainOverview['tokenAuthority']
+  ): BillingDomainOverview['tokenAuthority'] {
+    if (!history.lastObservedAt) return null;
+    if (!history.authorities) return fallback;
+    const authorities = [...new Set(history.authorities)];
+    if (authorities.length === 0) return null;
+    return authorities.length === 1 ? authorities[0] : 'mixed';
   }
 
   async function selectWindow(window: HistoryWindow): Promise<void> {
@@ -433,6 +448,16 @@
 
   function selectBillingDomain(providerId: string, billingDomainId: string): void {
     selectedBillingDomains = { ...selectedBillingDomains, [providerId]: billingDomainId };
+  }
+
+  function tokenTelemetryCommand(providerId: string, billingDomainId: string): string | null {
+    if (providerId === 'claude-code' && billingDomainId === 'subscription') {
+      return 'eval "$(agent-usage telemetry-env --provider claude-code)"';
+    }
+    if (providerId === 'grok' && billingDomainId === 'grok-build-subscription') {
+      return 'eval "$(agent-usage telemetry-env --provider grok)"';
+    }
+    return null;
   }
 
   function formatMoney(amount: number | null, currency: string): string {
@@ -768,6 +793,8 @@
           {/if}
 
           {#each [activeBillingDomain(provider, selectedBillingDomains[provider.id])] as domain (domain.id)}
+            {@const history = activeHistory(domain)}
+            {@const tokenAuthority = historyTokenAuthority(history, domain.tokenAuthority)}
             <div class="section-label">{t('quota')}</div>
             <div class="quotas">
               {#each domain.quotaBuckets as bucket (bucket.id)}
@@ -844,44 +871,53 @@
             {/if}
 
             <div class="section-label">{t('tokens')}</div>
-            <p class="token-scope">
-              {t('source')}: {authorityLabel(domain.tokenAuthority ?? 'unavailable')}
-              {domain.tokenAuthority === 'local-observation' ? ` · ${t('localOnly')}` : ''}
-              · {formatReset(
-                activeHistory(domain).lastObservedAt ?? provider.freshness.lastSuccessAt
-              )}
-            </p>
-            <dl class="tokens">
-              <div>
-                <dt>{t('total')}</dt>
-                <dd>{formatNumber(activeHistory(domain).tokenTotals.total)}</dd>
+            {#if tokenAuthority}
+              <p class="token-scope">
+                {t('source')}: {authorityLabel(tokenAuthority)}
+                {tokenAuthority === 'local-observation' ? ` · ${t('localOnly')}` : ''}
+                · {formatReset(history.lastObservedAt ?? null)}
+              </p>
+              <dl class="tokens">
+                <div>
+                  <dt>{t('total')}</dt>
+                  <dd>{formatNumber(history.tokenTotals.total)}</dd>
+                </div>
+                <div>
+                  <dt>{t('input')}</dt>
+                  <dd>{formatNumber(history.tokenTotals.input)}</dd>
+                </div>
+                <div>
+                  <dt>{t('output')}</dt>
+                  <dd>{formatNumber(history.tokenTotals.output)}</dd>
+                </div>
+                <div>
+                  <dt>{t('reasoning')}</dt>
+                  <dd>{formatNumber(history.tokenTotals.reasoning ?? 0)}</dd>
+                </div>
+                <div>
+                  <dt>{t('cacheRead')}</dt>
+                  <dd>{formatNumber(history.tokenTotals.cacheRead)}</dd>
+                </div>
+                <div>
+                  <dt>{t('cacheWrite')}</dt>
+                  <dd>{formatNumber(history.tokenTotals.cacheWrite)}</dd>
+                </div>
+              </dl>
+            {:else}
+              {@const telemetryCommand = tokenTelemetryCommand(provider.id, domain.id)}
+              <div class="token-unavailable">
+                <strong>{t('tokenObservationsMissing')}</strong>
+                {#if telemetryCommand}
+                  <span>{t('tokenCollectionEnable')}</span>
+                  <code>{telemetryCommand}</code>
+                {/if}
               </div>
-              <div>
-                <dt>{t('input')}</dt>
-                <dd>{formatNumber(activeHistory(domain).tokenTotals.input)}</dd>
-              </div>
-              <div>
-                <dt>{t('output')}</dt>
-                <dd>{formatNumber(activeHistory(domain).tokenTotals.output)}</dd>
-              </div>
-              <div>
-                <dt>{t('reasoning')}</dt>
-                <dd>{formatNumber(activeHistory(domain).tokenTotals.reasoning ?? 0)}</dd>
-              </div>
-              <div>
-                <dt>{t('cacheRead')}</dt>
-                <dd>{formatNumber(activeHistory(domain).tokenTotals.cacheRead)}</dd>
-              </div>
-              <div>
-                <dt>{t('cacheWrite')}</dt>
-                <dd>{formatNumber(activeHistory(domain).tokenTotals.cacheWrite)}</dd>
-              </div>
-            </dl>
+            {/if}
 
-            {#if activeHistory(domain).costs.length > 0 || domain.balances.length > 0 || domain.invoices.length > 0}
+            {#if history.costs.length > 0 || domain.balances.length > 0 || domain.invoices.length > 0}
               <div class="section-label">{t('billing')}</div>
               <dl class="billing-records">
-                {#each activeHistory(domain).costs as cost (`${cost.kind}:${cost.currency}`)}
+                {#each history.costs as cost (`${cost.kind}:${cost.currency}`)}
                   <div>
                     <dt>{costKindLabel(cost.kind)} · {t('nativeAmount')}</dt>
                     <dd>{formatMoney(cost.amount, cost.currency)}</dd>
@@ -938,9 +974,9 @@
                   </div>
                 {/each}
               </dl>
-              {#if activeHistory(domain).exchangeRates.length > 0}
+              {#if history.exchangeRates.length > 0}
                 <div class="rate-evidence">
-                  {#each activeHistory(domain).exchangeRates as rate (rate.id)}
+                  {#each history.exchangeRates as rate (rate.id)}
                     <small>
                       {t('exchangeRate')}: 1 {rate.baseCurrency} = {rate.rate}
                       {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
@@ -950,17 +986,17 @@
               {/if}
             {/if}
 
-            {#if activeHistory(domain).models.length > 0 || activeHistory(domain).days.length > 0}
+            {#if history.models.length > 0 || history.days.length > 0}
               <div class="history-rankings">
                 <div>
                   <strong>{t('topModels')}</strong>
-                  {#each activeHistory(domain).models.slice(0, 3) as model (model.model)}
+                  {#each history.models.slice(0, 3) as model (model.model)}
                     <span>{model.model}<b>{formatNumber(model.tokenTotals.total)}</b></span>
                   {/each}
                 </div>
                 <div>
                   <strong>{t('topDays')}</strong>
-                  {#each activeHistory(domain).days.slice(-3).reverse() as day (day.day)}
+                  {#each history.days.slice(-3).reverse() as day (day.day)}
                     <span>{day.day}<b>{formatNumber(day.tokenTotals.total)}</b></span>
                   {/each}
                 </div>
@@ -1510,6 +1546,27 @@
     margin: -4px 0 12px;
     color: #8f98a8;
     font-size: 0.72rem;
+  }
+
+  .token-unavailable {
+    display: grid;
+    gap: 7px;
+    margin: -4px 0 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(122, 136, 164, 0.14);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.018);
+    color: #8f98a8;
+    font-size: 0.75rem;
+  }
+
+  .token-unavailable strong {
+    color: #d5d9e2;
+  }
+
+  .token-unavailable code {
+    color: #aebfff;
+    overflow-wrap: anywhere;
   }
 
   .domain-tabs {

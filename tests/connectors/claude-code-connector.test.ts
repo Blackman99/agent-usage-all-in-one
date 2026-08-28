@@ -46,16 +46,65 @@ describe('Claude Code quota adapter', () => {
     ]);
   });
 
+  it('parses the current Claude Team usage screen and its timezone-aware reset times', () => {
+    expect(
+      parseClaudeUsageScreen(currentUsageScreenFixture, new Date('2026-08-28T02:00:00.000Z'))
+    ).toEqual([
+      {
+        id: 'current-session',
+        label: '5 hour',
+        usedPercent: 25,
+        resetsAt: '2026-08-28T06:50:00.000Z'
+      },
+      {
+        id: 'current-week-all-models',
+        label: 'Week · All models',
+        usedPercent: 41,
+        resetsAt: '2026-08-31T16:00:00.000Z'
+      },
+      {
+        id: 'current-week-fable',
+        label: 'Week · Fable only',
+        usedPercent: 75,
+        resetsAt: '2026-08-31T15:59:00.000Z'
+      }
+    ]);
+  });
+
+  it('reconciles screen redraws without inventing a Refreshing quota bucket', () => {
+    const quota = parseClaudeUsageScreen(
+      `${currentUsageScreenFixture}
+Refreshing…
+26% 26% used
+Resets 2:49pm (Asia/Shanghai)
+Current week (all models)
+42% 42% used
+Resets Aug 31 at 11:59pm (Asia/Shanghai)
+Esc to cancelCurrent week (all models)
+43% 43% used
+Resets Aug 31 at 11:59pm (Asia/Shanghai)`,
+      new Date('2026-08-28T02:00:00.000Z')
+    );
+
+    expect(quota).toHaveLength(3);
+    expect(quota.some((bucket) => bucket.label === 'Refreshing…')).toBe(false);
+    expect(quota).toContainEqual(
+      expect.objectContaining({ label: 'Week · All models', usedPercent: 43 })
+    );
+  });
+
   it('runs only the official screen-reader usage command and never requests OAuth material', async () => {
     const process = new FakeClaudeUsageProcess();
     const client = new ScreenReaderClaudeQuotaClient({
       command: '/usr/local/bin/claude',
       spawnProcess: (_command, arguments_) => {
         expect(arguments_[0]).toBe('-c');
-        expect(arguments_[1]).toContain(
-          'spawn {/usr/local/bin/claude} --safe-mode --ax-screen-reader'
+        const script = arguments_[1];
+        expect(script).toContain('spawn {/usr/local/bin/claude} --safe-mode --ax-screen-reader');
+        expect(script).toContain('send -- "/usage\\r"');
+        expect(script.indexOf('__CLAUDE_USAGE_DONE__')).toBeGreaterThan(
+          script.indexOf('send -- "/exit\\r"')
         );
-        expect(arguments_[1]).toContain('send -- "/usage\\r"');
         return process;
       },
       timeoutMs: 1_000,
@@ -63,7 +112,81 @@ describe('Claude Code quota adapter', () => {
     });
 
     await expect(client.readQuota()).resolves.toHaveLength(4);
-    expect(process.killed).toBe(true);
+    expect(process.killed).toBe(false);
+  });
+
+  it('keeps enough time for both client startup and the complete Fable redraw', async () => {
+    const process = new FakeClaudeUsageProcess();
+    let script = '';
+    const client = new ScreenReaderClaudeQuotaClient({
+      spawnProcess: (_command, arguments_) => {
+        script = arguments_[1];
+        return process;
+      },
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await expect(client.readQuota()).resolves.toHaveLength(4);
+    expect(script).toContain('send -- "/usage\\r"\nset timeout 8');
+    expect(script).toContain('-re {Esc to cancel} {\n    set timeout 14');
+  });
+
+  it('isolates subscription quota reads from API and hosted-provider overrides', async () => {
+    const process = new FakeClaudeUsageProcess();
+    const client = new ScreenReaderClaudeQuotaClient({
+      environment: {
+        PATH: '/usr/local/bin',
+        CLAUDE_CODE_OAUTH_TOKEN: 'subscription-session-token',
+        ANTHROPIC_API_KEY: 'api-key',
+        ANTHROPIC_AUTH_TOKEN: 'proxy-token',
+        ANTHROPIC_BASE_URL: 'https://proxy.example.test',
+        ANTHROPIC_MODEL: 'proxy-model',
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        CLAUDE_CODE_USE_VERTEX: '1',
+        CLAUDE_CODE_USE_FOUNDRY: '1'
+      },
+      spawnProcess: (_command, _arguments, options) => {
+        expect(options.env).toEqual({
+          PATH: '/usr/local/bin',
+          CLAUDE_CODE_OAUTH_TOKEN: 'subscription-session-token'
+        });
+        return process;
+      },
+      timeoutMs: 1_000,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await expect(client.readQuota()).resolves.toHaveLength(4);
+  });
+
+  it('waits for the completed usage screen before returning delayed Fable quota', async () => {
+    const process = new FakeDelayedClaudeUsageProcess();
+    const client = new ScreenReaderClaudeQuotaClient({
+      spawnProcess: () => process,
+      timeoutMs: 1_000,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await expect(client.readQuota()).resolves.toEqual([
+      expect.objectContaining({ label: '5 hour' }),
+      expect.objectContaining({ label: 'Week · All models' }),
+      expect.objectContaining({ label: 'Week · Fable only' })
+    ]);
+  });
+
+  it('uses a complete quota screen when the official client exits before the completion marker', async () => {
+    const process = new FakeClaudeExitAfterUsageProcess();
+    const client = new ScreenReaderClaudeQuotaClient({
+      spawnProcess: () => process,
+      timeoutMs: 1_000,
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await expect(client.readQuota()).resolves.toEqual([
+      expect.objectContaining({ label: '5 hour' }),
+      expect.objectContaining({ label: 'Week · All models' }),
+      expect.objectContaining({ label: 'Week · Fable only' })
+    ]);
   });
 
   it('fails closed when the official screen has no subscription quota', () => {
@@ -168,6 +291,20 @@ Resets Aug 31, 5:59 PM (Asia/Shanghai)
 Esc to cancel
 `;
 
+const currentUsageScreenFixture = `
+Settings  Status   Config   Usage   Stats
+Current session
+25% 25% used
+Resets 2:50pm (Asia/Shanghai)
+Current week (all models)
+41% 41% used
+Resets Sep 1 at 12am (Asia/Shanghai)
+Current week (Fable)
+75% 75% used
+Resets Aug 31 at 11:59pm (Asia/Shanghai)
+Esc to cancel
+`;
+
 const otlpFixture = {
   resourceMetrics: [
     {
@@ -229,6 +366,61 @@ class FakeClaudeUsageProcess extends EventEmitter implements ClaudeUsageProcess 
   kill(): boolean {
     this.killed = true;
     this.emit('exit', 0, null);
+    return true;
+  }
+}
+
+class FakeDelayedClaudeUsageProcess extends EventEmitter implements ClaudeUsageProcess {
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  killed = false;
+
+  constructor() {
+    super();
+    queueMicrotask(() => {
+      this.stdout.write(`
+Current session
+25% 25% used
+Resets 2:50pm (Asia/Shanghai)
+Current week (all models)
+41% 41% used
+Resets Sep 1 at 12am (Asia/Shanghai)
+Esc to cancel
+`);
+      setTimeout(() => {
+        this.stdout.write(`
+Current week (Fable)
+75% 75% used
+Resets Aug 31 at 11:59pm (Asia/Shanghai)
+Esc to cancel
+__CLAUDE_USAGE_DONE__
+`);
+      }, 10);
+    });
+  }
+
+  kill(): boolean {
+    this.killed = true;
+    this.emit('exit', 0, null);
+    return true;
+  }
+}
+
+class FakeClaudeExitAfterUsageProcess extends EventEmitter implements ClaudeUsageProcess {
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+
+  constructor() {
+    super();
+    queueMicrotask(() => {
+      this.stdout.write(currentUsageScreenFixture);
+      this.emit('exit', 22, null);
+    });
+  }
+
+  kill(): boolean {
     return true;
   }
 }

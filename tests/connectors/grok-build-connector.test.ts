@@ -31,6 +31,7 @@ describe('Grok Build official billing adapter', () => {
 
     await expect(client.readBilling()).resolves.toEqual(billingFixture);
     expect(process.methods).toEqual(['initialize', 'x.ai/billing']);
+    expect(process.requests[1]).toMatchObject({ method: 'x.ai/billing', params: {} });
     expect(JSON.stringify(process.requests)).not.toContain('oauth');
     expect(process.killed).toBe(true);
   });
@@ -39,12 +40,66 @@ describe('Grok Build official billing adapter', () => {
     const process = new FakeGrokBillingProcess(undefined, -32601);
     const client = new StdioGrokBillingClient({
       spawnProcess: () => process,
+      readUnifiedLog: async () => '',
       timeoutMs: 1_000
     });
 
     await expect(client.readBilling()).rejects.toMatchObject({
       code: 'grok-billing-capability-unsupported',
       recovery: 'Open Grok Build and run /usage, then update Grok Build before retrying.'
+    });
+  });
+
+  it('falls back to the latest official unified-log billing event when ACP is unavailable', async () => {
+    const process = new FakeGrokBillingProcess(undefined, -32601);
+    const client = new StdioGrokBillingClient({
+      spawnProcess: () => process,
+      readUnifiedLog: async () => grokBillingLogFixture,
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).resolves.toEqual({
+      ...billingFixture,
+      onDemandEnabled: null,
+      sourceObservedAt: '2026-08-28T02:37:06.249Z'
+    });
+    expect(process.killed).toBe(true);
+  });
+
+  it('uses the official unified log when the Grok executable cannot start', async () => {
+    const client = new StdioGrokBillingClient({
+      spawnProcess() {
+        throw new Error('grok is not on PATH');
+      },
+      readUnifiedLog: async () => grokBillingLogFixture,
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).resolves.toMatchObject({
+      subscriptionTier: 'SuperGrok Heavy',
+      sourceObservedAt: '2026-08-28T02:37:06.249Z'
+    });
+  });
+
+  it('skips malformed observation timestamps and keeps searching older billing events', async () => {
+    const process = new FakeGrokBillingProcess(undefined, -32601);
+    const client = new StdioGrokBillingClient({
+      spawnProcess: () => process,
+      readUnifiedLog: async () =>
+        [
+          grokBillingLogFixture,
+          JSON.stringify({
+            ts: 'not-a-timestamp',
+            msg: 'billing: fetched credits config',
+            ctx: billingFixture
+          })
+        ].join('\n'),
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).resolves.toMatchObject({
+      subscriptionTier: 'SuperGrok Heavy',
+      sourceObservedAt: '2026-08-28T02:37:06.249Z'
     });
   });
 });
@@ -80,6 +135,20 @@ describe('GrokBuildConnector', () => {
       }
     ]);
     expect(snapshot.quotaBuckets.some((bucket) => bucket.label.includes('5 hour'))).toBe(false);
+  });
+
+  it('preserves the official log observation time instead of presenting fallback data as fresh', async () => {
+    const billingClient: GrokBuildBillingClient = {
+      async readBilling() {
+        return { ...billingFixture, sourceObservedAt: '2026-08-28T02:37:06.249Z' };
+      }
+    };
+    const snapshot = await new GrokBuildConnector({
+      billingClient,
+      clock: () => new Date('2026-08-28T05:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.observedAt).toBe('2026-08-28T02:37:06.249Z');
   });
 
   it('keeps the provider available with an actionable /usage recovery when billing is unavailable', async () => {
@@ -190,6 +259,16 @@ const billingFixture = {
   onDemandEnabled: true,
   subscriptionTier: 'SuperGrok Heavy'
 };
+
+const grokBillingLogFixture = [
+  JSON.stringify({ ts: '2026-08-28T02:00:00.000Z', msg: 'unrelated event', ctx: {} }),
+  '{malformed-json',
+  JSON.stringify({
+    ts: '2026-08-28T02:37:06.249Z',
+    msg: 'billing: fetched credits config',
+    ctx: { ...billingFixture, onDemandEnabled: null }
+  })
+].join('\n');
 
 const grokOtlpFixture = {
   resourceMetrics: [

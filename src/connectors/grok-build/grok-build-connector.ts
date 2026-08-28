@@ -30,8 +30,9 @@ const billingConfigSchema = z
 export const grokBillingResponseSchema = z
   .object({
     config: billingConfigSchema.nullable(),
-    onDemandEnabled: z.boolean().optional(),
-    subscriptionTier: z.string().optional()
+    onDemandEnabled: z.boolean().nullable().optional(),
+    subscriptionTier: z.string().optional(),
+    sourceObservedAt: z.string().datetime({ offset: true }).optional()
   })
   .passthrough();
 
@@ -61,8 +62,10 @@ export class GrokBuildConnector implements Connector {
   async collect(): Promise<ConnectorSnapshot> {
     const warnings: ConnectorFailure[] = [];
     let quotaBuckets: QuotaBucket[] = [];
+    let observedAt = this.#clock().toISOString();
     try {
       const billing = await this.#billingClient.readBilling();
+      observedAt = billing.sourceObservedAt ?? observedAt;
       quotaBuckets = mapBillingQuota(billing);
       if (quotaBuckets.length === 0) {
         warnings.push({
@@ -82,7 +85,7 @@ export class GrokBuildConnector implements Connector {
       usage: [],
       costs: [],
       warnings,
-      observedAt: this.#clock().toISOString()
+      observedAt
     };
   }
 }
