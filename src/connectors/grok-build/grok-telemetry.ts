@@ -67,7 +67,7 @@ export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): Connec
         throw new GrokTelemetryError(
           'grok-otel-temporality-unsupported',
           'Cumulative Grok Build metrics cannot be safely added to local history.',
-          'Use agent-usage telemetry-env --provider grok to configure delta metrics.'
+          'Update Grok Build, restart it with delta telemetry enabled, then refresh Agent Usage.'
         );
       }
       const points = Array.isArray(metric.sum?.dataPoints)

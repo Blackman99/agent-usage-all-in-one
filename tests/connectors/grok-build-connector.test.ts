@@ -214,6 +214,20 @@ describe('Grok Build usage observations', () => {
     );
   });
 
+  it('rejects cumulative metrics without exposing a manual telemetry command', () => {
+    const cumulative = structuredClone(grokOtlpFixture);
+    cumulative.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.aggregationTemporality =
+      'AGGREGATION_TEMPORALITY_CUMULATIVE';
+
+    expect(() => parseGrokOtlpMetrics(cumulative, new Date('2026-08-28T02:00:00.000Z'))).toThrow(
+      expect.objectContaining({
+        code: 'grok-otel-temporality-unsupported',
+        recovery:
+          'Update Grok Build, restart it with delta telemetry enabled, then refresh Agent Usage.'
+      })
+    );
+  });
+
   it('normalizes official headless JSON while treating absent cost as unknown, not zero', () => {
     const snapshot = parseGrokHeadlessResult(
       {

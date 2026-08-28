@@ -22,7 +22,7 @@ interface UsageAggregate {
 export class ClaudeTelemetryError extends Error {
   readonly code = 'claude-otel-temporality-unsupported';
   readonly recovery =
-    'Use agent-usage telemetry-env --provider claude-code to configure delta metrics.';
+    'Update Claude Code, restart it with delta telemetry enabled, then refresh Agent Usage.';
 
   constructor() {
     super('Cumulative Claude Code metrics cannot be safely added to local history.');

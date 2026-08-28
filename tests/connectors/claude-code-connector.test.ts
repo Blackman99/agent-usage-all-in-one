@@ -290,7 +290,11 @@ describe('Claude Code OTLP metrics', () => {
       'AGGREGATION_TEMPORALITY_CUMULATIVE';
 
     expect(() => parseClaudeOtlpMetrics(cumulative, new Date('2026-08-28T02:00:00.000Z'))).toThrow(
-      expect.objectContaining({ code: 'claude-otel-temporality-unsupported' })
+      expect.objectContaining({
+        code: 'claude-otel-temporality-unsupported',
+        recovery:
+          'Update Claude Code, restart it with delta telemetry enabled, then refresh Agent Usage.'
+      })
     );
   });
 });

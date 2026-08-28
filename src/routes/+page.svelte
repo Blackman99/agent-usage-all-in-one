@@ -3,7 +3,6 @@
 
   import type {
     BillingDomainOverview,
-    CostKind,
     CoverageLevel,
     DataAuthority,
     BillingHistory,
@@ -38,6 +37,7 @@
   let pendingConnectorId: string | null = null;
   let secretInputs: Record<string, string> = {};
   let selectedBillingDomains: Record<string, string> = {};
+  let activeDashboardView: 'agents' | 'models' = 'agents';
   let selectedWindow: HistoryWindow = '7d';
   let selectedCurrency: 'CNY' | 'USD' = 'CNY';
   let selectedTrendMetric: 'tokens' | 'retail-equivalent' = 'tokens';
@@ -535,17 +535,6 @@
     return t(confidence === 'high' ? 'confidenceHigh' : 'confidenceMedium');
   }
 
-  function costKindLabel(kind: CostKind): string {
-    const keys: Record<CostKind, MessageKey> = {
-      actual: 'costActual',
-      subscription: 'costSubscription',
-      'reported-estimate': 'costReportedEstimate',
-      'retail-equivalent': 'costRetailEquivalent',
-      'legacy-unknown': 'costLegacyUnknown'
-    };
-    return t(keys[kind]);
-  }
-
   function providerHealthMessage(target: { health: ProviderOverview['health'] }): string | null {
     return locale === 'en' ? target.health.message : t('providerDegraded');
   }
@@ -583,13 +572,6 @@
         forecasts: [],
         forecastCoverage: provider.forecastCoverage
       }
-    );
-  }
-
-  function activeHistory(domain: BillingDomainOverview): BillingHistory {
-    return (
-      domain.history ??
-      fallbackHistory(domain.tokenTotals, domain.costs, domain.tokenAuthority, domain.tokenEvidence)
     );
   }
 
@@ -631,17 +613,6 @@
       authorities: tokenAuthority === 'mixed' ? undefined : tokenAuthority ? [tokenAuthority] : [],
       lastObservedAt: null
     };
-  }
-
-  function historyTokenAuthority(
-    history: BillingHistory,
-    fallback: BillingDomainOverview['tokenAuthority']
-  ): BillingDomainOverview['tokenAuthority'] {
-    if (!history.lastObservedAt) return null;
-    if (!history.authorities) return fallback;
-    const authorities = [...new Set(history.authorities)];
-    if (authorities.length === 0) return null;
-    return authorities.length === 1 ? authorities[0] : 'mixed';
   }
 
   async function selectWindow(window: HistoryWindow): Promise<void> {
@@ -889,16 +860,6 @@
     return null;
   }
 
-  function tokenTelemetryCommand(providerId: string, billingDomainId: string): string | null {
-    if (providerId === 'claude-code' && billingDomainId === 'subscription') {
-      return 'eval "$(agent-usage telemetry-env --provider claude-code)"';
-    }
-    if (providerId === 'grok' && billingDomainId === 'grok-build-subscription') {
-      return 'eval "$(agent-usage telemetry-env --provider grok)"';
-    }
-    return null;
-  }
-
   function formatMoney(amount: number | null, currency: string): string {
     if (amount === null) return '—';
     return new Intl.NumberFormat(locale, {
@@ -1099,867 +1060,611 @@
       {#if overview.providers.length === 0}
         <div class="state compact">{t('noProviders')}</div>
       {/if}
-      <section class="global-summary" aria-labelledby="global-summary-heading">
-        <div class="global-summary-heading">
-          <div>
-            <p class="eyebrow">{selectedWindow}</p>
-            <h2 id="global-summary-heading">{t('globalSummary')}</h2>
-          </div>
-          <div class="history-toolbar" aria-label={t('history')}>
-            {#each ['24h', '7d', '30d'] as window (window)}
-              <button
-                type="button"
-                aria-pressed={selectedWindow === window}
-                on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
-              >
-            {/each}
-          </div>
-        </div>
-        {#if overview.globalSummary}
-          {@const summary = overview.globalSummary}
-          <div class="summary-metrics">
-            <article>
-              <span>{t('recordedTokens')}</span>
-              <strong
-                data-testid="summary-recorded-tokens"
-                aria-label={summary.recordedTokens === null
-                  ? t('notAvailable')
-                  : tokenValueLabel(summary.recordedTokens)}
-              >
-                {summary.recordedTokens === null
-                  ? t('notAvailable')
-                  : formatCompactNumber(summary.recordedTokens)}
-              </strong>
-              <small>
-                {#if summary.recordedTokens === null}
-                  {t('noObservations')}
-                {:else}
-                  {t('classificationCoverage')}:
-                  {formatPercent(summary.tokenEvidence.classificationCoverage)} ·
-                  {t('timePrecision')}:
-                  {summary.tokenEvidence.timePrecisions.map(timePrecisionLabel).join(' + ') ||
-                    t('unknown')}
-                {/if}
-              </small>
-              <small>
-                {t('source')}: {displayAuthorities(overviewTokenEvidence.authorities)} ·
-                {formatReset(overviewTokenEvidence.lastObservedAt)}
-              </small>
-            </article>
-            <article>
-              <span>{t('apiRetailEquivalent')}</span>
-              <strong data-testid="summary-retail-equivalent">
-                {summary.apiRetailEquivalent.status === 'available'
-                  ? formatMoney(
-                      summary.apiRetailEquivalent.amount,
-                      summary.apiRetailEquivalent.currency
-                    )
-                  : t('notAvailable')}
-              </strong>
-              <small>
-                {t('pricingCoverage')}:
-                {formatPercent(summary.apiRetailEquivalent.pricingCoverage)}
-              </small>
-              <small>
-                {t('source')}: {displayAuthorities(
-                  overview.workbench.costs.retailEquivalent.authorities
-                )} · {formatReset(overview.workbench.costs.retailEquivalent.observedAt)}
-              </small>
-            </article>
-            <article>
-              <span>{t('mostConstrained')}</span>
-              <strong>
-                {summary.mostConstrained
-                  ? `${summary.mostConstrained.displayName} · ${summary.mostConstrained.label}`
-                  : t('notAvailable')}
-              </strong>
-              <small>
-                {#if summary.mostConstrained}
-                  {formatNumber(summary.mostConstrained.remainingPercent)}% {t('remaining')} ·
-                  {formatRelativeReset(summary.mostConstrained.resetsAt)} ·
-                  {formatReset(summary.mostConstrained.resetsAt)}
-                  · {authorityLabel(summary.mostConstrained.authority ?? 'unavailable')} ·
-                  {formatReset(summary.mostConstrained.observedAt ?? null)}
-                {:else}
-                  {t('notAvailable')}
-                {/if}
-              </small>
-            </article>
-            <article>
-              <span>{t('latestData')}</span>
-              <strong>
-                {summary.latestObservedAt
-                  ? formatReset(summary.latestObservedAt)
-                  : t('notAvailable')}
-              </strong>
-              <small>{t('generatedAt')}: {formatReset(summary.generatedAt)}</small>
-            </article>
-          </div>
-          {#if summary.contributions.length > 0}
-            <div class="summary-contributions" aria-label={t('domainContributions')}>
-              {#each summary.contributions as contribution (`${contribution.providerId}:${contribution.billingDomainId}`)}
-                <span>
-                  {contribution.providerDisplayName} · {contribution.billingDomainDisplayName}
-                  <b aria-label={tokenValueLabel(contribution.recordedTokens)}
-                    >{formatCompactNumber(contribution.recordedTokens)}</b
-                  >
-                  <small>
-                    {#if contribution.includedInHeadline === false}
-                      {t('separateFromHeadline')} ·
-                    {/if}
-                    {displayAuthorities(contribution.authorities)} ·
-                    {formatReset(contribution.lastObservedAt ?? null)}
-                  </small>
-                </span>
-              {/each}
-            </div>
-          {/if}
-        {/if}
-      </section>
-      {#if risk}
-        <section class="risk-banner" aria-label={t('riskOverview')}>
-          <div>
-            <strong>{risk.title}</strong>
-            <span>{risk.detail}</span>
-          </div>
-          <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
-        </section>
-      {/if}
-      <section class="providers" aria-label={t('providersLabel')}>
-        {#each displayProviders(overview, connectors) as provider (provider.id)}
-          {@const logo = providerLogoSources(provider.id)}
-          {@const selectedDomain = activeBillingDomain(
-            provider,
-            selectedBillingDomains[provider.id]
-          )}
-          {@const recoveryDiagnostic = degradedDiagnosticForProvider(
-            diagnostics,
-            provider.id,
-            selectedDomain.id
-          )}
-          {@const domainFreshness = selectedDomain.freshness ?? provider.freshness}
-          {@const domainHealth = selectedDomain.health ?? provider.health}
-          {@const domainCoverage = selectedDomain.coverage ?? provider.coverage}
-          <article class="provider-card">
-            <div class="provider-heading">
+      <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
+        <button
+          id="agent-usage-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeDashboardView === 'agents'}
+          aria-controls="agent-usage-panel"
+          tabindex={activeDashboardView === 'agents' ? 0 : -1}
+          on:click={() => (activeDashboardView = 'agents')}
+          on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
+        >
+        <button
+          id="token-model-costs-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeDashboardView === 'models'}
+          aria-controls="token-model-costs-panel"
+          tabindex={activeDashboardView === 'models' ? 0 : -1}
+          on:click={() => (activeDashboardView = 'models')}
+          on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
+        >
+      </div>
+      {#if activeDashboardView === 'agents'}
+        <div
+          id="agent-usage-panel"
+          data-testid="agent-usage-panel"
+          role="tabpanel"
+          aria-labelledby="agent-usage-tab"
+        >
+          {#if risk}
+            <section class="risk-banner" aria-label={t('riskOverview')}>
               <div>
-                {#if logo}
-                  <picture class="provider-logo" data-provider-logo={provider.id}>
-                    <source media="(prefers-color-scheme: light)" srcset={logo.light} />
-                    <source media="(prefers-color-scheme: dark)" srcset={logo.dark} />
-                    <img src={logo.dark} alt="" />
-                  </picture>
-                {/if}
-                <div>
-                  <h2 data-provider-logo={logo ? undefined : provider.id}>
-                    {provider.displayName}
-                  </h2>
-                  <p class="freshness" data-status={domainFreshness.status}>
-                    <span></span>
-                    {domainFreshness.status === 'fresh'
-                      ? t('updatedNow')
-                      : domainFreshness.status === 'stale'
-                        ? t('stale')
-                        : t('unavailable')}
-                    {domainFreshness.lastSuccessAt
-                      ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
-                      : ''}
-                  </p>
+                <strong>{risk.title}</strong>
+                <span>{risk.detail}</span>
+              </div>
+              <button on:click={() => openSettings(risk.target)}>{t('reviewInSettings')}</button>
+            </section>
+          {/if}
+          <section class="providers" aria-label={t('providersLabel')}>
+            {#each displayProviders(overview, connectors) as provider (provider.id)}
+              {@const logo = providerLogoSources(provider.id)}
+              {@const selectedDomain = activeBillingDomain(
+                provider,
+                selectedBillingDomains[provider.id]
+              )}
+              {@const recoveryDiagnostic = degradedDiagnosticForProvider(
+                diagnostics,
+                provider.id,
+                selectedDomain.id
+              )}
+              {@const domainFreshness = selectedDomain.freshness ?? provider.freshness}
+              {@const domainHealth = selectedDomain.health ?? provider.health}
+              {@const domainCoverage = selectedDomain.coverage ?? provider.coverage}
+              <article class="provider-card">
+                <div class="provider-heading">
+                  <div>
+                    {#if logo}
+                      <picture class="provider-logo" data-provider-logo={provider.id}>
+                        <source media="(prefers-color-scheme: light)" srcset={logo.light} />
+                        <source media="(prefers-color-scheme: dark)" srcset={logo.dark} />
+                        <img src={logo.dark} alt="" />
+                      </picture>
+                    {/if}
+                    <div>
+                      <h2 data-provider-logo={logo ? undefined : provider.id}>
+                        {provider.displayName}
+                      </h2>
+                      <p class="freshness" data-status={domainFreshness.status}>
+                        <span></span>
+                        {domainFreshness.status === 'fresh'
+                          ? t('updatedNow')
+                          : domainFreshness.status === 'stale'
+                            ? t('stale')
+                            : t('unavailable')}
+                        {domainFreshness.lastSuccessAt
+                          ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
+                          : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
                 </div>
-              </div>
-              <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
-            </div>
 
-            {#if domainHealth.status === 'degraded'}
-              <div class="degraded" role="status">
-                <strong>
-                  {recoveryDiagnostic
-                    ? `${recoveryDiagnostic.id} · ${diagnosticCategoryLabel(recoveryDiagnostic)}`
-                    : providerHealthMessage({ health: domainHealth })}
-                </strong>
-                <code>
-                  {recoveryDiagnostic
-                    ? diagnosticRecovery(recoveryDiagnostic)
-                    : providerHealthRecovery({ health: domainHealth })}
-                </code>
-                <button
-                  on:click={() =>
-                    openSettings(
-                      diagnosticTargetForProvider(diagnostics, provider.id, selectedDomain.id)
-                    )}>{t('reviewInSettings')}</button
-                >
-              </div>
-            {/if}
-
-            {#if (provider.billingDomains?.length ?? 0) > 1}
-              <div
-                class="domain-tabs"
-                role="tablist"
-                aria-label={`${provider.displayName} ${t('billingDomainTabs')}`}
-              >
-                {#each provider.billingDomains as domain (domain.id)}
-                  {@const selected = selectedDomain.id === domain.id}
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    tabindex={selected ? 0 : -1}
-                    on:click={() => selectBillingDomain(provider.id, domain.id)}
-                    on:keydown={handleTablistKeydown}>{domain.displayName}</button
-                  >
-                {/each}
-              </div>
-            {/if}
-
-            {#each [selectedDomain] as domain (domain.id)}
-              {@const history = activeHistory(domain)}
-              {@const tokenAuthority = historyTokenAuthority(history, domain.tokenAuthority)}
-              {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
-              {#if connector}
-                {#if connector.state === 'connected'}
-                  <div class="connected-summary" data-testid={`connector-${connector.id}`}>
-                    <span>
-                      <strong>{connectorStateLabel(connector.state)}</strong>
-                      <small>{connector.target.billingDomain.displayName}</small>
-                    </span>
-                    <button on:click={() => openSettings(`connector:${connector.id}`)}
-                      >{t('manageConnection')}</button
+                {#if domainHealth.status === 'degraded'}
+                  <div class="degraded" role="status">
+                    <strong>
+                      {recoveryDiagnostic
+                        ? `${recoveryDiagnostic.id} · ${diagnosticCategoryLabel(recoveryDiagnostic)}`
+                        : providerHealthMessage({ health: domainHealth })}
+                    </strong>
+                    <code>
+                      {recoveryDiagnostic
+                        ? diagnosticRecovery(recoveryDiagnostic)
+                        : providerHealthRecovery({ health: domainHealth })}
+                    </code>
+                    <button
+                      on:click={() =>
+                        openSettings(
+                          diagnosticTargetForProvider(diagnostics, provider.id, selectedDomain.id)
+                        )}>{t('reviewInSettings')}</button
                     >
                   </div>
-                {:else}
-                  <details
-                    class:connection-pending={pendingConnectorId === connector.id}
-                    class="inline-connection"
-                    data-testid={`connector-${connector.id}`}
-                    aria-busy={pendingConnectorId === connector.id}
-                    open
+                {/if}
+
+                {#if (provider.billingDomains?.length ?? 0) > 1}
+                  <div
+                    class="domain-tabs"
+                    role="tablist"
+                    aria-label={`${provider.displayName} ${t('billingDomainTabs')}`}
                   >
-                    <summary>
-                      <span>
-                        <strong>{connectorStateLabel(connector.state)}</strong>
-                        {#if connector.experimental}<small>{t('experimental')}</small>{/if}
-                      </span>
-                      {t('connectionSetup')}
-                    </summary>
-                    <div class="inline-connection-body">
-                      <p class="permission">{connectorPermission(connector)}</p>
-                      <div class="connection-meta">
-                        <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
-                        <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
-                      </div>
-                      <div class="coverage-list">
-                        <span>{t('coverageLabel')}</span>
-                        <strong
-                          >{connector.expectedCoverage
-                            .map(coverageDimensionLabel)
-                            .join(' · ')}</strong
+                    {#each provider.billingDomains as domain (domain.id)}
+                      {@const selected = selectedDomain.id === domain.id}
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        tabindex={selected ? 0 : -1}
+                        on:click={() => selectBillingDomain(provider.id, domain.id)}
+                        on:keydown={handleTablistKeydown}>{domain.displayName}</button
+                      >
+                    {/each}
+                  </div>
+                {/if}
+
+                {#each [selectedDomain] as domain (domain.id)}
+                  {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
+                  {#if connector}
+                    {#if connector.state === 'connected'}
+                      <div class="connected-summary" data-testid={`connector-${connector.id}`}>
+                        <span>
+                          <strong>{connectorStateLabel(connector.state)}</strong>
+                          <small>{connector.target.billingDomain.displayName}</small>
+                        </span>
+                        <button on:click={() => openSettings(`connector:${connector.id}`)}
+                          >{t('manageConnection')}</button
                         >
                       </div>
-                      {#if connector.credentialOwner === 'agent-usage'}
-                        <label class="secret-field">
-                          <span>{t('managementKey')}</span>
-                          <input
-                            type="password"
-                            autocomplete="off"
-                            aria-label={`${connector.displayName} ${t('managementKey')}`}
-                            value={secretInputs[connector.id] ?? ''}
-                            on:input={(event) =>
-                              (secretInputs = {
-                                ...secretInputs,
-                                [connector.id]: event.currentTarget.value
-                              })}
-                          />
-                        </label>
-                      {/if}
-                      <div class="connection-actions">
-                        {#if connector.state === 'discovered' || connector.state === 'skipped'}
-                          <button
-                            class="primary-action"
-                            disabled={!connector.installed ||
-                              pendingConnectorId === connector.id ||
-                              (connector.credentialOwner === 'agent-usage' &&
-                                !secretInputs[connector.id])}
-                            on:click={() => configureConnector(connector.id, 'connect')}
-                            >{t('connect')}</button
-                          >
-                        {/if}
-                        {#if connector.state === 'error' || connector.state === 'not-installed'}
-                          <button
-                            disabled={pendingConnectorId === connector.id}
-                            on:click={() => configureConnector(connector.id, 'retry')}
-                            >{t('retry')}</button
-                          >
-                        {/if}
-                        {#if connector.state !== 'skipped'}
-                          <button
-                            disabled={pendingConnectorId === connector.id}
-                            on:click={() => configureConnector(connector.id, 'skip')}
-                            >{t('skip')}</button
-                          >
-                        {/if}
-                      </div>
-                    </div>
-                  </details>
-                {/if}
-              {/if}
-              <div class="section-label">{t('quota')}</div>
-              <div class="quotas">
-                {#each domain.quotaBuckets as bucket (bucket.id)}
-                  <div class="quota-row">
-                    <div class="quota-copy">
-                      <strong>{bucket.label}</strong>
-                      <span>{bucket.usedPercent ?? '—'}% {t('used')}</span>
-                    </div>
-                    <div
-                      class="progress"
-                      class:progress-warning={(bucket.usedPercent ?? 0) >= 70 &&
-                        (bucket.usedPercent ?? 0) < 90}
-                      class:progress-critical={(bucket.usedPercent ?? 0) >= 90}
-                      role="progressbar"
-                      aria-label={bucket.label}
-                      aria-valuemin="0"
-                      aria-valuemax="100"
-                      aria-valuenow={bucket.usedPercent ?? undefined}
-                      aria-valuetext={bucket.usedPercent === null
-                        ? t('notAvailable')
-                        : `${formatNumber(bucket.usedPercent)}% ${t('used')}`}
-                      aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
-                    >
-                      <span style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
-                      ></span>
-                    </div>
-                    <span hidden id={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}>
-                      {t('source')}: {authorityLabel(bucket.authority)} ·
-                      {formatReset(
-                        bucket.observedAt ??
-                          domain.freshness?.lastSuccessAt ??
-                          provider.freshness.lastSuccessAt
-                      )}
-                    </span>
-                    <div class="quota-meta">
-                      <span>
-                        {t('resets')}
-                        {formatReset(bucket.resetsAt)} · {formatRelativeReset(bucket.resetsAt)}
-                      </span>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-              {#if (domain.forecasts?.length ?? 0) > 0}
-                <div class="forecast-list">
-                  {#each domain.forecasts as forecast (forecast.bucketId)}
-                    <p>
-                      <strong>{forecast.label}</strong>
-                      <span
-                        >{forecast.willLastUntilReset
-                          ? t('lastsUntilReset')
-                          : t('exhaustsBeforeReset')}</span
+                    {:else}
+                      <details
+                        class:connection-pending={pendingConnectorId === connector.id}
+                        class="inline-connection"
+                        data-testid={`connector-${connector.id}`}
+                        aria-busy={pendingConnectorId === connector.id}
+                        open
                       >
-                      <small>
-                        {confidenceLabel(forecast.confidence)} · {forecast.evidence.samples}
-                        {t('samples')} ·
-                        {t('predictedExhaustion')}
-                        {formatReset(forecast.predictedExhaustionAt)}
-                        · {authorityLabel('estimate')} · {formatReset(forecast.evidence.windowEnd)}
-                      </small>
-                    </p>
-                  {/each}
-                </div>
-              {/if}
-
-              <div class="section-label">{t('tokens')}</div>
-              {#if tokenAuthority}
-                <p class="token-scope">
-                  {t('source')}: {authorityLabel(tokenAuthority)}
-                  · {formatReset(history.lastObservedAt ?? null)}
-                  <br />
-                  {t('scope')}:
-                  {(history.tokenEvidence?.usageScopes ?? []).map(usageScopeLabel).join(' + ') ||
-                    t('unknown')}
-                  · {t('timePrecision')}:
-                  {(history.tokenEvidence?.timePrecisions ?? [])
-                    .map(timePrecisionLabel)
-                    .join(' + ') || t('unknown')}
-                  · {t('unclassified')}:
-                  {formatNumber(history.tokenEvidence?.unclassifiedTokens ?? 0)}
-                  · {t('aggregationTemporality')}:
-                  {(history.tokenEvidence?.aggregationTemporalities ?? [])
-                    .map(aggregationTemporalityLabel)
-                    .join(' + ') || t('unknown')}
-                </p>
-                <div class="token-total">
-                  <span>{t('total')}</span>
-                  <strong aria-label={tokenValueLabel(history.tokenTotals.total)}>
-                    {formatCompactNumber(history.tokenTotals.total)}
-                  </strong>
-                </div>
-                <details class="token-breakdown">
-                  <summary>{t('tokenBreakdown')}</summary>
-                  <dl class="tokens">
-                    <div>
-                      <dt>{t('input')}</dt>
-                      <dd aria-label={tokenValueLabel(history.tokenTotals.input)}>
-                        {formatCompactNumber(history.tokenTotals.input)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('output')}</dt>
-                      <dd aria-label={tokenValueLabel(history.tokenTotals.output)}>
-                        {formatCompactNumber(history.tokenTotals.output)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('reasoning')}</dt>
-                      <dd aria-label={tokenValueLabel(history.tokenTotals.reasoning ?? 0)}>
-                        {formatCompactNumber(history.tokenTotals.reasoning ?? 0)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('cacheRead')}</dt>
-                      <dd aria-label={tokenValueLabel(history.tokenTotals.cacheRead)}>
-                        {formatCompactNumber(history.tokenTotals.cacheRead)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('cacheWrite')}</dt>
-                      <dd aria-label={tokenValueLabel(history.tokenTotals.cacheWrite)}>
-                        {formatCompactNumber(history.tokenTotals.cacheWrite)}
-                      </dd>
-                    </div>
-                  </dl>
-                </details>
-              {:else}
-                {@const telemetryCommand = tokenTelemetryCommand(provider.id, domain.id)}
-                <div class="token-unavailable">
-                  <strong>{t('tokenObservationsMissing')}</strong>
-                  {#if telemetryCommand}
-                    <span>{t('tokenCollectionEnable')}</span>
-                    <code>{telemetryCommand}</code>
+                        <summary>
+                          <span>
+                            <strong>{connectorStateLabel(connector.state)}</strong>
+                            {#if connector.experimental}<small>{t('experimental')}</small>{/if}
+                          </span>
+                          {t('connectionSetup')}
+                        </summary>
+                        <div class="inline-connection-body">
+                          <p class="permission">{connectorPermission(connector)}</p>
+                          <div class="connection-meta">
+                            <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
+                            <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
+                          </div>
+                          <div class="coverage-list">
+                            <span>{t('coverageLabel')}</span>
+                            <strong
+                              >{connector.expectedCoverage
+                                .map(coverageDimensionLabel)
+                                .join(' · ')}</strong
+                            >
+                          </div>
+                          {#if connector.credentialOwner === 'agent-usage'}
+                            <label class="secret-field">
+                              <span>{t('managementKey')}</span>
+                              <input
+                                type="password"
+                                autocomplete="off"
+                                aria-label={`${connector.displayName} ${t('managementKey')}`}
+                                value={secretInputs[connector.id] ?? ''}
+                                on:input={(event) =>
+                                  (secretInputs = {
+                                    ...secretInputs,
+                                    [connector.id]: event.currentTarget.value
+                                  })}
+                              />
+                            </label>
+                          {/if}
+                          <div class="connection-actions">
+                            {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                              <button
+                                class="primary-action"
+                                disabled={!connector.installed ||
+                                  pendingConnectorId === connector.id ||
+                                  (connector.credentialOwner === 'agent-usage' &&
+                                    !secretInputs[connector.id])}
+                                on:click={() => configureConnector(connector.id, 'connect')}
+                                >{t('connect')}</button
+                              >
+                            {/if}
+                            {#if connector.state === 'error' || connector.state === 'not-installed'}
+                              <button
+                                disabled={pendingConnectorId === connector.id}
+                                on:click={() => configureConnector(connector.id, 'retry')}
+                                >{t('retry')}</button
+                              >
+                            {/if}
+                            {#if connector.state !== 'skipped'}
+                              <button
+                                disabled={pendingConnectorId === connector.id}
+                                on:click={() => configureConnector(connector.id, 'skip')}
+                                >{t('skip')}</button
+                              >
+                            {/if}
+                          </div>
+                        </div>
+                      </details>
+                    {/if}
                   {/if}
-                </div>
-              {/if}
-
-              {#if history.costs.length > 0 || domain.balances.length > 0 || domain.invoices.length > 0}
-                <div class="section-label">{t('billing')}</div>
-                <dl class="billing-records">
-                  {#each history.costs as cost (`${cost.kind}:${cost.currency}`)}
-                    <div>
-                      <dt>{costKindLabel(cost.kind)} · {t('nativeAmount')}</dt>
-                      <dd>{formatMoney(cost.amount, cost.currency)}</dd>
-                      <small>
-                        {#if cost.convertedAmount !== null}
-                          {t('comparison')}: {formatMoney(
-                            cost.convertedAmount,
-                            cost.comparisonCurrency
+                  <div class="section-label">{t('quota')}</div>
+                  <div class="quotas">
+                    {#each domain.quotaBuckets as bucket (bucket.id)}
+                      <div class="quota-row">
+                        <div class="quota-copy">
+                          <strong>{bucket.label}</strong>
+                          <span>{bucket.usedPercent ?? '—'}% {t('used')}</span>
+                        </div>
+                        <div
+                          class="progress"
+                          class:progress-warning={(bucket.usedPercent ?? 0) >= 70 &&
+                            (bucket.usedPercent ?? 0) < 90}
+                          class:progress-critical={(bucket.usedPercent ?? 0) >= 90}
+                          role="progressbar"
+                          aria-label={bucket.label}
+                          aria-valuemin="0"
+                          aria-valuemax="100"
+                          aria-valuenow={bucket.usedPercent ?? undefined}
+                          aria-valuetext={bucket.usedPercent === null
+                            ? t('notAvailable')
+                            : `${formatNumber(bucket.usedPercent)}% ${t('used')}`}
+                          aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
+                        >
+                          <span
+                            style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
+                          ></span>
+                        </div>
+                        <span hidden id={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}>
+                          {t('source')}: {authorityLabel(bucket.authority)} ·
+                          {formatReset(
+                            bucket.observedAt ??
+                              domain.freshness?.lastSuccessAt ??
+                              provider.freshness.lastSuccessAt
                           )}
-                        {:else if cost.conversionUnavailableReason === 'unknown-native-amount'}
-                          {t('unknownAmount')}
-                        {:else}
-                          {t('rateUnavailable')}
-                        {/if}
-                      </small>
-                      <small>
-                        {t('source')}:
-                        {cost.authorities && cost.authorities.length > 0
-                          ? cost.authorities.map(authorityLabel).join(' + ')
-                          : authorityLabel('unavailable')} ·
-                        {formatReset(cost.observedAt ?? null)}
-                      </small>
-                      {#if cost.pricingEvidence}
-                        <small>
-                          {t('pricingCoverage')}:
-                          {formatPercent(cost.pricingEvidence.pricingCoverage)} ·
-                          {formatNumber(cost.pricingEvidence.pricedTokens)} / {formatNumber(
-                            cost.pricingEvidence.recordedTokens
-                          )}
-                          {t('tokens')} · {formatNumber(cost.pricingEvidence.unpricedTokens)}
-                          {t('unpricedTokens')}
-                        </small>
-                      {/if}
-                      {#each cost.priceSnapshots as price (price.id)}
-                        <small>
-                          {t('priceVersion')}: {price.version} · {price.source}{price.contextTier
-                            ? ` · ${price.contextTier}`
-                            : ''}
-                        </small>
+                        </span>
+                        <div class="quota-meta">
+                          <span>
+                            {t('resets')}
+                            {formatReset(bucket.resetsAt)} · {formatRelativeReset(bucket.resetsAt)}
+                          </span>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                  {#if (domain.forecasts?.length ?? 0) > 0}
+                    <div class="forecast-list">
+                      {#each domain.forecasts as forecast (forecast.bucketId)}
+                        <p>
+                          <strong>{forecast.label}</strong>
+                          <span
+                            >{forecast.willLastUntilReset
+                              ? t('lastsUntilReset')
+                              : t('exhaustsBeforeReset')}</span
+                          >
+                          <small>
+                            {confidenceLabel(forecast.confidence)} · {forecast.evidence.samples}
+                            {t('samples')} ·
+                            {t('predictedExhaustion')}
+                            {formatReset(forecast.predictedExhaustionAt)}
+                            · {authorityLabel('estimate')} · {formatReset(
+                              forecast.evidence.windowEnd
+                            )}
+                          </small>
+                        </p>
                       {/each}
                     </div>
-                  {/each}
-                  {#each domain.balances as balance (balance.id)}
-                    <div>
-                      <dt>
-                        {balance.kind === 'prepaid'
-                          ? t('prepaid')
-                          : balance.kind === 'spending-limit'
-                            ? t('spendingLimit')
-                            : t('currentInvoice')}
-                      </dt>
-                      <dd>{formatMoney(balance.amount, balance.currency)}</dd>
-                      <small>
-                        {t('source')}: {authorityLabel(balance.authority)} · {formatReset(
-                          balance.observedAt
-                        )}
-                      </small>
-                    </div>
-                  {/each}
-                  {#each domain.invoices as invoice (invoice.id)}
-                    <div>
-                      <dt>{invoice.number ?? t('invoices')}</dt>
-                      <dd>{formatMoney(invoice.amount, invoice.currency)}</dd>
-                      <small>
-                        {t('source')}: {authorityLabel(invoice.authority)} · {formatReset(
-                          invoice.createdAt
-                        )}
-                      </small>
-                    </div>
-                  {/each}
-                </dl>
-                {#if history.exchangeRates.length > 0}
-                  <div class="rate-evidence">
-                    {#each history.exchangeRates as rate (rate.id)}
-                      <small>
-                        {t('exchangeRate')}: 1 {rate.baseCurrency} = {rate.rate}
-                        {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
-                      </small>
-                    {/each}
-                  </div>
-                {/if}
-              {/if}
-
-              {#if history.models.length > 0 || history.days.length > 0}
-                <div class="history-rankings">
-                  <div>
-                    <strong>{t('topModels')}</strong>
-                    {#each history.models.slice(0, 3) as model (model.model)}
-                      <span>
-                        {model.model}<b aria-label={tokenValueLabel(model.tokenTotals.total)}
-                          >{formatCompactNumber(model.tokenTotals.total)}</b
-                        >
-                        <small>
-                          {displayAuthorities(
-                            model.observations?.map((observation) => observation.authority) ??
-                              history.authorities
-                          )} · {formatReset(
-                            model.observations
-                              ?.map((observation) => observation.observedAt)
-                              .sort((left, right) => right.localeCompare(left))[0] ??
-                              history.lastObservedAt ??
-                              null
-                          )}
-                        </small>
-                      </span>
-                    {/each}
-                  </div>
-                  <div>
-                    <strong>{t('topDays')}</strong>
-                    {#each history.days.slice(-3).reverse() as day (day.day)}
-                      <span>
-                        {day.day}<b aria-label={tokenValueLabel(day.tokenTotals.total)}
-                          >{formatCompactNumber(day.tokenTotals.total)}</b
-                        >
-                        <small>
-                          {displayAuthorities(day.authorities)} ·
-                          {formatReset(day.lastObservedAt ?? null)}
-                        </small>
-                      </span>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            {/each}
-          </article>
-        {/each}
-      </section>
-      {#if overview.workbench}
-        {@const workbench = overview.workbench}
-        <section
-          class="token-money-workbench"
-          data-testid="token-money-workbench"
-          aria-labelledby="token-money-workbench-heading"
-        >
-          <div class="workbench-heading">
-            <div>
-              <p class="eyebrow">{selectedWindow} · {workbench.timeZone}</p>
-              <h2 id="token-money-workbench-heading">{t('tokenMoneyWorkbench')}</h2>
-              <p>{t('workbenchSubtitle')}</p>
-            </div>
-            <div class="workbench-controls">
-              <div class="segmented-control" role="group" aria-label={t('displayCurrency')}>
-                {#each ['CNY', 'USD'] as currency (currency)}
-                  <button
-                    type="button"
-                    aria-pressed={selectedCurrency === currency}
-                    on:click={() => selectCurrency(currency as 'CNY' | 'USD')}>{currency}</button
-                  >
+                  {/if}
                 {/each}
-              </div>
-            </div>
-          </div>
-
-          <div class="workbench-metrics">
-            <article data-testid="workbench-recorded-tokens">
-              <span>{t('recordedTokens')}</span>
-              <strong
-                aria-label={workbench.recordedTokens === null
-                  ? t('notAvailable')
-                  : tokenValueLabel(workbench.recordedTokens)}
-              >
-                {workbench.recordedTokens === null
-                  ? t('notAvailable')
-                  : formatCompactNumber(workbench.recordedTokens)}
-              </strong>
-              <small
-                >{workbench.trend.granularity === 'hour'
-                  ? t('precisionHour')
-                  : t('precisionDay')}</small
-              >
-              <small>
-                {t('source')}: {displayAuthorities(overviewTokenEvidence.authorities)} ·
-                {formatReset(overviewTokenEvidence.lastObservedAt)}
-              </small>
-            </article>
-            {#each workbenchMetrics(workbench) as item (item.id)}
-              <article data-testid={`workbench-${item.id}`}>
-                <span>{t(item.label)}</span>
-                <strong>
-                  {item.metric.status === 'available'
-                    ? formatMoney(item.metric.amount, item.metric.comparisonCurrency)
-                    : t('notAvailable')}
-                </strong>
-                <small>{t('nativeAmount')}: {nativeAmountEvidence(item.metric)}</small>
-                <small>
-                  {t('source')}:
-                  {item.metric.authorities.length > 0
-                    ? item.metric.authorities.map(authorityLabel).join(' + ')
-                    : authorityLabel('unavailable')}
-                  · {formatReset(item.metric.observedAt)}
-                </small>
-                <small>{t('amountCoverage')}: {formatPercent(item.metric.amountCoverage)}</small>
-                {#if item.metric.purpose === 'retail-equivalent'}
-                  <small>{t('pricingCoverage')}: {formatPercent(item.metric.pricingCoverage)}</small
-                  >
-                {/if}
-                {#if item.metric.exchangeRates.length > 0}
-                  {#each item.metric.exchangeRates as rate (rate.id)}
-                    <small>
-                      {t('conversionEvidence')}: 1 {rate.baseCurrency} = {rate.rate}
-                      {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
-                    </small>
-                  {/each}
-                {:else if item.metric.status === 'available' && selectedCurrency === 'USD'}
-                  <small>{t('noConversionNeeded')}</small>
-                {:else if item.metric.conversionUnavailableReasons.length > 0}
-                  <small>{t('rateUnavailable')}</small>
-                {/if}
               </article>
             {/each}
-          </div>
-
-          <article class="workbench-trend">
-            <div class="trend-heading">
-              <div>
-                <span>{t('trendMetric')}</span>
-                <strong data-testid="trend-mode">
-                  {selectedTrendMetric === 'tokens'
-                    ? t('recordedTokens')
-                    : t('apiRetailEquivalent')}
-                </strong>
-              </div>
-              <div class="segmented-control" role="group" aria-label={t('trendMetric')}>
-                <button
-                  type="button"
-                  aria-pressed={selectedTrendMetric === 'tokens'}
-                  on:click={() => (selectedTrendMetric = 'tokens')}
-                  >{t('recordedTokenTrend')}</button
-                >
-                <button
-                  type="button"
-                  aria-pressed={selectedTrendMetric === 'retail-equivalent'}
-                  on:click={() => (selectedTrendMetric = 'retail-equivalent')}
-                  >{t('retailEquivalentTrend')}</button
-                >
-              </div>
-            </div>
-            <div class="trend-chart" aria-hidden="true">
-              {#each workbench.trend.buckets as bucket (bucket.start)}
-                <div class="trend-column" title={bucket.label}>
-                  <div class:trend-gap={bucket.gap} class="trend-stack">
-                    {#if bucket.gap}
-                      <span class="gap-marker">·</span>
-                    {:else}
-                      {#each bucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
-                        {#if (trendValue(segment) ?? 0) > 0}
-                          <span
-                            class="trend-segment"
-                            style={`height: ${Math.max(2, ((trendValue(segment) ?? 0) / trendMaximum(workbench)) * 100)}%; background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
-                            title={trendSegmentDescription(segment)}
-                          ></span>
-                        {/if}
-                      {/each}
-                    {/if}
-                  </div>
-                  <small>{bucket.label.slice(-5)}</small>
+          </section>
+        </div>
+      {:else}
+        <div
+          id="token-model-costs-panel"
+          data-testid="token-model-costs-panel"
+          role="tabpanel"
+          aria-labelledby="token-model-costs-tab"
+        >
+          {#if overview.workbench}
+            {@const workbench = overview.workbench}
+            <section
+              class="token-money-workbench"
+              data-testid="token-money-workbench"
+              aria-labelledby="token-money-workbench-heading"
+            >
+              <div class="workbench-heading">
+                <div>
+                  <p class="eyebrow">{selectedWindow} · {workbench.timeZone}</p>
+                  <h2 id="token-money-workbench-heading">{t('tokenMoneyWorkbench')}</h2>
+                  <p>{t('workbenchSubtitle')}</p>
                 </div>
-              {/each}
-            </div>
-            <div class="trend-legend" aria-hidden="true">
-              {#each trendLegend(workbench) as segment (`${segment.providerId}:${segment.billingDomainId}`)}
-                <span>
-                  <i
-                    style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
-                  ></i>
-                  {segment.providerDisplayName} · {segment.billingDomainDisplayName}
-                  {#if segment.includedInHeadline === false}
-                    · {t('separateFromHeadline')}{/if}
-                </span>
-              {/each}
-            </div>
-            <div class="trend-data">
-              <table
-                aria-label={`${t('trendData')} · ${selectedWindow} · ${workbench.timeZone} · ${workbench.trend.granularity === 'hour' ? t('precisionHour') : t('precisionDay')} · ${t('trendSummary')}`}
-              >
-                <thead>
-                  <tr>
-                    <th>{t('interval')}</th>
-                    <th>{t('providerEvidence')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each workbench.trend.buckets as bucket (bucket.start)}
-                    <tr>
-                      <td>{bucket.label}</td>
-                      <td>
-                        {bucket.gap
-                          ? t('gap')
-                          : bucket.segments.map(trendSegmentDescription).join('; ')}
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <section
-            class="model-ranking"
-            data-testid="model-ranking"
-            aria-labelledby="model-ranking-heading"
-          >
-            <div class="ranking-heading">
-              <div>
-                <h3 id="model-ranking-heading">{t('topModels')}</h3>
-                <p>{t('modelRankingSubtitle')}</p>
-              </div>
-              <div class="segmented-control" role="group" aria-label={t('topModels')}>
-                <button
-                  type="button"
-                  aria-pressed={modelRankingSort === 'tokens'}
-                  on:click={() => (modelRankingSort = 'tokens')}>{t('sortByTokens')}</button
-                >
-                <button
-                  type="button"
-                  aria-pressed={modelRankingSort === 'retail-equivalent'}
-                  on:click={() => (modelRankingSort = 'retail-equivalent')}
-                  >{t('sortByRetailEquivalent')}</button
-                >
-              </div>
-            </div>
-            <ol class="ranking-list">
-              {#each rankedModels(workbench, modelRankingSort) as model (model.id)}
-                {@const modelLogo = providerLogoSources(model.providerId)}
-                <li>
-                  <button
-                    type="button"
-                    data-testid="model-ranking-row"
-                    on:click={(event) => openModelDetail(model.id, event.currentTarget)}
-                    on:keydown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        void openModelDetail(model.id, event.currentTarget);
-                      }
-                    }}
-                  >
-                    <span class="ranking-identity">
-                      {#if modelLogo}
-                        <picture class="ranking-logo" data-provider-logo={model.providerId}>
-                          <source media="(prefers-color-scheme: light)" srcset={modelLogo.light} />
-                          <source media="(prefers-color-scheme: dark)" srcset={modelLogo.dark} />
-                          <img src={modelLogo.dark} alt="" />
-                        </picture>
-                      {/if}
-                      <span>
-                        <strong>{model.model}</strong>
-                        <small>{model.providerDisplayName} · {model.billingDomainDisplayName}</small
-                        >
-                        {#if model.includedInHeadline === false}
-                          <small>{t('separateFromHeadline')}</small>
-                        {/if}
-                        <small>
-                          {displayAuthorities(model.authorities)} ·
-                          {formatReset(model.lastObservedAt)}
-                        </small>
-                      </span>
-                    </span>
-                    <span class="ranking-value">
-                      <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
-                        >{formatCompactNumber(model.tokenTotals.total)} {t('tokens')}</strong
+                <div class="workbench-controls">
+                  <div class="history-toolbar" aria-label={t('history')}>
+                    {#each ['24h', '7d', '30d'] as window (window)}
+                      <button
+                        type="button"
+                        aria-pressed={selectedWindow === window}
+                        on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
                       >
-                      <small>
-                        {t('tokenShare')}:
-                        {model.includedInHeadline !== false
-                          ? formatPercent(model.tokenShare)
-                          : t('headlineShareNotApplicable')}
-                      </small>
-                    </span>
-                    <span class="ranking-value">
-                      <strong>
-                        {model.retailEquivalent.status === 'available'
-                          ? formatMoney(
-                              model.retailEquivalent.amount,
-                              model.retailEquivalent.comparisonCurrency
-                            )
-                          : t('notAvailable')}
-                      </strong>
-                      <small>
-                        {t('retailShare')}:
-                        {model.includedInHeadline !== false
-                          ? formatPercent(model.retailShare)
-                          : t('headlineShareNotApplicable')}
-                      </small>
-                      <small>
-                        {displayAuthorities(model.retailEquivalent.authorities)} ·
-                        {formatReset(model.retailEquivalent.observedAt)}
-                      </small>
-                    </span>
-                  </button>
-                </li>
-              {/each}
-            </ol>
-            {#if workbench.modelRanking.unclassified.length > 0}
-              <div class="unclassified-usage">
-                <strong>{t('unclassifiedUsage')}</strong>
-                {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
-                  <span>
-                    {item.providerDisplayName} · {item.billingDomainDisplayName}
-                    {#if item.includedInHeadline === false}
-                      · {t('separateFromHeadline')}{/if}
-                    <b aria-label={tokenValueLabel(item.tokenTotals.total)}
-                      >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
+                    {/each}
+                  </div>
+                  <div class="segmented-control" role="group" aria-label={t('displayCurrency')}>
+                    {#each ['CNY', 'USD'] as currency (currency)}
+                      <button
+                        type="button"
+                        aria-pressed={selectedCurrency === currency}
+                        on:click={() => selectCurrency(currency as 'CNY' | 'USD')}
+                        >{currency}</button
+                      >
+                    {/each}
+                  </div>
+                </div>
+              </div>
+
+              <div class="workbench-metrics">
+                <article data-testid="workbench-recorded-tokens">
+                  <span>{t('recordedTokens')}</span>
+                  <strong
+                    aria-label={workbench.recordedTokens === null
+                      ? t('notAvailable')
+                      : tokenValueLabel(workbench.recordedTokens)}
+                  >
+                    {workbench.recordedTokens === null
+                      ? t('notAvailable')
+                      : formatCompactNumber(workbench.recordedTokens)}
+                  </strong>
+                  <small
+                    >{workbench.trend.granularity === 'hour'
+                      ? t('precisionHour')
+                      : t('precisionDay')}</small
+                  >
+                  <small>
+                    {t('source')}: {displayAuthorities(overviewTokenEvidence.authorities)} ·
+                    {formatReset(overviewTokenEvidence.lastObservedAt)}
+                  </small>
+                </article>
+                {#each workbenchMetrics(workbench) as item (item.id)}
+                  <article data-testid={`workbench-${item.id}`}>
+                    <span>{t(item.label)}</span>
+                    <strong>
+                      {item.metric.status === 'available'
+                        ? formatMoney(item.metric.amount, item.metric.comparisonCurrency)
+                        : t('notAvailable')}
+                    </strong>
+                    <small>{t('nativeAmount')}: {nativeAmountEvidence(item.metric)}</small>
+                    <small>
+                      {t('source')}:
+                      {item.metric.authorities.length > 0
+                        ? item.metric.authorities.map(authorityLabel).join(' + ')
+                        : authorityLabel('unavailable')}
+                      · {formatReset(item.metric.observedAt)}
+                    </small>
+                    <small>{t('amountCoverage')}: {formatPercent(item.metric.amountCoverage)}</small
                     >
-                    <small>
-                      {item.includedInHeadline !== false
-                        ? formatPercent(item.tokenShare)
-                        : t('headlineShareNotApplicable')}
-                    </small>
-                    <small>
-                      {displayAuthorities(item.authorities)} · {formatReset(item.lastObservedAt)}
-                    </small>
-                  </span>
+                    {#if item.metric.purpose === 'retail-equivalent'}
+                      <small
+                        >{t('pricingCoverage')}: {formatPercent(item.metric.pricingCoverage)}</small
+                      >
+                    {/if}
+                    {#if item.metric.exchangeRates.length > 0}
+                      {#each item.metric.exchangeRates as rate (rate.id)}
+                        <small>
+                          {t('conversionEvidence')}: 1 {rate.baseCurrency} = {rate.rate}
+                          {rate.quoteCurrency} · {rate.source} · {formatReset(rate.observedAt)}
+                        </small>
+                      {/each}
+                    {:else if item.metric.status === 'available' && selectedCurrency === 'USD'}
+                      <small>{t('noConversionNeeded')}</small>
+                    {:else if item.metric.conversionUnavailableReasons.length > 0}
+                      <small>{t('rateUnavailable')}</small>
+                    {/if}
+                  </article>
                 {/each}
               </div>
-            {/if}
-          </section>
-        </section>
+
+              <article class="workbench-trend">
+                <div class="trend-heading">
+                  <div>
+                    <span>{t('trendMetric')}</span>
+                    <strong data-testid="trend-mode">
+                      {selectedTrendMetric === 'tokens'
+                        ? t('recordedTokens')
+                        : t('apiRetailEquivalent')}
+                    </strong>
+                  </div>
+                  <div class="segmented-control" role="group" aria-label={t('trendMetric')}>
+                    <button
+                      type="button"
+                      aria-pressed={selectedTrendMetric === 'tokens'}
+                      on:click={() => (selectedTrendMetric = 'tokens')}
+                      >{t('recordedTokenTrend')}</button
+                    >
+                    <button
+                      type="button"
+                      aria-pressed={selectedTrendMetric === 'retail-equivalent'}
+                      on:click={() => (selectedTrendMetric = 'retail-equivalent')}
+                      >{t('retailEquivalentTrend')}</button
+                    >
+                  </div>
+                </div>
+                <div class="trend-chart" aria-hidden="true">
+                  {#each workbench.trend.buckets as bucket (bucket.start)}
+                    <div class="trend-column" title={bucket.label}>
+                      <div class:trend-gap={bucket.gap} class="trend-stack">
+                        {#if bucket.gap}
+                          <span class="gap-marker">·</span>
+                        {:else}
+                          {#each bucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
+                            {#if (trendValue(segment) ?? 0) > 0}
+                              <span
+                                class="trend-segment"
+                                style={`height: ${Math.max(2, ((trendValue(segment) ?? 0) / trendMaximum(workbench)) * 100)}%; background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+                                title={trendSegmentDescription(segment)}
+                              ></span>
+                            {/if}
+                          {/each}
+                        {/if}
+                      </div>
+                      <small>{bucket.label.slice(-5)}</small>
+                    </div>
+                  {/each}
+                </div>
+                <div class="trend-legend" aria-hidden="true">
+                  {#each trendLegend(workbench) as segment (`${segment.providerId}:${segment.billingDomainId}`)}
+                    <span>
+                      <i
+                        style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+                      ></i>
+                      {segment.providerDisplayName} · {segment.billingDomainDisplayName}
+                      {#if segment.includedInHeadline === false}
+                        · {t('separateFromHeadline')}{/if}
+                    </span>
+                  {/each}
+                </div>
+                <div class="trend-data">
+                  <table
+                    aria-label={`${t('trendData')} · ${selectedWindow} · ${workbench.timeZone} · ${workbench.trend.granularity === 'hour' ? t('precisionHour') : t('precisionDay')} · ${t('trendSummary')}`}
+                  >
+                    <thead>
+                      <tr>
+                        <th>{t('interval')}</th>
+                        <th>{t('providerEvidence')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each workbench.trend.buckets as bucket (bucket.start)}
+                        <tr>
+                          <td>{bucket.label}</td>
+                          <td>
+                            {bucket.gap
+                              ? t('gap')
+                              : bucket.segments.map(trendSegmentDescription).join('; ')}
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+
+              <section
+                class="model-ranking"
+                data-testid="model-ranking"
+                aria-labelledby="model-ranking-heading"
+              >
+                <div class="ranking-heading">
+                  <div>
+                    <h3 id="model-ranking-heading">{t('topModels')}</h3>
+                    <p>{t('modelRankingSubtitle')}</p>
+                  </div>
+                  <div class="segmented-control" role="group" aria-label={t('topModels')}>
+                    <button
+                      type="button"
+                      aria-pressed={modelRankingSort === 'tokens'}
+                      on:click={() => (modelRankingSort = 'tokens')}>{t('sortByTokens')}</button
+                    >
+                    <button
+                      type="button"
+                      aria-pressed={modelRankingSort === 'retail-equivalent'}
+                      on:click={() => (modelRankingSort = 'retail-equivalent')}
+                      >{t('sortByRetailEquivalent')}</button
+                    >
+                  </div>
+                </div>
+                <ol class="ranking-list">
+                  {#each rankedModels(workbench, modelRankingSort) as model (model.id)}
+                    {@const modelLogo = providerLogoSources(model.providerId)}
+                    <li>
+                      <button
+                        type="button"
+                        data-testid="model-ranking-row"
+                        on:click={(event) => openModelDetail(model.id, event.currentTarget)}
+                        on:keydown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            void openModelDetail(model.id, event.currentTarget);
+                          }
+                        }}
+                      >
+                        <span class="ranking-identity">
+                          {#if modelLogo}
+                            <picture class="ranking-logo" data-provider-logo={model.providerId}>
+                              <source
+                                media="(prefers-color-scheme: light)"
+                                srcset={modelLogo.light}
+                              />
+                              <source
+                                media="(prefers-color-scheme: dark)"
+                                srcset={modelLogo.dark}
+                              />
+                              <img src={modelLogo.dark} alt="" />
+                            </picture>
+                          {/if}
+                          <span>
+                            <strong>{model.model}</strong>
+                            <small
+                              >{model.providerDisplayName} · {model.billingDomainDisplayName}</small
+                            >
+                            {#if model.includedInHeadline === false}
+                              <small>{t('separateFromHeadline')}</small>
+                            {/if}
+                            <small>
+                              {displayAuthorities(model.authorities)} ·
+                              {formatReset(model.lastObservedAt)}
+                            </small>
+                          </span>
+                        </span>
+                        <span class="ranking-value">
+                          <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
+                            >{formatCompactNumber(model.tokenTotals.total)} {t('tokens')}</strong
+                          >
+                          <small>
+                            {t('tokenShare')}:
+                            {model.includedInHeadline !== false
+                              ? formatPercent(model.tokenShare)
+                              : t('headlineShareNotApplicable')}
+                          </small>
+                        </span>
+                        <span class="ranking-value">
+                          <strong>
+                            {model.retailEquivalent.status === 'available'
+                              ? formatMoney(
+                                  model.retailEquivalent.amount,
+                                  model.retailEquivalent.comparisonCurrency
+                                )
+                              : t('notAvailable')}
+                          </strong>
+                          <small>
+                            {t('retailShare')}:
+                            {model.includedInHeadline !== false
+                              ? formatPercent(model.retailShare)
+                              : t('headlineShareNotApplicable')}
+                          </small>
+                          <small>
+                            {displayAuthorities(model.retailEquivalent.authorities)} ·
+                            {formatReset(model.retailEquivalent.observedAt)}
+                          </small>
+                        </span>
+                      </button>
+                    </li>
+                  {/each}
+                </ol>
+                {#if workbench.modelRanking.unclassified.length > 0}
+                  <div class="unclassified-usage">
+                    <strong>{t('unclassifiedUsage')}</strong>
+                    {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
+                      <span>
+                        {item.providerDisplayName} · {item.billingDomainDisplayName}
+                        {#if item.includedInHeadline === false}
+                          · {t('separateFromHeadline')}{/if}
+                        <b aria-label={tokenValueLabel(item.tokenTotals.total)}
+                          >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
+                        >
+                        <small>
+                          {item.includedInHeadline !== false
+                            ? formatPercent(item.tokenShare)
+                            : t('headlineShareNotApplicable')}
+                        </small>
+                        <small>
+                          {displayAuthorities(item.authorities)} · {formatReset(
+                            item.lastObservedAt
+                          )}
+                        </small>
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
+              </section>
+            </section>
+          {/if}
+        </div>
       {/if}
     {/if}
   </main>
@@ -2513,6 +2218,32 @@
     animation: spin 0.75s linear infinite;
   }
 
+  .dashboard-tabs {
+    display: inline-flex;
+    gap: 5px;
+    margin-bottom: 20px;
+    padding: 5px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface-inset);
+  }
+
+  .dashboard-tabs button {
+    min-height: 40px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-weight: 650;
+  }
+
+  .dashboard-tabs button[aria-selected='true'] {
+    background: var(--selected);
+    color: var(--selected-text);
+  }
+
   .providers {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2538,6 +2269,13 @@
 
   .workbench-heading {
     margin-bottom: 16px;
+  }
+
+  .workbench-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .workbench-heading h2,
@@ -2879,97 +2617,15 @@
     text-align: right;
   }
 
-  .global-summary {
-    margin-bottom: 18px;
-    padding: 18px;
-    border: 1px solid rgba(122, 136, 164, 0.2);
-    border-radius: 18px;
-    background: rgba(14, 17, 24, 0.84);
-  }
-
-  .global-summary-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 16px;
-  }
-
-  .global-summary-heading .eyebrow,
-  .global-summary-heading h2 {
-    margin: 0;
-  }
-
-  .global-summary-heading h2 {
-    margin-top: 5px;
-    font-size: 1rem;
-  }
-
-  .summary-metrics {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .summary-metrics article {
-    display: grid;
-    align-content: start;
-    gap: 7px;
-    min-height: 112px;
-    padding: 13px;
-    border: 1px solid rgba(122, 136, 164, 0.14);
-    border-radius: 13px;
-    background: rgba(20, 24, 33, 0.72);
-  }
-
-  .summary-metrics span,
-  .summary-metrics small {
-    color: #929baa;
-    font-size: 0.7rem;
-  }
-
-  .summary-metrics strong {
-    overflow-wrap: anywhere;
-    color: #f2f4f8;
-    font-size: 1.04rem;
-    font-weight: 650;
-  }
-
-  .summary-contributions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-  }
-
-  .summary-contributions span {
-    display: inline-flex;
-    gap: 8px;
-    padding: 6px 8px;
-    border: 1px solid rgba(122, 136, 164, 0.14);
-    border-radius: 999px;
-    color: #929baa;
-    font-size: 0.66rem;
-  }
-
-  .summary-contributions b {
-    color: #dce1ea;
-    font-weight: 650;
-  }
-
   .history-toolbar {
     display: flex;
     width: fit-content;
     gap: 5px;
-    margin: 0 0 16px auto;
+    margin: 0;
     padding: 4px;
     border: 1px solid rgba(122, 136, 164, 0.16);
     border-radius: 12px;
     background: rgba(14, 17, 24, 0.78);
-  }
-
-  .global-summary .history-toolbar {
-    margin: 0;
   }
 
   .history-toolbar button {
@@ -3355,69 +3011,6 @@
     white-space: normal;
   }
 
-  .token-scope {
-    margin: -4px 0 12px;
-    color: #8f98a8;
-    font-size: 0.72rem;
-  }
-
-  .token-total {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px;
-    border: 1px solid rgba(122, 136, 164, 0.12);
-    border-radius: 13px;
-    background: rgba(255, 255, 255, 0.018);
-  }
-
-  .token-total span,
-  .token-breakdown summary {
-    color: #858e9e;
-    font-size: 0.68rem;
-  }
-
-  .token-total strong {
-    color: #e6eaf1;
-    font-size: 1.18rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .token-breakdown {
-    margin-top: 8px;
-  }
-
-  .token-breakdown summary {
-    width: fit-content;
-    cursor: pointer;
-  }
-
-  .token-breakdown .tokens {
-    margin-top: 8px;
-  }
-
-  .token-unavailable {
-    display: grid;
-    gap: 7px;
-    margin: -4px 0 0;
-    padding: 12px 14px;
-    border: 1px solid rgba(122, 136, 164, 0.14);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.018);
-    color: #8f98a8;
-    font-size: 0.75rem;
-  }
-
-  .token-unavailable strong {
-    color: #d5d9e2;
-  }
-
-  .token-unavailable code {
-    color: #aebfff;
-    overflow-wrap: anywhere;
-  }
-
   .domain-tabs {
     display: flex;
     gap: 7px;
@@ -3593,90 +3186,6 @@
 
   .progress.progress-critical span {
     background: #c2413b;
-  }
-
-  .tokens {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    margin: 0;
-  }
-
-  .billing-records {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin: 0;
-  }
-
-  .billing-records div {
-    padding: 12px;
-    border: 1px solid rgba(122, 136, 164, 0.12);
-    border-radius: 13px;
-    background: rgba(255, 255, 255, 0.018);
-  }
-
-  .billing-records small {
-    display: block;
-    margin-top: 6px;
-    color: #7f899a;
-    font-size: 0.64rem;
-    line-height: 1.35;
-  }
-
-  .rate-evidence {
-    display: grid;
-    gap: 4px;
-    margin-top: 8px;
-    color: #7f899a;
-    font-size: 0.67rem;
-  }
-
-  .history-rankings {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 16px;
-  }
-
-  .history-rankings > div {
-    display: grid;
-    gap: 7px;
-    padding: 12px;
-    border: 1px solid rgba(122, 136, 164, 0.12);
-    border-radius: 13px;
-  }
-
-  .history-rankings strong {
-    color: #aeb6c4;
-    font-size: 0.69rem;
-  }
-
-  .history-rankings span {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    color: #858e9e;
-    font-size: 0.68rem;
-  }
-
-  .history-rankings b {
-    color: #d9deea;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .history-rankings small {
-    grid-column: 1 / -1;
-    color: #717b8c;
-    font-size: 0.6rem;
-  }
-
-  .tokens div {
-    min-width: 0;
-    padding: 12px;
-    border: 1px solid rgba(122, 136, 164, 0.12);
-    border-radius: 13px;
-    background: rgba(255, 255, 255, 0.018);
   }
 
   dt {
@@ -4070,7 +3579,6 @@
   }
 
   /* Theme surfaces stay neutral so Provider identity comes from official artwork and data. */
-  .global-summary,
   .token-money-workbench,
   .privacy-section,
   .monitoring-section,
@@ -4079,16 +3587,11 @@
     background: var(--surface);
   }
 
-  .summary-metrics article,
   .workbench-metrics article,
   .workbench-trend,
   .model-ranking,
   .ranking-list button,
-  .billing-records div,
-  .history-rankings > div,
-  .tokens div,
   .inline-connection,
-  .token-unavailable,
   .settings-connections article,
   .model-detail-summary span,
   .model-token-breakdown div,
@@ -4142,9 +3645,6 @@
   .ranking-value small,
   .unclassified-usage > strong,
   .unclassified-usage > span,
-  .summary-metrics span,
-  .summary-metrics small,
-  .summary-contributions span,
   .risk-banner span,
   .privacy-section > div > p:not(.eyebrow),
   .privacy-section small,
@@ -4158,16 +3658,10 @@
   .permission,
   .secret-field,
   .connection-actions button,
-  .token-scope,
-  .token-unavailable,
   .freshness,
   .quota-copy span,
   .quota-meta,
   dt,
-  .billing-records small,
-  .rate-evidence,
-  .history-rankings strong,
-  .history-rankings span,
   .model-detail-summary span,
   .model-observations span,
   .model-observations small,
@@ -4191,12 +3685,8 @@
   .ranking-identity strong,
   .ranking-value strong,
   .unclassified-usage b,
-  .summary-metrics strong,
-  .summary-contributions b,
   .inline-connection summary strong,
   .coverage-list strong,
-  .token-unavailable strong,
-  .history-rankings b,
   .model-detail-header button,
   .model-detail-content section h3,
   .model-detail-summary b,
@@ -4266,10 +3756,6 @@
     .provider-card {
       padding: 20px;
     }
-
-    .tokens {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
   }
 
   @media (max-width: 759px) {
@@ -4316,23 +3802,14 @@
       grid-template-columns: 1fr;
     }
 
-    .tokens {
-      grid-template-columns: repeat(2, 1fr);
-    }
-
-    .global-summary-heading {
-      align-items: flex-start;
-      flex-direction: column;
-    }
-
-    .summary-metrics {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
     .workbench-heading,
     .trend-heading {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .workbench-controls {
+      justify-content: flex-start;
     }
 
     .workbench-metrics {

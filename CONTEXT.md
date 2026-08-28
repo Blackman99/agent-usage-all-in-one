@@ -161,8 +161,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     snapshots so displayed totals, line items, authority, precision, time, and
     trend can be audited without joining model names across sources.
 30. A Provider with independent billing domains declares one
-    `summaryBillingDomainId`. Provider headlines, the global summary, and the
-    workbench scalar aggregate only that domain. Sibling-domain evidence remains
-    separately identified in global contributions, trends, rankings, and its
-    Provider tab, with an explicit marker that it is not part of the headline
-    total or its percentage denominator.
+    `summaryBillingDomainId`. Provider headlines and workbench scalar metrics
+    aggregate only that domain. Sibling-domain Token and cost evidence remains
+    separately identified in the model-cost view's trends and rankings, with an
+    explicit marker that it is not part of the headline total or its percentage
+    denominator. Provider billing-domain tabs remain quota and connection views;
+    they do not duplicate Token or cost detail.

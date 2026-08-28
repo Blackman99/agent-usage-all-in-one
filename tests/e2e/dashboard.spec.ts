@@ -43,8 +43,14 @@ test('shows persisted provider usage and refreshes from the dashboard', async ({
   const demoProvider = page.locator('.provider-card').filter({ hasText: 'Demo Agent' });
   await expect(demoProvider.getByRole('heading', { name: 'Demo Agent' })).toBeVisible();
   await expect(page.getByText('42% used')).toBeVisible();
-  await expect(demoProvider.getByLabel('12,400 Tokens')).toHaveText('12.4K');
+  await expect(demoProvider.locator('.token-total')).toHaveCount(0);
   await expect(page.locator('.quota-meta')).toContainText(/in 3 hours/);
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  await expect(page.getByTestId('workbench-recorded-tokens').locator('strong')).toHaveAttribute(
+    'aria-label',
+    /[\d,]+ Tokens/
+  );
+  await page.getByRole('tab', { name: 'Agent usage' }).click();
   expect(refreshRequests).toBe(1);
 
   await page.getByRole('button', { name: 'Refresh' }).click();
@@ -85,6 +91,14 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.goto(freshLaunch.stdout.trim());
 
+  const mainViews = page.getByRole('tablist', { name: 'Main views' });
+  const agentUsageTab = mainViews.getByRole('tab', { name: 'Agent usage' });
+  const modelCostsTab = mainViews.getByRole('tab', { name: 'Tokens & model costs' });
+  await expect(agentUsageTab).toHaveAttribute('aria-selected', 'true');
+  await expect(modelCostsTab).toHaveAttribute('aria-selected', 'false');
+  await expect(page.getByTestId('agent-usage-panel')).toBeVisible();
+  await expect(page.getByTestId('token-model-costs-panel')).toHaveCount(0);
+
   await expect(page.getByRole('heading', { name: 'Connections' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Diagnostics' })).toHaveCount(0);
   for (const name of ['Codex', 'Claude Code', 'OpenCode Go', 'Grok']) {
@@ -95,6 +109,12 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
     await expect(page.locator(`[data-provider-logo="${providerId}"]`)).toBeVisible();
   }
   await expect(page.locator('.provider-mark')).toHaveCount(0);
+  await modelCostsTab.click();
+  await expect(modelCostsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('agent-usage-panel')).toHaveCount(0);
+  await expect(page.getByTestId('token-model-costs-panel')).toBeVisible();
+  await expect(page.getByTestId('token-money-workbench')).toBeVisible();
+  await agentUsageTab.click();
   await expect(page.getByTestId('connector-claude-code').getByText('Experimental')).toBeVisible();
   await expect(page.getByTestId('connector-codex').getByText('Official client')).toBeVisible();
   const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
@@ -183,7 +203,7 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await page.getByRole('checkbox', { name: 'Local notifications' }).uncheck();
 });
 
-test('renders Codex quota, total tokens, and the same actionable degraded state', async ({
+test('renders Codex quota without duplicating Token detail and keeps the actionable degraded state', async ({
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
@@ -283,10 +303,7 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   await expect(provider.getByText('5 hour', { exact: true })).toBeVisible();
   await expect(provider.getByText('Week', { exact: true })).toBeVisible();
   await expectQuotaShowsOnlyReset(provider, 2);
-  await expect(provider.getByText('1,250', { exact: true })).toBeVisible();
-  await expect(provider).toContainText(/Scope:\s*Account-wide/);
-  await expect(provider).toContainText(/Precision:\s*Day/);
-  await expect(provider).toContainText(/Unclassified:\s*1,250/);
+  await expectProviderHasNoTokenDetail(provider);
   await expect(provider.getByText('codex · Unauthorized')).toBeVisible();
   await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toBeVisible();
   const reviewButton = provider.getByRole('button', { name: 'Review in settings' });
@@ -314,9 +331,7 @@ test('keeps successful usage visible when an auxiliary settings request fails', 
   );
 });
 
-test('labels OpenCode Go account quota separately from this-Mac token history', async ({
-  page
-}) => {
+test('shows OpenCode Go account quota without duplicating its Token history', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({
@@ -389,13 +404,10 @@ test('labels OpenCode Go account quota separately from this-Mac token history', 
   await expect(provider.getByRole('progressbar', { name: '5 hour' })).toHaveAccessibleDescription(
     /Source: Official account.*Aug 28/
   );
-  await expect(provider).toContainText('Source: Local observation');
-  await expect(provider).toContainText(/Scope:\s*This Mac only/);
-  await expect(provider).toContainText(/Precision:\s*Day/);
-  await expect(provider.getByText('1,200')).toBeVisible();
+  await expectProviderHasNoTokenDetail(provider);
 });
 
-test('keeps Claude All models and Fable-only quota separate from local OTLP tokens', async ({
+test('keeps Claude All models and Fable-only quota without duplicating local Token detail', async ({
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
@@ -486,14 +498,10 @@ test('keeps Claude All models and Fable-only quota separate from local OTLP toke
   const quotaEvidence = provider.getByText('Source: Official Client');
   await expect(quotaEvidence).toHaveCount(3);
   for (const evidence of await quotaEvidence.all()) await expect(evidence).toBeHidden();
-  await expect(provider).toContainText('Source: Local observation');
-  await expect(provider).toContainText(/Scope:\s*This Mac only/);
-  await expect(provider).toContainText(/Precision:\s*Event/);
-  await expect(provider).toContainText(/Aggregation:\s*Delta/);
-  await expect(provider.getByText('575')).toBeVisible();
+  await expectProviderHasNoTokenDetail(provider);
 });
 
-test('renders Grok shared weekly quota and alpha telemetry without inventing a five-hour bucket', async ({
+test('renders Grok shared weekly quota without duplicating telemetry or inventing a five-hour bucket', async ({
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
@@ -617,32 +625,20 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expectQuotaShowsOnlyReset(provider, 1);
   await expect(provider.getByText('Plan: SuperGrok Heavy')).toHaveCount(0);
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
-  await expect(provider).toContainText('Source: Local observation');
-  await expect(provider).toContainText(/Scope:\s*This Mac only/);
-  await expect(provider).toContainText(/Precision:\s*Event/);
-  await expect(provider).toContainText(/Aggregation:\s*Delta/);
-  await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeHidden();
-  await provider.getByText('Token breakdown', { exact: true }).click();
-  await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
+  await expectProviderHasNoTokenDetail(provider);
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
   await provider.getByRole('tab', { name: 'xAI API' }).click();
   await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
   await page.getByRole('button', { name: 'Close settings' }).click();
-  await expect(provider.getByText('1,742')).toBeVisible();
-  await expect(provider).toContainText(/Scope:\s*Account-wide/);
-  await expect(provider).toContainText(/Precision:\s*Billing period/);
-  await expect(provider).toContainText(/Aggregation:\s*Delta/);
-  await expect(provider.getByText('$2.50')).toBeVisible();
-  await expect(provider.getByText('$45.00')).toBeVisible();
+  await expectProviderHasNoTokenDetail(provider);
   await expect(provider.getByText('Weekly limit')).toHaveCount(0);
   await provider.getByRole('tab', { name: 'Build / SuperGrok' }).click();
-  await expect(provider.getByText('525')).toBeVisible();
-  await expect(provider.getByText('$2.50')).toHaveCount(0);
+  await expect(provider.getByText('Weekly limit')).toBeVisible();
 });
 
-test('explains how to enable Claude and Grok token collection instead of showing false zeroes', async ({
+test('does not expose manual telemetry setup when Claude and Grok have no Token data', async ({
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
@@ -728,21 +724,19 @@ test('explains how to enable Claude and Grok token collection instead of showing
   const grok = page.locator('.provider-card').filter({ hasText: 'Grok' });
 
   for (const provider of [claude, grok]) {
-    await expect(provider.getByText('No token observations in this time window.')).toBeVisible();
-    await expect(provider.locator('.tokens')).toHaveCount(0);
+    await expectProviderHasNoTokenDetail(provider);
   }
-  await expect(
-    claude.getByText('eval "$(agent-usage telemetry-env --provider claude-code)"')
-  ).toBeVisible();
-  await expect(grok.getByText('eval "$(agent-usage telemetry-env --provider grok)"')).toBeVisible();
+  await expect(page.getByText('No token observations in this time window.')).toHaveCount(0);
+  await expect(page.getByText(/agent-usage telemetry-env/)).toHaveCount(0);
 
-  await grok.getByRole('tab', { name: 'xAI API' }).click();
-  await expect(grok.getByText('agent-usage telemetry-env --provider grok')).toHaveCount(0);
-  await expect(grok.getByText('No token observations in this time window.')).toBeVisible();
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  await expect(page.getByTestId('token-model-costs-panel')).toBeAttached();
+  await expect(page.getByText('No token observations in this time window.')).toHaveCount(0);
+  await expect(page.getByText(/agent-usage telemetry-env/)).toHaveCount(0);
 
   await page.getByRole('button', { name: '中文' }).click();
-  await expect(claude.getByText('当前时间范围内没有 Token 观测数据。')).toBeVisible();
-  await expect(grok.getByText('当前时间范围内没有 Token 观测数据。')).toBeVisible();
+  await expect(page.getByText('当前时间范围内没有 Token 观测数据。')).toHaveCount(0);
+  await expect(page.getByText(/agent-usage telemetry-env/)).toHaveCount(0);
 });
 
 test('switches 24-hour, 7-day, and 30-day token and cost history without mixing cost kinds', async ({
@@ -778,53 +772,26 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'History Agent' });
-  await expect(
-    provider.getByText('Total').locator('..').getByText('700', { exact: true })
-  ).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Recent usage summary' })).toBeVisible();
-  const summary = page.getByRole('region', { name: 'Recent usage summary' });
-  await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('700');
-  await expect(page.getByTestId('summary-retail-equivalent')).toHaveText('$1.25');
-  await expect(summary.getByText('Classification coverage: 100%')).toBeVisible();
-  await expect(summary.getByText('Pricing coverage: 85.7%')).toBeVisible();
-  await expect(summary.getByText('Precision: Day + Billing period')).toBeVisible();
+  await expectProviderHasNoTokenDetail(provider);
+  await expect(page.getByRole('heading', { name: 'Recent usage summary' })).toHaveCount(0);
   const risk = page.getByRole('region', { name: 'Capacity outlook' });
   await expect(risk).toContainText('20% remaining');
   await expect(risk).toContainText('Official account');
   await expect(risk).toContainText('Aug 28');
-  await expect(
-    summary.getByText('History Agent · API').locator('..').getByText('700')
-  ).toBeVisible();
-  await page.getByRole('button', { name: '24h' }).click();
-  await expect(
-    provider.getByText('Total').locator('..').getByText('100', { exact: true })
-  ).toBeVisible();
-  await page.getByRole('button', { name: '7d' }).click();
-  await expect(
-    provider.getByText('Total').locator('..').getByText('700', { exact: true })
-  ).toBeVisible();
-  await page.getByRole('button', { name: '30d' }).click();
-  await expect(
-    provider.getByText('Total').locator('..').getByText('3,000', { exact: true })
-  ).toBeVisible();
-  await expect(provider.getByText('actual · Native')).toBeVisible();
-  await expect(provider.getByText('Subscription · Native')).toBeVisible();
-  await expect(provider.getByText('Reported estimate · Native')).toBeVisible();
-  const retailEquivalent = provider.getByText('API retail equivalent · Native').locator('..');
-  await expect(retailEquivalent).toContainText('$1.25');
-  await expect(retailEquivalent).toContainText('Source: Estimate');
-  await expect(retailEquivalent).toContainText(
-    'Pricing coverage: 96.7% · 2,900 / 3,000 Tokens · 100 unpriced Tokens'
-  );
-  await expect(
-    provider.getByText('Price version: 2026-08-01 · Official retail pricing')
-  ).toBeVisible();
-  await expect(provider.getByText('top-model')).toBeVisible();
-  await expect(provider.getByText('2026-08-28')).toBeVisible();
   await expect(page.getByText('Recommended agent')).toHaveCount(0);
   await expect(page.getByText('Advice only · never switches agents')).toHaveCount(0);
+
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  await expect(risk).toHaveCount(0);
   const workbench = page.getByTestId('token-money-workbench');
-  await expect(workbench.getByRole('heading', { name: 'Token & money workbench' })).toBeVisible();
+  await expect(workbench.getByRole('heading', { name: 'Tokens & model costs' })).toBeVisible();
+  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('700');
+  await workbench.getByRole('button', { name: '24h' }).click();
+  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('100');
+  await workbench.getByRole('button', { name: '7d' }).click();
+  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('700');
+  await workbench.getByRole('button', { name: '30d' }).click();
+  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('3,000');
   await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText(
     'Source: Official account'
   );
@@ -843,11 +810,12 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await page.reload();
   await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   await expect(workbench.getByRole('button', { name: 'USD' })).toHaveAttribute(
     'aria-pressed',
     'true'
   );
-  await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('3,000');
+  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('3,000');
 });
 
 test('downloads a redacted export and clears only the selected local scope', async ({ page }) => {
@@ -891,6 +859,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   });
 
   await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   const ranking = page.getByTestId('model-ranking');
   await expect(ranking.getByRole('heading', { name: 'Top models' })).toBeVisible();
   const rows = ranking.getByTestId('model-ranking-row');
@@ -986,12 +955,6 @@ test('follows system theme and keeps the usage dashboard responsive with local o
         .evaluate((element) => getComputedStyle(element).backgroundImage)
     )
     .toBe('none');
-  await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('12.4K');
-  await expect(page.getByTestId('summary-recorded-tokens')).toHaveAttribute(
-    'aria-label',
-    '12,400 Tokens'
-  );
-
   for (const providerId of ['codex', 'claude-code', 'opencode-go']) {
     const logo = page.locator(`picture[data-provider-logo="${providerId}"]`).first();
     await expect(logo).toBeVisible();
@@ -1005,6 +968,13 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     'data-provider-logo',
     'grok'
   );
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  await expect(page.getByTestId('workbench-recorded-tokens')).toContainText('12.4K');
+  await expect(page.getByTestId('workbench-recorded-tokens').locator('strong')).toHaveAttribute(
+    'aria-label',
+    '12,400 Tokens'
+  );
+  await page.getByRole('tab', { name: 'Agent usage' }).click();
   expect(
     await page
       .locator('picture[data-provider-logo="opencode-go"] img')
@@ -1069,7 +1039,18 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   const quota = page.getByRole('progressbar', { name: '5 hour' });
   await expect(quota).toHaveAttribute('aria-valuenow', '42');
   await expect(quota).toHaveAttribute('aria-valuetext', '42% used');
+
+  const mainViews = page.getByRole('tablist', { name: 'Main views' });
+  const agentUsageTab = mainViews.getByRole('tab', { name: 'Agent usage' });
+  const modelCostsTab = mainViews.getByRole('tab', { name: 'Tokens & model costs' });
+  await agentUsageTab.focus();
+  await agentUsageTab.press('ArrowRight');
+  await expect(modelCostsTab).toBeFocused();
+  await expect(modelCostsTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('table', { name: /Trend data · 7d/ })).toBeAttached();
+  await modelCostsTab.press('ArrowLeft');
+  await expect(agentUsageTab).toBeFocused();
+  await expect(agentUsageTab).toHaveAttribute('aria-selected', 'true');
 
   const grok = page.locator('.provider-card').filter({ hasText: 'Grok' });
   const buildTab = grok.getByRole('tab', { name: 'Build / SuperGrok' });
@@ -1115,6 +1096,9 @@ test('switches the complete catalog to Simplified Chinese without translating pr
 
   await page.getByRole('button', { name: '中文' }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  const mainViews = page.getByRole('tablist', { name: '主要视图' });
+  await expect(mainViews.getByRole('tab', { name: 'Agent 用量' })).toBeVisible();
+  await expect(mainViews.getByRole('tab', { name: 'Token 与模型费用' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '连接' })).toHaveCount(0);
   await expect(page.getByText('连接设置').first()).toBeVisible();
   await page.getByRole('button', { name: '设置', exact: true }).click();
@@ -1137,6 +1121,14 @@ async function expectQuotaShowsOnlyReset(provider: Locator, bucketCount: number)
     await expect(metadata).toContainText('Resets');
     await expect(metadata).not.toContainText(/Source:|Scope:|Plan:|Limit:|Use balance:/);
   }
+}
+
+async function expectProviderHasNoTokenDetail(provider: Locator): Promise<void> {
+  await expect(
+    provider.locator(
+      '.token-scope, .token-total, .token-breakdown, .token-unavailable, .billing-records, .history-rankings'
+    )
+  ).toHaveCount(0);
 }
 
 function withTokenDomain<
