@@ -250,6 +250,16 @@ export interface HistoryDay {
   costs: HistoryCost[];
 }
 
+export interface HistoryInterval {
+  start: string;
+  end: string;
+  label: string;
+  gap: boolean;
+  tokenTotals: TokenTotals;
+  tokenEvidence: TokenEvidence;
+  costs: HistoryCost[];
+}
+
 export interface HistoryCost {
   kind: CostKind;
   currency: string;
@@ -260,6 +270,8 @@ export interface HistoryCost {
   priceSnapshots: PriceSnapshotReference[];
   authorities?: DataAuthority[];
   observedAt?: string | null;
+  records?: number;
+  knownRecords?: number;
   pricingEvidence?: {
     pricedTokens: number;
     unpricedTokens: number;
@@ -277,6 +289,7 @@ export interface BillingHistory {
   tokenEvidence: TokenEvidence;
   models: HistoryModel[];
   days: HistoryDay[];
+  intervals: HistoryInterval[];
   costs: HistoryCost[];
   exchangeRates: ExchangeRateSnapshot[];
   authorities?: DataAuthority[];
@@ -366,10 +379,79 @@ export interface AgentRecommendation {
 export interface UsageOverview {
   generatedAt: string;
   globalSummary: GlobalUsageSummary;
+  workbench: TokenMoneyWorkbench;
   providers: ProviderOverview[];
   riskSummary: {
     mostConstrained: QuotaRisk | null;
     recommendation: AgentRecommendation | null;
+  };
+}
+
+export type WorkbenchCostPurpose = 'actual' | 'reported-estimate' | 'retail-equivalent';
+
+export interface WorkbenchNativeAmount {
+  currency: string;
+  amount: number | null;
+  records: number;
+  knownRecords: number;
+}
+
+export interface WorkbenchMoneyMetric {
+  purpose: WorkbenchCostPurpose;
+  status: 'available' | 'partial' | 'unavailable';
+  amount: number | null;
+  comparisonCurrency: string;
+  nativeAmounts: WorkbenchNativeAmount[];
+  authorities: DataAuthority[];
+  observedAt: string | null;
+  records: number;
+  knownRecords: number;
+  amountCoverage: number | null;
+  pricingCoverage: number | null;
+  pricedTokens: number;
+  recordedTokens: number;
+  conversionUnavailableReasons: Array<'unknown-native-amount' | 'missing-rate' | 'stale-rate'>;
+  exchangeRates: ExchangeRateSnapshot[];
+}
+
+export interface WorkbenchTrendSegment {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  recordedTokens: number;
+  observationCount: number;
+  timePrecisions: TokenTimePrecision[];
+  retailEquivalent: {
+    status: WorkbenchMoneyMetric['status'];
+    amount: number | null;
+    currency: string;
+  };
+}
+
+export interface WorkbenchTrendBucket {
+  start: string;
+  end: string;
+  label: string;
+  gap: boolean;
+  segments: WorkbenchTrendSegment[];
+}
+
+export interface TokenMoneyWorkbench {
+  window: HistoryWindow;
+  start: string;
+  end: string;
+  timeZone: string;
+  comparisonCurrency: string;
+  recordedTokens: number | null;
+  costs: {
+    actual: WorkbenchMoneyMetric;
+    reportedEstimate: WorkbenchMoneyMetric;
+    retailEquivalent: WorkbenchMoneyMetric;
+  };
+  trend: {
+    granularity: 'hour' | 'day';
+    buckets: WorkbenchTrendBucket[];
   };
 }
 

@@ -297,12 +297,39 @@ describe('local HTTP server', () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
+      workbench: {
+        window: string;
+        timeZone: string;
+        comparisonCurrency: string;
+        trend: { granularity: string; buckets: unknown[] };
+      };
       providers: Array<{ billingDomains: Array<{ history: unknown }> }>;
     };
+    expect(body.workbench).toMatchObject({
+      window: '7d',
+      timeZone: 'Asia/Shanghai',
+      comparisonCurrency: 'CNY',
+      trend: { granularity: 'day' }
+    });
+    expect(body.workbench.trend.buckets).toHaveLength(7);
     expect(body.providers[0].billingDomains[0].history).toMatchObject({
       window: '7d',
       timeZone: 'Asia/Shanghai',
       days: [{ day: '2026-08-28' }]
+    });
+
+    const usdResponse = await fetch(
+      `${server.origin}/api/overview?window=24h&timeZone=UTC&currency=USD`,
+      { headers: { authorization: 'Bearer history-token' } }
+    );
+    expect(usdResponse.status).toBe(200);
+    expect(await usdResponse.json()).toMatchObject({
+      workbench: {
+        window: '24h',
+        timeZone: 'UTC',
+        comparisonCurrency: 'USD',
+        trend: { granularity: 'hour' }
+      }
     });
 
     const exportResponse = await fetch(

@@ -647,13 +647,17 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   const requestedWindows: string[] = [];
+  const requestedCurrencies: string[] = [];
   await page.route('**/api/overview**', async (route) => {
-    const window = new URL(route.request().url()).searchParams.get('window') ?? '24h';
+    const url = new URL(route.request().url());
+    const window = url.searchParams.get('window') ?? '24h';
+    const currency = url.searchParams.get('currency') ?? 'CNY';
     requestedWindows.push(window);
+    requestedCurrencies.push(currency);
     const total = window === '24h' ? 100 : window === '7d' ? 700 : 3000;
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(historyOverviewFixture(window, total))
+      body: JSON.stringify(historyOverviewFixture(window, total, currency))
     });
   });
 
@@ -700,6 +704,20 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(provider.getByText('2026-08-28')).toBeVisible();
   await expect(page.getByText('Recommended agent')).toHaveCount(0);
   await expect(page.getByText('Advice only · never switches agents')).toHaveCount(0);
+  const workbench = page.getByTestId('token-money-workbench');
+  await expect(workbench.getByRole('heading', { name: 'Token & money workbench' })).toBeVisible();
+  await expect(workbench.getByTestId('workbench-actual')).toContainText('CN¥18.00');
+  await expect(workbench.getByTestId('workbench-reported-estimate')).toContainText('CN¥0.03');
+  await expect(workbench.getByTestId('workbench-retail-equivalent')).toContainText('CN¥9.00');
+  await expect(workbench.getByText('Subscription', { exact: true })).toHaveCount(0);
+  await workbench.getByRole('button', { name: 'USD' }).click();
+  await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
+  await expect(workbench.getByTestId('workbench-reported-estimate')).toContainText('$0.0042');
+  await workbench.getByRole('button', { name: 'API retail equivalent trend' }).click();
+  await expect(workbench.getByTestId('trend-mode')).toHaveText('API retail equivalent');
+  const trendTable = workbench.getByRole('table', { name: 'Trend data' });
+  await expect(trendTable).toContainText('Gap');
+  await expect(trendTable).toContainText('Billing period');
   await page.reload();
   await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
   await expect(page.getByTestId('summary-recorded-tokens')).toHaveText('3,000');
@@ -752,7 +770,7 @@ test('switches the complete catalog to Simplified Chinese without translating pr
   await expect(demoCard).toContainText('官方账户');
   await expect(demoCard).not.toContainText('Official Account');
   await page.getByRole('button', { name: '关闭设置' }).click();
-  await page.getByRole('button', { name: 'EN' }).click();
+  await page.getByRole('button', { name: 'EN', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
 
@@ -840,7 +858,7 @@ function tokenEvidenceFixture(
   };
 }
 
-function historyOverviewFixture(window: string, total: number): unknown {
+function historyOverviewFixture(window: string, total: number, currency = 'CNY'): unknown {
   const pricedTokens = Math.max(0, total - 100);
   const tokenTotals = {
     total,
@@ -870,6 +888,7 @@ function historyOverviewFixture(window: string, total: number): unknown {
   };
   return {
     generatedAt: '2026-08-28T02:00:00.000Z',
+    workbench: tokenMoneyWorkbenchFixture(window, total, currency),
     globalSummary: {
       window,
       recordedTokens: total,
@@ -1009,6 +1028,98 @@ function historyOverviewFixture(window: string, total: number): unknown {
         ]
       }
     ]
+  };
+}
+
+function tokenMoneyWorkbenchFixture(window: string, total: number, currency: string): unknown {
+  const comparison =
+    currency === 'USD'
+      ? { actual: 2.5, reported: 0.0042, retail: 1.25 }
+      : {
+          actual: 18,
+          reported: 0.03024,
+          retail: 9
+        };
+  const bucketCount = window === '24h' ? 24 : window === '7d' ? 7 : 30;
+  const metric = (
+    purpose: 'actual' | 'reported-estimate' | 'retail-equivalent',
+    amount: number,
+    nativeAmount: number,
+    authority: string
+  ) => ({
+    purpose,
+    status: 'available',
+    amount,
+    comparisonCurrency: currency,
+    nativeAmounts: [{ currency: 'USD', amount: nativeAmount, records: 1, knownRecords: 1 }],
+    authorities: [authority],
+    observedAt: '2026-08-28T01:57:00.000Z',
+    records: 1,
+    knownRecords: 1,
+    amountCoverage: 1,
+    pricingCoverage: purpose === 'retail-equivalent' ? Math.max(0, total - 100) / total : null,
+    pricedTokens: purpose === 'retail-equivalent' ? Math.max(0, total - 100) : 0,
+    recordedTokens: total,
+    conversionUnavailableReasons: [],
+    exchangeRates:
+      currency === 'CNY'
+        ? [
+            {
+              id: 'usd-cny',
+              baseCurrency: 'USD',
+              quoteCurrency: 'CNY',
+              rate: 7.2,
+              observedAt: '2026-08-28T01:00:00.000Z',
+              source: 'Test rate'
+            }
+          ]
+        : []
+  });
+  return {
+    window,
+    start: '2026-07-29T02:00:00.000Z',
+    end: '2026-08-28T02:00:00.000Z',
+    timeZone: 'Asia/Shanghai',
+    comparisonCurrency: currency,
+    recordedTokens: total,
+    costs: {
+      actual: metric('actual', comparison.actual, 2.5, 'official-account'),
+      reportedEstimate: metric(
+        'reported-estimate',
+        comparison.reported,
+        0.0042,
+        'local-observation'
+      ),
+      retailEquivalent: metric('retail-equivalent', comparison.retail, 1.25, 'estimate')
+    },
+    trend: {
+      granularity: window === '24h' ? 'hour' : 'day',
+      buckets: Array.from({ length: bucketCount }, (_, index) => ({
+        start: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+        end: `2026-08-${String(index + 2).padStart(2, '0')}T00:00:00.000Z`,
+        label: `Bucket ${index + 1}`,
+        gap: index > 0,
+        segments:
+          index === 0
+            ? [
+                {
+                  providerId: 'history-agent',
+                  providerDisplayName: 'History Agent',
+                  billingDomainId: 'api',
+                  billingDomainDisplayName: 'API',
+                  recordedTokens: total,
+                  observationCount: 1,
+                  timePrecisions: ['billing-period'],
+                  retailEquivalent: {
+                    status: 'available',
+                    amount: comparison.retail,
+                    currency
+                  }
+                }
+              ]
+            : []
+      }))
+    }
   };
 }
 

@@ -69,6 +69,11 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
   window. Priced, unpriced, and recorded Token counts remain available so the
   ratio can be recomputed. It is independent from classification and Provider
   data Coverage.
+- **Token and money workbench**: The selected-window read model that keeps
+  recorded Tokens, actual cost, reported estimate, and API retail equivalent
+  separate while exposing Provider and billing-domain trend intervals.
+- **Trend gap**: An hourly or daily interval with no Token observation. It stays
+  visibly discontinuous; cost evidence does not fabricate a Token observation.
 - **Data authority**: The provenance level of a value: official account,
   official client, local observation, estimate, or unavailable.
 - **Freshness**: The age and last-success state of a connector result.
@@ -129,3 +134,12 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     monthly overlapping allowance values never become time-range cost records.
 22. Fixed subscription cost is billing-domain evidence only. It is never
     allocated to a Token observation, model, session, or daily bucket.
+23. Workbench cost metrics include only actual, reported-estimate, or
+    retail-equivalent records. Subscription and legacy-unknown evidence never
+    enter those metrics or their trends.
+24. A converted workbench amount is available only when every contributing
+    record has a known native amount and valid conversion. Missing or stale CNY
+    evidence cannot hide the original USD or other native amount.
+25. Workbench trend segments retain Provider and billing-domain identity. An
+    interval without observations remains a gap, and day or billing-period
+    precision remains explicit in visual and accessible output.

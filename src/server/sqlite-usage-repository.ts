@@ -670,6 +670,7 @@ export class SqliteUsageRepository implements UsageRepository {
     return {
       generatedAt: now.toISOString(),
       globalSummary: buildGlobalSummary(overviews, riskSummary, now, query),
+      workbench: buildTokenMoneyWorkbench(overviews, now, query),
       providers: overviews,
       riskSummary
     };
@@ -1341,6 +1342,12 @@ export class SqliteUsageRepository implements UsageRepository {
         costs: CostRow[];
       }
     >();
+    const intervals = buildHistoryIntervals(normalized).map((interval) => ({
+      ...interval,
+      tokens: zeroTokenTotals(),
+      evidence: emptyTokenEvidence(),
+      costs: [] as CostRow[]
+    }));
     for (const row of usage) {
       authorities.add(row.authority);
       addUsageRow(tokenTotals, row);
@@ -1363,6 +1370,11 @@ export class SqliteUsageRepository implements UsageRepository {
       addUsageRow(daily.tokens, row);
       addTokenEvidence(daily.evidence, row);
       byDay.set(day, daily);
+      const interval = intervals[historyIntervalIndex(row.observed_at, normalized)];
+      if (interval) {
+        addUsageRow(interval.tokens, row);
+        addTokenEvidence(interval.evidence, row);
+      }
     }
     for (const cost of costs) {
       const day = localDay(cost.observed_at, normalized.timeZone);
@@ -1373,6 +1385,8 @@ export class SqliteUsageRepository implements UsageRepository {
       };
       if (cost.kind !== 'subscription' && cost.kind !== 'legacy-unknown') {
         daily.costs.push(cost);
+        const interval = intervals[historyIntervalIndex(cost.observed_at, normalized)];
+        if (interval) interval.costs.push(cost);
       }
       byDay.set(day, daily);
     }
@@ -1413,6 +1427,15 @@ export class SqliteUsageRepository implements UsageRepository {
           tokenEvidence: finishTokenEvidence(daily.evidence),
           costs: summarizeCosts(daily.costs, daily.tokens.total)
         })),
+      intervals: intervals.map((interval) => ({
+        start: interval.start.toISOString(),
+        end: interval.end.toISOString(),
+        label: interval.label,
+        gap: interval.evidence.observationCount === 0,
+        tokenTotals: interval.tokens,
+        tokenEvidence: finishTokenEvidence(interval.evidence),
+        costs: summarizeCosts(interval.costs, interval.tokens.total)
+      })),
       costs: summarizeCosts(costs, tokenTotals.total),
       exchangeRates: [...exchangeRates.values()],
       authorities: [...authorities].sort(),
@@ -2008,6 +2031,183 @@ function buildGlobalSummary(
   };
 }
 
+function buildTokenMoneyWorkbench(
+  providers: ProviderOverview[],
+  now: Date,
+  query: UsageQuery
+): UsageOverview['workbench'] {
+  const normalized = normalizeUsageQuery(now, query);
+  const histories = providers.flatMap((provider) =>
+    provider.billingDomains.map((domain) => ({ provider, domain, history: domain.history }))
+  );
+  const costs = histories.flatMap(({ history }) => history.costs);
+  const rates = uniqueExchangeRates(histories.flatMap(({ history }) => history.exchangeRates));
+  const recordedTokens = histories.reduce(
+    (total, { history }) => total + history.tokenEvidence.recordedTokens,
+    0
+  );
+  const observationCount = histories.reduce(
+    (total, { history }) => total + history.tokenEvidence.observationCount,
+    0
+  );
+  const comparisonCurrency = normalized.comparisonCurrency;
+  const metric = (purpose: UsageOverview['workbench']['costs']['actual']['purpose']) =>
+    buildWorkbenchMetric(costs, purpose, comparisonCurrency, recordedTokens, rates);
+  const emptyIntervals = buildHistoryIntervals(normalized);
+  const buckets = emptyIntervals.map((emptyInterval, index) => {
+    const segments = histories.flatMap(({ provider, domain, history }) => {
+      const interval = history.intervals[index];
+      if (!interval) return [];
+      const retailEquivalent = buildWorkbenchMetric(
+        interval.costs,
+        'retail-equivalent',
+        comparisonCurrency,
+        interval.tokenEvidence.recordedTokens,
+        history.exchangeRates
+      );
+      if (interval.tokenEvidence.observationCount === 0 && retailEquivalent.records === 0)
+        return [];
+      return [
+        {
+          providerId: provider.id,
+          providerDisplayName: provider.displayName,
+          billingDomainId: domain.id,
+          billingDomainDisplayName: domain.displayName,
+          recordedTokens: interval.tokenEvidence.recordedTokens,
+          observationCount: interval.tokenEvidence.observationCount,
+          timePrecisions: interval.tokenEvidence.timePrecisions,
+          retailEquivalent: {
+            status: retailEquivalent.status,
+            amount: retailEquivalent.amount,
+            currency: comparisonCurrency
+          }
+        }
+      ];
+    });
+    return {
+      start: emptyInterval.start.toISOString(),
+      end: emptyInterval.end.toISOString(),
+      label: emptyInterval.label,
+      gap: segments.every((segment) => segment.observationCount === 0),
+      segments
+    };
+  });
+  return {
+    window: normalized.window,
+    start: normalized.start.toISOString(),
+    end: normalized.end.toISOString(),
+    timeZone: normalized.timeZone,
+    comparisonCurrency,
+    recordedTokens: observationCount > 0 ? recordedTokens : null,
+    costs: {
+      actual: metric('actual'),
+      reportedEstimate: metric('reported-estimate'),
+      retailEquivalent: metric('retail-equivalent')
+    },
+    trend: {
+      granularity: normalized.window === '24h' ? 'hour' : 'day',
+      buckets
+    }
+  };
+}
+
+function buildWorkbenchMetric(
+  costs: HistoryCost[],
+  purpose: UsageOverview['workbench']['costs']['actual']['purpose'],
+  comparisonCurrency: string,
+  recordedTokens: number,
+  rates: ExchangeRateSnapshot[]
+): UsageOverview['workbench']['costs']['actual'] {
+  const relevant = costs.filter((cost) => cost.kind === purpose);
+  const native = new Map<
+    string,
+    { amount: number; complete: boolean; records: number; knownRecords: number }
+  >();
+  const authorities = new Set<DataAuthority>();
+  const conversionUnavailableReasons = new Set<
+    'unknown-native-amount' | 'missing-rate' | 'stale-rate'
+  >();
+  let observedAt: string | null = null;
+  let records = 0;
+  let knownRecords = 0;
+  let convertedRecords = 0;
+  let convertedAmount = 0;
+  let pricedTokens = 0;
+  for (const cost of relevant) {
+    const rowRecords = cost.records ?? 1;
+    const rowKnownRecords = cost.knownRecords ?? (cost.amount === null ? 0 : rowRecords);
+    records += rowRecords;
+    knownRecords += rowKnownRecords;
+    if (cost.convertedAmount !== null) {
+      convertedAmount += cost.convertedAmount;
+      convertedRecords += rowKnownRecords;
+    }
+    if (cost.conversionUnavailableReason) {
+      conversionUnavailableReasons.add(cost.conversionUnavailableReason);
+    }
+    for (const authority of cost.authorities ?? []) authorities.add(authority);
+    if (cost.observedAt && (!observedAt || cost.observedAt > observedAt))
+      observedAt = cost.observedAt;
+    pricedTokens += cost.pricingEvidence?.pricedTokens ?? 0;
+    const currency = cost.currency.toUpperCase();
+    const amount = native.get(currency) ?? {
+      amount: 0,
+      complete: true,
+      records: 0,
+      knownRecords: 0
+    };
+    amount.records += rowRecords;
+    amount.knownRecords += rowKnownRecords;
+    if (cost.amount === null || rowKnownRecords !== rowRecords) amount.complete = false;
+    else amount.amount += cost.amount;
+    native.set(currency, amount);
+  }
+  const status =
+    records === 0
+      ? 'unavailable'
+      : knownRecords === records && convertedRecords === records
+        ? 'available'
+        : convertedRecords > 0
+          ? 'partial'
+          : 'unavailable';
+  const nativeCurrencies = new Set(native.keys());
+  return {
+    purpose,
+    status,
+    amount: status === 'available' ? preciseAmount(convertedAmount) : null,
+    comparisonCurrency,
+    nativeAmounts: [...native.entries()]
+      .map(([currency, amount]) => ({
+        currency,
+        amount: amount.complete ? preciseAmount(amount.amount) : null,
+        records: amount.records,
+        knownRecords: amount.knownRecords
+      }))
+      .sort((left, right) => left.currency.localeCompare(right.currency)),
+    authorities: [...authorities].sort(),
+    observedAt,
+    records,
+    knownRecords,
+    amountCoverage: records === 0 ? null : knownRecords / records,
+    pricingCoverage:
+      purpose === 'retail-equivalent' && recordedTokens > 0 ? pricedTokens / recordedTokens : null,
+    pricedTokens,
+    recordedTokens,
+    conversionUnavailableReasons: [...conversionUnavailableReasons].sort(),
+    exchangeRates: rates
+      .filter(
+        (rate) =>
+          rate.quoteCurrency.toUpperCase() === comparisonCurrency &&
+          nativeCurrencies.has(rate.baseCurrency.toUpperCase())
+      )
+      .sort((left, right) => left.id.localeCompare(right.id))
+  };
+}
+
+function uniqueExchangeRates(rates: ExchangeRateSnapshot[]): ExchangeRateSnapshot[] {
+  return [...new Map(rates.map((rate) => [rate.id, rate])).values()];
+}
+
 function addAggregatedTokenEvidence(target: MutableTokenEvidence, source: TokenEvidence): void {
   target.recordedTokens += source.recordedTokens;
   target.sourceReportedTokens += source.sourceReportedTokens;
@@ -2022,16 +2222,15 @@ function addAggregatedTokenEvidence(target: MutableTokenEvidence, source: TokenE
   }
 }
 
-function normalizeUsageQuery(
-  now: Date,
-  query: UsageQuery
-): {
+interface NormalizedUsageQuery {
   window: HistoryWindow;
   start: Date;
   end: Date;
   timeZone: string;
   comparisonCurrency: string;
-} {
+}
+
+function normalizeUsageQuery(now: Date, query: UsageQuery): NormalizedUsageQuery {
   const window = query.window ?? '24h';
   const durations: Record<HistoryWindow, number> = {
     '24h': 24 * 60 * 60 * 1000,
@@ -2046,6 +2245,34 @@ function normalizeUsageQuery(
     timeZone,
     comparisonCurrency: (query.comparisonCurrency ?? 'CNY').toUpperCase()
   };
+}
+
+function buildHistoryIntervals(
+  query: NormalizedUsageQuery
+): Array<{ start: Date; end: Date; label: string }> {
+  const count = query.window === '24h' ? 24 : query.window === '7d' ? 7 : 30;
+  const duration = (query.end.getTime() - query.start.getTime()) / count;
+  return Array.from({ length: count }, (_, index) => {
+    const start = new Date(query.start.getTime() + index * duration);
+    const end = new Date(
+      index === count - 1 ? query.end.getTime() : query.start.getTime() + (index + 1) * duration
+    );
+    return {
+      start,
+      end,
+      label:
+        query.window === '24h'
+          ? localHour(start.toISOString(), query.timeZone)
+          : localDay(start.toISOString(), query.timeZone)
+    };
+  });
+}
+
+function historyIntervalIndex(observedAt: string, query: NormalizedUsageQuery): number {
+  const count = query.window === '24h' ? 24 : query.window === '7d' ? 7 : 30;
+  const elapsed = new Date(observedAt).getTime() - query.start.getTime();
+  const duration = (query.end.getTime() - query.start.getTime()) / count;
+  return Math.max(0, Math.min(count - 1, Math.floor(elapsed / duration)));
 }
 
 function validTimeZone(value: string | undefined): boolean {
@@ -2083,6 +2310,20 @@ function localDay(observedAt: string, timeZone: string): string {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+function localHour(observedAt: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date(observedAt));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:00`;
+}
+
 function summarizeHistoryCosts(
   rows: CostRow[],
   recordedTokens: number,
@@ -2102,6 +2343,8 @@ function summarizeHistoryCosts(
       authorities: Set<DataAuthority>;
       observedAt: string | null;
       pricedTokens: number;
+      records: number;
+      knownRecords: number;
     }
   >();
   for (const row of rows) {
@@ -2115,12 +2358,18 @@ function summarizeHistoryCosts(
       prices: new Map<string, PriceSnapshotReference>(),
       authorities: new Set<DataAuthority>(),
       observedAt: null,
-      pricedTokens: 0
+      pricedTokens: 0,
+      records: 0,
+      knownRecords: 0
     };
+    group.records += 1;
     if (!group.observedAt || row.observed_at > group.observedAt) group.observedAt = row.observed_at;
     group.authorities.add(row.authority);
     if (row.amount === null) group.unknown = true;
-    else group.amount += Number(row.amount);
+    else {
+      group.amount += Number(row.amount);
+      group.knownRecords += 1;
+    }
     if (row.kind === 'retail-equivalent') group.pricedTokens += Number(row.priced_tokens ?? 0);
     const price = priceSnapshotFromRow(row);
     if (price) group.prices.set(price.id, price);
@@ -2149,6 +2398,8 @@ function summarizeHistoryCosts(
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
           observedAt: group.observedAt,
+          records: group.records,
+          knownRecords: group.knownRecords,
           pricingEvidence
         };
       }
@@ -2163,6 +2414,8 @@ function summarizeHistoryCosts(
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
           observedAt: group.observedAt,
+          records: group.records,
+          knownRecords: group.knownRecords,
           pricingEvidence
         };
       }
@@ -2178,6 +2431,8 @@ function summarizeHistoryCosts(
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
           observedAt: group.observedAt,
+          records: group.records,
+          knownRecords: group.knownRecords,
           pricingEvidence
         };
       }
@@ -2192,6 +2447,8 @@ function summarizeHistoryCosts(
           priceSnapshots: [...group.prices.values()],
           authorities: [...group.authorities].sort(),
           observedAt: group.observedAt,
+          records: group.records,
+          knownRecords: group.knownRecords,
           pricingEvidence
         };
       }
@@ -2213,6 +2470,8 @@ function summarizeHistoryCosts(
         priceSnapshots: [...group.prices.values()],
         authorities: [...group.authorities].sort(),
         observedAt: group.observedAt,
+        records: group.records,
+        knownRecords: group.knownRecords,
         pricingEvidence
       };
     })
