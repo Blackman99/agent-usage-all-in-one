@@ -264,6 +264,8 @@ Run `pnpm licenses:generate` after dependency changes and review the diff before
 | `zimmerframe`                           | 1.1.4               | MIT           | [link](https://github.com/sveltejs/zimmerframe#readme)                                     |
 | `zod`                                   | 4.4.3               | MIT           | [link](https://zod.dev)                                                                    |
 
-The package archives retain each dependency license in its own installed package.
+Complete license texts for dependencies bundled into the browser distribution are in
+[BUNDLED_LICENSES.md](BUNDLED_LICENSES.md). Dependencies installed separately retain
+their license texts in their own packages.
 Adapted source and trademark notices that require project-level context are recorded in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

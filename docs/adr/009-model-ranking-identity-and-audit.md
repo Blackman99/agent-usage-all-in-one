@@ -16,13 +16,18 @@ them in a model ranking would imply attribution that the source did not provide.
 ## Decision
 
 Each ranking entry is identified by the tuple `(provider, billing domain,
-model)`. The read model exposes all known entries plus two deterministic Top 5
+model)`. The read model exposes all known entries plus three deterministic Top 5
 orders:
 
 - recorded Tokens descending, then the stable tuple identity;
 - available API retail equivalent descending, then recorded Tokens and the
   stable tuple identity. Unpriced entries follow priced entries and retain an
-  unavailable amount.
+  unavailable amount;
+- displayable cost descending, preferring API retail equivalent when it is
+  available and otherwise using a Provider/client-reported estimate. Every
+  amount retains its purpose, and reported estimates are never relabelled as
+  retail equivalents. Shares for reported estimates are calculated only within
+  the reported-estimate domain.
 
 Unknown, absent, and `all-models` identifiers are aggregated per Provider and
 billing domain into a separate unclassified section. They contribute to the
@@ -38,6 +43,8 @@ selected window as the workbench and retains gaps.
 - Matching model-name strings never merge across source boundaries.
 - Token ranking remains useful when pricing is incomplete.
 - Retail sorting cannot imply that missing pricing means zero cost.
+- The cost ranking can include unpriced models without combining incompatible
+  cost purposes into a single total or share.
 - Known model totals plus unclassified totals reconcile to recorded Tokens.
 - UI drawers can explain the displayed result without a second data fetch or a
   model-name-only join.

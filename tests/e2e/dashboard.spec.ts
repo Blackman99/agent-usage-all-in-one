@@ -892,6 +892,12 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.getByTestId('usage-headline')).toContainText('CN¥9.00');
   await expect(workbench.getByTestId('usage-headline')).toContainText('API retail equivalent');
   await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
+  await expect(
+    workbench.getByTestId('usage-trend-chart').locator('[data-cost-purpose="retail-equivalent"]')
+  ).toHaveCount(1);
+  await expect(
+    workbench.getByTestId('usage-trend-chart').locator('[data-cost-purpose="reported-estimate"]')
+  ).toHaveCount(1);
   await expect(workbench.getByTestId('usage-provider-summary')).toContainText('History Agent');
   const unknownProvider = workbench
     .getByTestId('usage-provider-summary')
@@ -1639,6 +1645,11 @@ function tokenMoneyWorkbenchFixture(window: string, total: number, currency: str
                   retailEquivalent: {
                     status: 'available',
                     amount: comparison.retail,
+                    currency
+                  },
+                  reportedEstimate: {
+                    status: 'available',
+                    amount: comparison.reported,
                     currency
                   }
                 }

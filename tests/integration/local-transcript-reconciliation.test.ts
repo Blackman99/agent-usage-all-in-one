@@ -114,6 +114,43 @@ describe('local transcript source reconciliation', () => {
     repository.close();
   });
 
+  it('loads retained Codex history without rescanning every observation for each day', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-reconcile-scale-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const days = Array.from(
+      { length: 30 },
+      (_, index) => `2026-07-${String(index + 1).padStart(2, '0')}`
+    );
+    const officialUsage = days.map((day) => ({
+      ...legacy(`codex:daily:${day}`, 'subscription'),
+      observedAt: `${day}T12:00:00.000Z`
+    }));
+    const transcriptUsage = Array.from({ length: 6_000 }, (_, index) => {
+      const day = days[index % days.length];
+      return {
+        ...known(`codex-transcript:session-${index}`, 'gpt-5.6-sol', 'subscription'),
+        observedAt: `${day}T01:00:00.000Z`
+      };
+    });
+    repository.saveSnapshot({
+      provider: { id: 'codex', displayName: 'Codex' },
+      billingDomains: [{ id: 'subscription', displayName: 'Codex subscription' }],
+      quotaBuckets: [],
+      usage: [...officialUsage, ...transcriptUsage],
+      costs: [],
+      observedAt: '2026-08-01T00:00:00.000Z'
+    });
+
+    const startedAt = performance.now();
+    const retained = repository.getRetailPricingBackfillSnapshots();
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(retained[0].usage).toHaveLength(officialUsage.length);
+    expect(elapsedMs).toBeLessThan(1_000);
+    repository.close();
+  }, 20_000);
+
   it('keeps a Grok client-reported model estimate available to the model workbench', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-grok-reported-cost-'));
     workspaces.push(workspace);

@@ -830,22 +830,18 @@
     return `${formatter.format(new Date(workbench.start))} – ${formatter.format(new Date(workbench.end))}`;
   }
 
-  function trendValue(
-    segment: UsageOverview['workbench']['trend']['buckets'][number]['segments'][number],
-    metric: 'tokens' | 'retail-equivalent'
-  ): number | null {
-    return metric === 'tokens' ? segment.recordedTokens : segment.retailEquivalent.amount;
-  }
-
   function trendMaximum(
     workbench: UsageOverview['workbench'],
     metric: 'tokens' | 'retail-equivalent'
   ): number | null {
     const values = workbench.trend.buckets.flatMap((bucket) =>
-      bucket.segments.flatMap((segment) => {
-        const value = trendValue(segment, metric);
-        return value === null ? [] : [value];
-      })
+      bucket.segments.flatMap((segment) =>
+        metric === 'tokens'
+          ? [segment.recordedTokens]
+          : [segment.retailEquivalent.amount, segment.reportedEstimate?.amount ?? null].filter(
+              (value): value is number => value !== null
+            )
+      )
     );
     return values.length > 0 ? Math.max(...values) : null;
   }
@@ -856,16 +852,24 @@
   ) {
     const buckets = workbench.trend.buckets;
     const maximum = Math.max(1, trendMaximum(workbench, metric) ?? 0);
-    const identities = trendLegend(workbench);
+    const identities = trendLegend(workbench, metric);
     return identities.map((identity) => {
-      const key = `${identity.providerId}:${identity.billingDomainId}`;
+      const key = `${identity.providerId}:${identity.billingDomainId}:${identity.costPurpose ?? 'tokens'}`;
       const runs: Array<Array<{ x: number; y: number; value: number; label: string }>> = [];
       let currentRun: Array<{ x: number; y: number; value: number; label: string }> = [];
       for (const [index, bucket] of buckets.entries()) {
         const segment = bucket.segments.find(
-          (candidate) => `${candidate.providerId}:${candidate.billingDomainId}` === key
+          (candidate) =>
+            candidate.providerId === identity.providerId &&
+            candidate.billingDomainId === identity.billingDomainId
         );
-        const value = segment ? trendValue(segment, metric) : null;
+        const value = segment
+          ? metric === 'tokens'
+            ? segment.recordedTokens
+            : identity.costPurpose === 'reported-estimate'
+              ? (segment.reportedEstimate?.amount ?? null)
+              : segment.retailEquivalent.amount
+          : null;
         if (bucket.gap || value === null) {
           if (currentRun.length > 0) runs.push(currentRun);
           currentRun = [];
@@ -903,12 +907,28 @@
       : formatMoney(value, currency);
   }
 
-  function trendLegend(workbench: UsageOverview['workbench']) {
+  function trendLegend(
+    workbench: UsageOverview['workbench'],
+    metric: 'tokens' | 'retail-equivalent'
+  ) {
+    const segments = workbench.trend.buckets.flatMap((bucket) => bucket.segments);
+    const identities =
+      metric === 'tokens'
+        ? segments.map((segment) => ({ ...segment, costPurpose: null }))
+        : segments.flatMap((segment) => [
+            ...(segment.retailEquivalent.amount === null
+              ? []
+              : [{ ...segment, costPurpose: 'retail-equivalent' as const }]),
+            ...(segment.reportedEstimate?.amount == null
+              ? []
+              : [{ ...segment, costPurpose: 'reported-estimate' as const }])
+          ]);
     return [
       ...new Map(
-        workbench.trend.buckets
-          .flatMap((bucket) => bucket.segments)
-          .map((segment) => [`${segment.providerId}:${segment.billingDomainId}`, segment])
+        identities.map((segment) => [
+          `${segment.providerId}:${segment.billingDomainId}:${segment.costPurpose ?? 'tokens'}`,
+          segment
+        ])
       ).values()
     ];
   }
@@ -931,7 +951,24 @@
     const value =
       metric === 'tokens'
         ? `${formatNumber(segment.recordedTokens)} ${t('tokens')}`
-        : formatMoney(segment.retailEquivalent.amount, segment.retailEquivalent.currency);
+        : [
+            ...(segment.retailEquivalent.amount === null
+              ? []
+              : [
+                  `${t('apiRetailEquivalent')}: ${formatMoney(
+                    segment.retailEquivalent.amount,
+                    segment.retailEquivalent.currency
+                  )}`
+                ]),
+            ...(segment.reportedEstimate?.amount == null
+              ? []
+              : [
+                  `${t('providerReportedEstimate')}: ${formatMoney(
+                    segment.reportedEstimate.amount,
+                    segment.reportedEstimate.currency
+                  )}`
+                ])
+          ].join(' + ') || t('notAvailable');
     const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
     const authorities =
       segment.authorities && segment.authorities.length > 0
@@ -1514,6 +1551,7 @@
                           {#if trendAreaPath(run)}
                             <path
                               class="trend-area"
+                              data-cost-purpose={series.costPurpose ?? undefined}
                               d={trendAreaPath(run)}
                               style={`fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
                             ></path>
@@ -1521,12 +1559,14 @@
                           {#if run.length > 1}
                             <path
                               class="trend-line"
+                              data-cost-purpose={series.costPurpose ?? undefined}
                               d={trendLinePath(run)}
                               style={`stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
                             ></path>
                           {:else if run[0]}
                             <circle
                               class="trend-point"
+                              data-cost-purpose={series.costPurpose ?? undefined}
                               cx={run[0].x}
                               cy={run[0].y}
                               r="4"
@@ -1552,6 +1592,10 @@
                           style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
                         ></i>
                         {segment.providerDisplayName} · {segment.billingDomainDisplayName}
+                        {#if segment.costPurpose}
+                          · {segment.costPurpose === 'reported-estimate'
+                            ? t('providerReportedEstimate')
+                            : t('apiRetailEquivalent')}{/if}
                         {#if segment.includedInHeadline === false}
                           · {t('separateFromHeadline')}{/if}
                       </span>
@@ -1678,7 +1722,11 @@
                   <span>{breakdownDimension === 'model' ? t('model') : t('day')}</span>
                   <span>{t('cost')}</span>
                   <span
-                    >{selectedTrendMetric === 'tokens' ? t('tokenShare') : t('retailShare')}</span
+                    >{selectedTrendMetric === 'tokens'
+                      ? t('tokenShare')
+                      : breakdownDimension === 'model'
+                        ? t('costShare')
+                        : t('retailShare')}</span
                   >
                   <span>{t('tokens')}</span>
                 </div>
@@ -2172,7 +2220,9 @@
                   <div>
                     <strong>{formatMoney(price.amount, price.currency)}</strong>
                     <span
-                      >{authorityLabel(price.authority)} · {formatReset(
+                      >{price.kind === 'reported-estimate'
+                        ? t('providerReportedEstimate')
+                        : t('apiRetailEquivalent')} · {authorityLabel(price.authority)} · {formatReset(
                         price.observedAt ?? null
                       )}</span
                     >

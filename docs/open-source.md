@@ -14,8 +14,10 @@ Code under MIT. Its copyright and license text are preserved in
 
 `THIRD_PARTY_LICENSES.md` is generated from the exact pnpm lockfile and lists
 every production and development dependency, version, declared license, and
-project link. Dependency packages retain their own license texts. The generated
-report is refreshed and reviewed whenever dependencies change.
+project link. `BUNDLED_LICENSES.md` carries the complete license and copyright
+texts for dependency code bundled into the browser distribution. Dependencies
+installed separately retain their license texts in their own packages. Both
+generated reports are checked by CI whenever dependencies change.
 
 ## Provider marks
 

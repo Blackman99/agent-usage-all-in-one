@@ -95,7 +95,8 @@ export class UsageApplication {
       return;
     }
     const calculatedAt = this.#clock().toISOString();
-    for (const snapshot of this.#repository.getRetailPricingBackfillSnapshots()) {
+    const snapshots = this.#repository.getRetailPricingBackfillSnapshots();
+    for (const snapshot of snapshots) {
       const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
       if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
     }

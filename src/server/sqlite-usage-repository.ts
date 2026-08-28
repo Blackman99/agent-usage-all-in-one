@@ -54,7 +54,12 @@ interface ProviderRow {
 
 function additiveUsagePredicate(alias = ''): string {
   const prefix = alias ? `${alias}.` : '';
-  const outer = alias || 'usage_observations';
+  const codexOfficialDays = `(SELECT billing_domain_id, date(observed_at)
+    FROM usage_observations
+    WHERE provider_id = 'codex' AND id LIKE 'codex:daily:%')`;
+  const codexRemainderDays = `(SELECT billing_domain_id, date(observed_at)
+    FROM usage_observations
+    WHERE provider_id = 'codex' AND id LIKE 'codex-transcript:account-remainder:%')`;
   return `NOT (
     ${prefix}aggregation_temporality = 'unknown'
     AND (
@@ -69,31 +74,13 @@ function additiveUsagePredicate(alias = ''): string {
       AND (
         (
           ${prefix}id LIKE 'codex:daily:%'
-          AND EXISTS (
-            SELECT 1 FROM usage_observations codex_remainder
-            WHERE codex_remainder.provider_id = ${outer}.provider_id
-              AND codex_remainder.billing_domain_id = ${outer}.billing_domain_id
-              AND codex_remainder.id LIKE 'codex-transcript:account-remainder:%'
-              AND date(codex_remainder.observed_at) = date(${outer}.observed_at)
-          )
+          AND (${prefix}billing_domain_id, date(${prefix}observed_at)) IN ${codexRemainderDays}
         )
         OR (
           ${prefix}id LIKE 'codex-transcript:%'
           AND ${prefix}id NOT LIKE 'codex-transcript:account-remainder:%'
-          AND EXISTS (
-            SELECT 1 FROM usage_observations codex_official
-            WHERE codex_official.provider_id = ${outer}.provider_id
-              AND codex_official.billing_domain_id = ${outer}.billing_domain_id
-              AND codex_official.id LIKE 'codex:daily:%'
-              AND date(codex_official.observed_at) = date(${outer}.observed_at)
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM usage_observations codex_remainder
-            WHERE codex_remainder.provider_id = ${outer}.provider_id
-              AND codex_remainder.billing_domain_id = ${outer}.billing_domain_id
-              AND codex_remainder.id LIKE 'codex-transcript:account-remainder:%'
-              AND date(codex_remainder.observed_at) = date(${outer}.observed_at)
-          )
+          AND (${prefix}billing_domain_id, date(${prefix}observed_at)) IN ${codexOfficialDays}
+          AND (${prefix}billing_domain_id, date(${prefix}observed_at)) NOT IN ${codexRemainderDays}
         )
       )
     )
