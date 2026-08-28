@@ -60,7 +60,12 @@ describe('privacy, export, and retention', () => {
           authority: 'local-observation',
           recordedTokens: 150,
           classifiedTokens: 125,
-          unclassifiedTokens: 25
+          unclassifiedTokens: 25,
+          usageScopes: ['this-mac'],
+          aggregationTemporalities: ['delta'],
+          reasoningSemantics: 'included-in-output',
+          cacheReadSemantics: 'separate',
+          cacheWriteSemantics: 'separate'
         }),
         expect.objectContaining({
           recordType: 'cost',
@@ -297,6 +302,13 @@ function snapshot(): ConnectorSnapshot {
         sessionId: 'account-private-123',
         observedAt: '2026-08-27T00:00:00.000Z',
         sourceReportedTotalTokens: 150,
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
         inputTokens: 100,
         outputTokens: 25,
         cacheReadTokens: 0,

@@ -257,8 +257,12 @@ export interface HistoryModelObservation {
   timePrecision: TokenTimePrecision;
   sourceReportedTotalTokens: number | null;
   recordedTokens: number;
+  classifiedTokens: number;
   unclassifiedTokens: number;
   totalDerivation: TokenTotalDerivation;
+  tokenSemantics: TokenSemantics;
+  usageScope: TokenUsageScope;
+  aggregationTemporality: TokenAggregationTemporality;
   tokenTotals: TokenTotals;
 }
 
@@ -361,6 +365,7 @@ export interface RetentionStatus {
 export interface ProviderOverview {
   id: string;
   displayName: string;
+  summaryBillingDomainId: string | null;
   freshness: {
     status: 'fresh' | 'stale' | 'unavailable';
     lastSuccessAt: string | null;

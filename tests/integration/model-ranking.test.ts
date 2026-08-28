@@ -163,9 +163,17 @@ describe('model ranking read model', () => {
         observations: [
           expect.objectContaining({
             id: 'named-with-remainder',
-            recordedTokens: 100,
+            recordedTokens: 150,
+            classifiedTokens: 100,
             sourceReportedTotalTokens: 150,
-            unclassifiedTokens: 50
+            unclassifiedTokens: 50,
+            usageScope: 'this-mac',
+            aggregationTemporality: 'delta',
+            tokenSemantics: {
+              reasoning: 'included-in-output',
+              cacheRead: 'separate',
+              cacheWrite: 'separate'
+            }
           })
         ]
       })

@@ -156,6 +156,9 @@ interface UsageHistoryRow {
   time_precision: TokenTimePrecision;
   usage_scope: TokenUsageScope;
   aggregation_temporality: TokenAggregationTemporality;
+  reasoning_semantics: TokenSemantics['reasoning'];
+  cache_read_semantics: TokenSemantics['cacheRead'];
+  cache_write_semantics: TokenSemantics['cacheWrite'];
 }
 
 interface PricingBackfillRow extends UsageHistoryRow {
@@ -1040,6 +1043,7 @@ export class SqliteUsageRepository implements UsageRepository {
     const domainRows = this.#database
       .prepare(`SELECT id, display_name FROM billing_domains WHERE provider_id = ? ORDER BY id`)
       .all(provider.id) as unknown as BillingDomainRow[];
+    const summaryBillingDomainId = selectSummaryBillingDomainId(provider.id, domainRows);
     const quotaRows = this.#database
       .prepare(
         `SELECT id, billing_domain_id, label, used_percent, resets_at, authority, observed_at,
@@ -1067,26 +1071,33 @@ export class SqliteUsageRepository implements UsageRepository {
            GROUP_CONCAT(DISTINCT aggregation_temporality) AS aggregation_temporalities,
            GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations
-         WHERE provider_id = ? AND ${additiveUsagePredicate()}`
+         WHERE provider_id = ? AND (? IS NULL OR billing_domain_id = ?)
+           AND ${additiveUsagePredicate()}`
       )
-      .get(provider.id) as unknown as TokenRow;
+      .get(provider.id, summaryBillingDomainId, summaryBillingDomainId) as unknown as TokenRow;
     const actualCostCount = this.#database
       .prepare(
         "SELECT COUNT(*) AS count FROM cost_records WHERE provider_id = ? AND kind = 'actual'"
       )
-      .get(provider.id) as unknown as { count: number };
+      .get(provider.id) as unknown as {
+      count: number;
+    };
     const nonAdditiveTokenCount = this.#database
       .prepare(
         `SELECT COUNT(*) AS count FROM usage_observations
-         WHERE provider_id = ? AND NOT (${additiveUsagePredicate()})`
+         WHERE provider_id = ? AND (? IS NULL OR billing_domain_id = ?)
+           AND NOT (${additiveUsagePredicate()})`
       )
-      .get(provider.id) as unknown as { count: number };
+      .get(provider.id, summaryBillingDomainId, summaryBillingDomainId) as unknown as {
+      count: number;
+    };
 
     const quotaBuckets = quotaRows.map(mapQuotaRow);
 
     return {
       id: provider.id,
       displayName: provider.display_name,
+      summaryBillingDomainId,
       freshness: {
         status: freshnessStatus(provider.last_success_at, now),
         lastSuccessAt: provider.last_success_at
@@ -1342,7 +1353,8 @@ export class SqliteUsageRepository implements UsageRepository {
         `SELECT id, model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
                 cache_read_tokens, cache_write_tokens, source_reported_total_tokens,
                 unclassified_tokens, total_derivation, model_attribution, time_precision,
-                usage_scope, aggregation_temporality
+                usage_scope, aggregation_temporality, reasoning_semantics,
+                cache_read_semantics, cache_write_semantics
          FROM usage_observations
          WHERE provider_id = ? AND billing_domain_id = ?
            AND observed_at >= ? AND observed_at < ?
@@ -2687,9 +2699,17 @@ function mapHistoryModelObservation(
     authority: row.authority,
     timePrecision: row.time_precision,
     sourceReportedTotalTokens: row.source_reported_total_tokens,
-    recordedTokens: Math.max(0, Number(row.total_tokens) - Number(row.unclassified_tokens)),
+    recordedTokens: Number(row.total_tokens),
+    classifiedTokens: Math.max(0, Number(row.total_tokens) - Number(row.unclassified_tokens)),
     unclassifiedTokens: Number(row.unclassified_tokens),
     totalDerivation: row.total_derivation,
+    tokenSemantics: {
+      reasoning: row.reasoning_semantics,
+      cacheRead: row.cache_read_semantics,
+      cacheWrite: row.cache_write_semantics
+    },
+    usageScope: row.usage_scope,
+    aggregationTemporality: row.aggregation_temporality,
     tokenTotals: {
       total: Math.max(0, Number(row.total_tokens) - Number(row.unclassified_tokens)),
       input: Number(row.input_tokens),
@@ -2712,8 +2732,16 @@ function mapUnclassifiedObservation(
     timePrecision: row.time_precision,
     sourceReportedTotalTokens: row.source_reported_total_tokens,
     recordedTokens: Number(row.total_tokens),
+    classifiedTokens: 0,
     unclassifiedTokens: Number(row.unclassified_tokens),
     totalDerivation: row.total_derivation,
+    tokenSemantics: {
+      reasoning: row.reasoning_semantics,
+      cacheRead: row.cache_read_semantics,
+      cacheWrite: row.cache_write_semantics
+    },
+    usageScope: row.usage_scope,
+    aggregationTemporality: row.aggregation_temporality,
     tokenTotals: {
       total: Number(row.total_tokens),
       input: Number(row.input_tokens),
@@ -3021,6 +3049,20 @@ function tokenCoverage(tokens: TokenRow, excludedObservationCount = 0): Coverage
     tokens.aggregation_temporalities
   );
   return scopes.includes('this-mac') || temporalities.includes('delta') ? 'partial' : 'complete';
+}
+
+function selectSummaryBillingDomainId(
+  providerId: string,
+  domains: BillingDomainRow[]
+): string | null {
+  if (providerId === 'grok') {
+    return (
+      domains.find((domain) => domain.id === 'grok-build-subscription')?.id ??
+      domains[0]?.id ??
+      null
+    );
+  }
+  return domains[0]?.id ?? null;
 }
 
 function freshnessStatus(

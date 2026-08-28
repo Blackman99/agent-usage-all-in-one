@@ -249,7 +249,10 @@ describe('UsageApplication', () => {
         invoices: [{ number: 'INV-1', amount: 25 }]
       }
     ]);
-    expect(overview.providers[0].tokenTotals.total).toBe(2_267);
+    expect(overview.providers[0]).toMatchObject({
+      summaryBillingDomainId: 'grok-build-subscription',
+      tokenTotals: { total: 525 }
+    });
     repository.close();
   });
 });

@@ -72,7 +72,10 @@ describe('all-provider token contract', () => {
     });
 
     const grok = overview.providers.find((provider) => provider.id === 'grok')!;
-    expect(grok.tokenTotals.total).toBe(2_267);
+    expect(grok).toMatchObject({
+      summaryBillingDomainId: 'grok-build-subscription',
+      tokenTotals: { total: 525 }
+    });
     expect(grok.billingDomains.map((domain) => domain.id)).toEqual([
       'grok-build-subscription',
       'xai-api'

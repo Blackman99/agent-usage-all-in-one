@@ -501,6 +501,18 @@
         : t('temporalityUnknown');
   }
 
+  function tokenSemanticsSummary(
+    semantics: BillingHistory['models'][number]['observations'][number]['tokenSemantics']
+  ): string {
+    const reasoning =
+      semantics.reasoning === 'included-in-output' ? t('includedInOutput') : t('separateCategory');
+    const cacheRead =
+      semantics.cacheRead === 'included-in-input' ? t('includedInInput') : t('separateCategory');
+    const cacheWrite =
+      semantics.cacheWrite === 'included-in-input' ? t('includedInInput') : t('separateCategory');
+    return `${t('reasoning')}: ${reasoning} · ${t('cacheRead')}: ${cacheRead} · ${t('cacheWrite')}: ${cacheWrite}`;
+  }
+
   function coverageDimensionLabel(coverage: CoverageDimension): string {
     const keys: Record<CoverageDimension, MessageKey> = {
       quota: 'quota',
@@ -684,8 +696,7 @@
       'opencode-go': {
         dark: '/brands/opencode-dark.svg',
         light: '/brands/opencode-light.svg'
-      },
-      grok: { dark: '/brands/xai-dark.svg', light: '/brands/xai-light.svg' }
+      }
     };
     return paths[providerId] ?? null;
   }
@@ -727,6 +738,7 @@
     return {
       id,
       displayName,
+      summaryBillingDomainId: null,
       freshness: { status: 'unavailable', lastSuccessAt: null },
       health: { status: 'healthy', errorCode: null, message: null, recovery: null },
       coverage: {
@@ -791,14 +803,25 @@
       (candidate) => candidate.providerId === providerId
     );
     const diagnostic =
-      candidates?.find(
-        (candidate) =>
-          candidate.billingDomainId === billingDomainId && candidate.status === 'degraded'
-      ) ??
-      candidates?.find((candidate) => candidate.status === 'degraded') ??
+      degradedDiagnosticForProvider(report, providerId, billingDomainId) ??
       candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ??
       candidates?.[0];
     return diagnostic ? `diagnostic:${diagnostic.id}` : null;
+  }
+
+  function degradedDiagnosticForProvider(
+    report: DoctorReport | null,
+    providerId: string,
+    billingDomainId?: string
+  ): DoctorReport['connectors'][number] | null {
+    const candidates = report?.connectors.filter(
+      (candidate) => candidate.providerId === providerId && candidate.status === 'degraded'
+    );
+    return (
+      candidates?.find((candidate) => candidate.billingDomainId === billingDomainId) ??
+      candidates?.[0] ??
+      null
+    );
   }
 
   function actionableRisk(
@@ -1181,6 +1204,15 @@
       <section class="providers" aria-label={t('providersLabel')}>
         {#each displayProviders(overview, connectors) as provider (provider.id)}
           {@const logo = providerLogoSources(provider.id)}
+          {@const selectedDomain = activeBillingDomain(
+            provider,
+            selectedBillingDomains[provider.id]
+          )}
+          {@const recoveryDiagnostic = degradedDiagnosticForProvider(
+            diagnostics,
+            provider.id,
+            selectedDomain.id
+          )}
           <article class="provider-card">
             <div class="provider-heading">
               <div>
@@ -1213,16 +1245,20 @@
 
             {#if provider.health.status === 'degraded'}
               <div class="degraded" role="status">
-                <strong>{providerHealthMessage(provider)}</strong>
-                <code>{providerHealthRecovery(provider)}</code>
+                <strong>
+                  {recoveryDiagnostic
+                    ? `${recoveryDiagnostic.id} · ${diagnosticCategoryLabel(recoveryDiagnostic)}`
+                    : providerHealthMessage(provider)}
+                </strong>
+                <code>
+                  {recoveryDiagnostic
+                    ? diagnosticRecovery(recoveryDiagnostic)
+                    : providerHealthRecovery(provider)}
+                </code>
                 <button
                   on:click={() =>
                     openSettings(
-                      diagnosticTargetForProvider(
-                        diagnostics,
-                        provider.id,
-                        activeBillingDomain(provider, selectedBillingDomains[provider.id]).id
-                      )
+                      diagnosticTargetForProvider(diagnostics, provider.id, selectedDomain.id)
                     )}>{t('reviewInSettings')}</button
                 >
               </div>
@@ -1235,9 +1271,7 @@
                 aria-label={`${provider.displayName} ${t('billingDomainTabs')}`}
               >
                 {#each provider.billingDomains as domain (domain.id)}
-                  {@const selected =
-                    activeBillingDomain(provider, selectedBillingDomains[provider.id]).id ===
-                    domain.id}
+                  {@const selected = selectedDomain.id === domain.id}
                   <button
                     type="button"
                     role="tab"
@@ -1250,7 +1284,7 @@
               </div>
             {/if}
 
-            {#each [activeBillingDomain(provider, selectedBillingDomains[provider.id])] as domain (domain.id)}
+            {#each [selectedDomain] as domain (domain.id)}
               {@const history = activeHistory(domain)}
               {@const tokenAuthority = historyTokenAuthority(history, domain.tokenAuthority)}
               {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
@@ -2194,13 +2228,23 @@
                     {timePrecisionLabel(observation.timePrecision)}
                   </strong>
                   <span>{formatReset(observation.observedAt)}</span>
+                  <small>{t('scope')} {usageScopeLabel(observation.usageScope)}</small>
+                  <small>
+                    {t('aggregationTemporality')}
+                    {aggregationTemporalityLabel(observation.aggregationTemporality)}
+                  </small>
                   <small>{t('recordedTotal')} {formatNumber(observation.recordedTokens)}</small>
+                  <small>{t('classified')} {formatNumber(observation.classifiedTokens)}</small>
+                  <small>{t('unclassified')} {formatNumber(observation.unclassifiedTokens)}</small>
                   <small>
                     {t('sourceReportedTotal')}
                     {observation.sourceReportedTotalTokens === null
                       ? t('notAvailable')
                       : formatNumber(observation.sourceReportedTotalTokens)}
                   </small>
+                  <small
+                    >{t('semantics')} · {tokenSemanticsSummary(observation.tokenSemantics)}</small
+                  >
                 </article>
               {/each}
             </div>

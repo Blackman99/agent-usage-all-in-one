@@ -187,6 +187,31 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-28T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [
+          {
+            id: 'codex',
+            providerId: 'codex',
+            billingDomainId: 'subscription',
+            status: 'degraded',
+            category: 'unauthorized',
+            message: 'Codex account usage is unavailable.',
+            recovery: 'Run codex login, then refresh Agent Usage.',
+            affectedCoverage: ['quota', 'tokens', 'history'],
+            lastAttemptAt: '2026-08-28T02:00:00.000Z',
+            lastSuccessAt: '2026-08-27T02:00:00.000Z'
+          }
+        ],
+        providers: []
+      })
+    });
+  });
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -261,7 +286,7 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   await expect(provider).toContainText(/Scope:\s*Account-wide/);
   await expect(provider).toContainText(/Precision:\s*Day/);
   await expect(provider).toContainText(/Unclassified:\s*1,250/);
-  await expect(provider.getByText('Codex account usage is unavailable.')).toBeVisible();
+  await expect(provider.getByText('codex · Unauthorized')).toBeVisible();
   await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toBeVisible();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   const diagnostic = page.getByTestId('settings-diagnostic-codex');
@@ -572,9 +597,10 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeHidden();
   await provider.getByText('Token breakdown', { exact: true }).click();
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
+  await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
   await expect(
     provider.getByText('Open Grok Build and run /usage, then retry refresh.')
-  ).toBeVisible();
+  ).toHaveCount(0);
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
   await page.getByRole('button', { name: 'Close settings' }).click();
@@ -858,7 +884,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await ranking.getByRole('button', { name: 'Sort by API retail equivalent' }).click();
   await expect(rows.first()).toContainText('fable-model');
   const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
-  await expect(grokRow.locator('img')).toHaveAttribute('src', '/brands/xai-dark.svg');
+  await expect(grokRow.locator('img')).toHaveCount(0);
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
 
   const fableRow = rows.filter({ hasText: 'fable-model' });
@@ -874,7 +900,12 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(detail.getByRole('button', { name: 'Close model detail' })).toBeFocused();
   await expect(detail).toContainText('Claude Code · Subscription');
   await expect(detail).toContainText('Recorded total 400');
-  await expect(detail).toContainText('Source-reported total 400');
+  await expect(detail).toContainText('Recorded total 450');
+  await expect(detail).toContainText('Classified 400');
+  await expect(detail).toContainText('Unclassified 50');
+  await expect(detail).toContainText('Source-reported total 450');
+  await expect(detail).toContainText('Scope This Mac only');
+  await expect(detail).toContainText('Aggregation Delta');
   await expect(detail).toContainText('Input · 320 · $3.20');
   await expect(detail).toContainText('2026-08-01 · Official fixture pricing');
   await expect(detail).toContainText('Local observation · Event');
@@ -933,7 +964,7 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     '12,400 Tokens'
   );
 
-  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
+  for (const providerId of ['codex', 'claude-code', 'opencode-go']) {
     const logo = page.locator(`picture[data-provider-logo="${providerId}"]`).first();
     await expect(logo).toBeVisible();
     await expect(logo.locator('img')).toHaveAttribute('src', /^\/brands\//);
@@ -941,9 +972,10 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   await expect(
     page.locator('picture[data-provider-logo="opencode-go"] source').first()
   ).toHaveAttribute('srcset', '/brands/opencode-light.svg');
-  await expect(page.locator('picture[data-provider-logo="grok"] source').first()).toHaveAttribute(
-    'srcset',
-    '/brands/xai-light.svg'
+  await expect(page.locator('picture[data-provider-logo="grok"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Grok', exact: true })).toHaveAttribute(
+    'data-provider-logo',
+    'grok'
   );
   expect(
     await page
@@ -951,13 +983,6 @@ test('follows system theme and keeps the usage dashboard responsive with local o
       .first()
       .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
   ).toBe('/brands/opencode-light.svg');
-  expect(
-    await page
-      .locator('picture[data-provider-logo="grok"] img')
-      .first()
-      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
-  ).toBe('/brands/xai-light.svg');
-
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect.poll(gridColumnCount).toBe(2);
   await page.setViewportSize({ width: 1680, height: 1000 });
@@ -996,12 +1021,6 @@ test('follows system theme and keeps the usage dashboard responsive with local o
       .first()
       .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
   ).toBe('/brands/opencode-dark.svg');
-  expect(
-    await page
-      .locator('picture[data-provider-logo="grok"] img')
-      .first()
-      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
-  ).toBe('/brands/xai-dark.svg');
   expect(externalRequests).toEqual([]);
 });
 
@@ -1511,8 +1530,17 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
             observedAt: '2026-08-28T00:30:00.000Z',
             authority: 'local-observation',
             timePrecision: 'event',
-            sourceReportedTotalTokens: tokens,
-            recordedTokens: tokens,
+            sourceReportedTotalTokens: model === 'fable-model' ? 450 : tokens,
+            recordedTokens: model === 'fable-model' ? 450 : tokens,
+            classifiedTokens: tokens,
+            unclassifiedTokens: model === 'fable-model' ? 50 : 0,
+            usageScope: 'this-mac',
+            aggregationTemporality: 'delta',
+            tokenSemantics: {
+              reasoning: 'included-in-output',
+              cacheRead: 'separate',
+              cacheWrite: 'separate'
+            },
             totalDerivation: 'source-reported',
             tokenTotals
           }

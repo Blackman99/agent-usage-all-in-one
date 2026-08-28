@@ -46,6 +46,9 @@ export function buildUsageExport(
         timePrecisions: history.tokenEvidence.timePrecisions,
         usageScopes: history.tokenEvidence.usageScopes,
         aggregationTemporalities: history.tokenEvidence.aggregationTemporalities,
+        reasoningSemantics: null,
+        cacheReadSemantics: null,
+        cacheWriteSemantics: null,
         inputTokens: history.tokenTotals.input,
         outputTokens: history.tokenTotals.output,
         reasoningTokens: history.tokenTotals.reasoning,
@@ -73,8 +76,7 @@ export function buildUsageExport(
       const modelObservations = history.models.flatMap((model) =>
         model.observations.map((observation) => ({
           model: model.model,
-          observation,
-          classified: true
+          observation
         }))
       );
       const modelObservationIds = new Set(
@@ -86,14 +88,11 @@ export function buildUsageExport(
           .filter((observation) => !modelObservationIds.has(observation.id))
           .map((observation) => ({
             model: observation.model,
-            observation,
-            classified: false
+            observation
           }))
-      ].map(({ model, observation, classified }) => {
-        const classifiedTokens = classified ? observation.recordedTokens : 0;
-        const recordedTokens = classified
-          ? observation.recordedTokens + observation.unclassifiedTokens
-          : observation.recordedTokens;
+      ].map(({ model, observation }) => {
+        const recordedTokens = observation.recordedTokens;
+        const classifiedTokens = observation.classifiedTokens;
         return {
           ...tokenRow,
           recordType: 'token-observation',
@@ -113,8 +112,11 @@ export function buildUsageExport(
           classificationCoverage: recordedTokens === 0 ? null : classifiedTokens / recordedTokens,
           totalDerivations: [observation.totalDerivation],
           timePrecisions: [observation.timePrecision],
-          usageScopes: null,
-          aggregationTemporalities: null,
+          usageScopes: [observation.usageScope],
+          aggregationTemporalities: [observation.aggregationTemporality],
+          reasoningSemantics: observation.tokenSemantics.reasoning,
+          cacheReadSemantics: observation.tokenSemantics.cacheRead,
+          cacheWriteSemantics: observation.tokenSemantics.cacheWrite,
           inputTokens: observation.tokenTotals.input,
           outputTokens: observation.tokenTotals.output,
           reasoningTokens: observation.tokenTotals.reasoning,
@@ -311,6 +313,9 @@ const CSV_COLUMNS = [
   'timePrecisions',
   'usageScopes',
   'aggregationTemporalities',
+  'reasoningSemantics',
+  'cacheReadSemantics',
+  'cacheWriteSemantics',
   'inputTokens',
   'outputTokens',
   'reasoningTokens',
