@@ -55,8 +55,40 @@ describe('token and money workbench', () => {
           authorities: ['estimate']
         }
       },
-      trend: { granularity: 'hour' }
+      trend: { granularity: 'hour' },
+      tokenBreakdown: {
+        status: 'available',
+        classificationCoverage: 1,
+        authorities: ['official-account']
+      }
     });
+    expect(cny.providerSummary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          providerId: 'grok',
+          billingDomainId: 'grok-build-subscription',
+          includedInHeadline: true,
+          recordedTokens: 100,
+          tokenShare: 0.5,
+          retailEquivalent: expect.objectContaining({ status: 'available', amount: 0.00072 })
+        }),
+        expect.objectContaining({
+          providerId: 'grok',
+          billingDomainId: 'xai-api',
+          includedInHeadline: false,
+          tokenShare: null,
+          retailShare: null
+        })
+      ])
+    );
+    expect(cny.dayBreakdown.filter((bucket) => !bucket.gap)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recordedTokens: 100,
+          retailEquivalent: expect.objectContaining({ status: 'available', amount: 0.00072 })
+        })
+      ])
+    );
     expect(cny.costs.actual.nativeAmounts).toEqual([
       { currency: 'USD', amount: 0.25, knownRecords: 1, records: 1 }
     ]);
@@ -149,6 +181,17 @@ describe('token and money workbench', () => {
       conversionUnavailableReasons: ['missing-rate'],
       nativeAmounts: [{ currency: 'USD', amount: 0.001 }]
     });
+    expect(cny.providerSummary).toEqual([
+      expect.objectContaining({
+        providerId: 'claude-code',
+        retailEquivalent: expect.objectContaining({ status: 'unavailable', amount: null })
+      })
+    ]);
+    expect(cny.dayBreakdown.filter((bucket) => !bucket.gap)).toEqual([
+      expect.objectContaining({
+        retailEquivalent: expect.objectContaining({ status: 'unavailable', amount: null })
+      })
+    ]);
     expect(cny.trend).toMatchObject({ granularity: 'day' });
     expect(cny.trend.buckets).toHaveLength(7);
 
@@ -163,6 +206,109 @@ describe('token and money workbench', () => {
     });
     expect(usd.trend.buckets).toHaveLength(30);
     expect(usd.trend.granularity).toBe('day');
+
+    repository.close();
+  });
+
+  it('marks category totals partial when source-reported tokens exceed classified tokens', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-workbench-partial-tokens-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(
+      snapshot(
+        'codex',
+        'Codex',
+        'subscription',
+        'Subscription',
+        [
+          {
+            ...usage(
+              'partial-codex-usage',
+              'subscription',
+              '2026-08-28T01:00:00.000Z',
+              'gpt-5',
+              'event'
+            ),
+            sourceReportedTotalTokens: 120
+          }
+        ],
+        []
+      )
+    );
+
+    const workbench = repository.getOverview(NOW, { window: '24h' }).workbench;
+    expect(workbench.recordedTokens).toBe(120);
+    expect(workbench.tokenBreakdown).toMatchObject({
+      status: 'partial',
+      tokenTotals: { total: 120, input: 80, output: 20 },
+      classificationCoverage: 100 / 120,
+      authorities: ['official-account'],
+      lastObservedAt: '2026-08-28T01:00:00.000Z'
+    });
+
+    repository.close();
+  });
+
+  it('keeps recorded tokens unavailable for a cost-only billing domain', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-workbench-cost-only-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(
+      snapshot(
+        'grok',
+        'Grok',
+        'xai-api',
+        'xAI API',
+        [],
+        [
+          {
+            ...cost(
+              'cost-only-retail',
+              'xai-api',
+              '2026-08-28T01:00:00.000Z',
+              'retail-equivalent',
+              0.25
+            ),
+            authority: 'estimate'
+          }
+        ]
+      )
+    );
+
+    const workbench = repository.getOverview(NOW, {
+      window: '24h',
+      comparisonCurrency: 'USD'
+    }).workbench;
+    expect(workbench.recordedTokens).toBeNull();
+    expect(workbench.providerSummary).toEqual([
+      expect.objectContaining({
+        providerId: 'grok',
+        billingDomainId: 'xai-api',
+        recordedTokens: null,
+        tokenShare: null,
+        authorities: [],
+        lastObservedAt: null,
+        retailEquivalent: expect.objectContaining({
+          status: 'available',
+          amount: 0.25,
+          authorities: ['estimate'],
+          observedAt: '2026-08-28T01:00:00.000Z'
+        })
+      })
+    ]);
+    expect(workbench.dayBreakdown.find((day) => day.retailEquivalent.records > 0)).toMatchObject({
+      gap: true,
+      recordedTokens: null,
+      tokenShare: null,
+      authorities: [],
+      lastObservedAt: null,
+      retailEquivalent: {
+        status: 'available',
+        amount: 0.25,
+        authorities: ['estimate'],
+        observedAt: '2026-08-28T01:00:00.000Z'
+      }
+    });
 
     repository.close();
   });

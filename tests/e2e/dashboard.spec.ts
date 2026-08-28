@@ -46,7 +46,11 @@ test('shows persisted provider usage and refreshes from the dashboard', async ({
   await expect(demoProvider.locator('.token-total')).toHaveCount(0);
   await expect(page.locator('.quota-meta')).toContainText(/in 3 hours/);
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await expect(page.getByTestId('workbench-recorded-tokens').locator('strong')).toHaveAttribute(
+  await page
+    .getByTestId('token-money-workbench')
+    .getByRole('button', { name: 'Tokens', exact: true })
+    .click();
+  await expect(page.getByTestId('usage-headline').locator('strong')).toHaveAttribute(
     'aria-label',
     /[\d,]+ Tokens/
   );
@@ -881,24 +885,35 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByRole('heading', { name: 'Tokens & model costs' })).toBeVisible();
-  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('700');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('CN¥9.00');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('API retail equivalent');
+  await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
+  await expect(workbench.getByTestId('usage-provider-summary')).toContainText('History Agent');
+  const unknownProvider = workbench
+    .getByTestId('usage-provider-summary')
+    .locator('li')
+    .filter({ hasText: 'Unknown Agent' });
+  await expect(unknownProvider).toContainText('Unavailable');
+  await expect(unknownProvider).not.toContainText('$0.00');
+  await workbench.getByRole('button', { name: 'Tokens', exact: true }).click();
+  await expect(workbench.getByTestId('usage-headline')).toContainText('700');
+  await expect(workbench.getByTestId('trend-mode')).toHaveText('Recorded tokens');
+  await expect(unknownProvider).toContainText('Unavailable');
+  await expect(unknownProvider).not.toContainText('0 Tokens');
   await workbench.getByRole('button', { name: '24h' }).click();
-  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('100');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('100');
   await workbench.getByRole('button', { name: '7d' }).click();
-  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('700');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('700');
   await workbench.getByRole('button', { name: '30d' }).click();
-  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('3,000');
-  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText(
-    'Source: Official account'
-  );
-  await expect(workbench.getByTestId('workbench-actual')).toContainText('CN¥18.00');
-  await expect(workbench.getByTestId('workbench-reported-estimate')).toContainText('CN¥0.03');
-  await expect(workbench.getByTestId('workbench-retail-equivalent')).toContainText('CN¥9.00');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('3,000');
+  await expect(workbench.getByTestId('usage-totals')).toContainText('Input');
+  await expect(workbench.getByTestId('usage-totals')).toContainText('Output');
+  await expect(workbench.getByTestId('usage-totals')).toContainText('Cache read');
   await expect(workbench.getByText('Subscription', { exact: true })).toHaveCount(0);
   await workbench.getByRole('button', { name: 'USD' }).click();
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
-  await expect(workbench.getByTestId('workbench-reported-estimate')).toContainText('$0.0042');
-  await workbench.getByRole('button', { name: 'API retail equivalent trend' }).click();
+  await workbench.getByRole('button', { name: 'Cost', exact: true }).click();
+  await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
   await expect(workbench.getByTestId('trend-mode')).toHaveText('API retail equivalent');
   const trendTable = workbench.getByRole('table', { name: 'Trend data' });
   await expect(trendTable).toContainText('Gap');
@@ -911,7 +926,7 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
     'aria-pressed',
     'true'
   );
-  await expect(workbench.getByTestId('workbench-recorded-tokens')).toContainText('3,000');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
 });
 
 test('downloads a redacted export and clears only the selected local scope', async ({ page }) => {
@@ -956,24 +971,56 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
 
   await page.goto(freshLaunch.stdout.trim());
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  const ranking = page.getByTestId('model-ranking');
-  await expect(ranking.getByRole('heading', { name: 'Top models' })).toBeVisible();
+  const ranking = page.getByTestId('usage-breakdown');
+  await expect(ranking.getByRole('heading', { name: 'Breakdown' })).toBeVisible();
+  await expect(ranking.getByRole('button', { name: 'Model', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
   const rows = ranking.getByTestId('model-ranking-row');
   await expect(rows).toHaveCount(5);
+  await expect(rows.first()).toContainText('fable-model');
+  await expect(rows.first()).toContainText('Claude Code · Subscription');
+  await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/claude.svg');
+
+  await page
+    .getByTestId('token-money-workbench')
+    .getByRole('button', {
+      name: 'Tokens',
+      exact: true
+    })
+    .click();
   await expect(rows.first()).toContainText('shared-model');
   await expect(rows.first()).toContainText('Codex · Subscription');
-  await expect(rows.first()).toContainText('Local observation');
   await expect(rows.first()).toContainText('Unavailable');
   await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/openai.svg');
   await expect(ranking.getByText('Unclassified usage')).toBeVisible();
   await expect(ranking.getByText('1,000 Tokens')).toBeVisible();
 
-  await ranking.getByRole('button', { name: 'Sort by API retail equivalent' }).click();
+  await page
+    .getByTestId('token-money-workbench')
+    .getByRole('button', {
+      name: 'Cost',
+      exact: true
+    })
+    .click();
   await expect(rows.first()).toContainText('fable-model');
   const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
   await expect(grokRow.locator('img')).toHaveCount(0);
   await expect(grokRow).toContainText('Separate domain · not included in headline');
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
+
+  await ranking.getByRole('button', { name: 'Day', exact: true }).click();
+  await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(2);
+  await expect(ranking).toContainText('Bucket 1');
+  const costOnlyDay = ranking.getByTestId('day-breakdown-row').filter({ hasText: 'Cost only' });
+  await expect(costOnlyDay).toContainText('Unavailable');
+  await page
+    .getByTestId('token-money-workbench')
+    .getByRole('button', { name: 'Tokens', exact: true })
+    .click();
+  await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(1);
+  await ranking.getByRole('button', { name: 'Model', exact: true }).click();
 
   const fableRow = rows.filter({ hasText: 'fable-model' });
   await fableRow.focus();
@@ -1065,8 +1112,12 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     'grok'
   );
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await expect(page.getByTestId('workbench-recorded-tokens')).toContainText('12.4K');
-  await expect(page.getByTestId('workbench-recorded-tokens').locator('strong')).toHaveAttribute(
+  await page
+    .getByTestId('token-money-workbench')
+    .getByRole('button', { name: 'Tokens', exact: true })
+    .click();
+  await expect(page.getByTestId('usage-headline')).toContainText('12.4K');
+  await expect(page.getByTestId('usage-headline').locator('strong')).toHaveAttribute(
     'aria-label',
     '12,400 Tokens'
   );
@@ -1589,6 +1640,85 @@ function tokenMoneyWorkbenchFixture(window: string, total: number, currency: str
             : []
       }))
     },
+    providerSummary: [
+      {
+        providerId: 'history-agent',
+        providerDisplayName: 'History Agent',
+        billingDomainId: 'api',
+        billingDomainDisplayName: 'API',
+        includedInHeadline: true,
+        recordedTokens: total,
+        tokenShare: 1,
+        retailEquivalent: metric('retail-equivalent', comparison.retail, 1.25, 'estimate'),
+        retailShare: 1,
+        authorities: ['official-account'],
+        lastObservedAt: '2026-08-28T01:57:00.000Z'
+      },
+      {
+        providerId: 'unknown-agent',
+        providerDisplayName: 'Unknown Agent',
+        billingDomainId: 'api',
+        billingDomainDisplayName: 'API',
+        includedInHeadline: true,
+        recordedTokens: null,
+        tokenShare: null,
+        retailEquivalent: {
+          ...metric('retail-equivalent', 0, 0, 'estimate'),
+          status: 'unavailable',
+          amount: null,
+          nativeAmounts: [],
+          authorities: [],
+          observedAt: null,
+          records: 0,
+          knownRecords: 0,
+          amountCoverage: null,
+          pricingCoverage: 0,
+          pricedTokens: 0
+        },
+        retailShare: null,
+        authorities: ['local-observation'],
+        lastObservedAt: '2026-08-28T01:57:00.000Z'
+      }
+    ],
+    tokenBreakdown: {
+      status: 'available',
+      tokenTotals: {
+        total,
+        input: total * 0.8,
+        output: total * 0.2,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      },
+      classificationCoverage: 1,
+      authorities: ['official-account'],
+      lastObservedAt: '2026-08-28T01:57:00.000Z'
+    },
+    dayBreakdown: Array.from({ length: bucketCount }, (_, index) => ({
+      start: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      end: `2026-08-${String(index + 2).padStart(2, '0')}T00:00:00.000Z`,
+      label: index === 1 ? 'Cost only' : `Bucket ${index + 1}`,
+      gap: index > 0,
+      recordedTokens: index === 0 ? total : null,
+      tokenShare: index === 0 ? 1 : null,
+      retailEquivalent:
+        index === 0
+          ? metric('retail-equivalent', comparison.retail, 1.25, 'estimate')
+          : index === 1
+            ? metric('retail-equivalent', currency === 'USD' ? 0.5 : 3.6, 0.5, 'estimate')
+            : {
+                ...metric('retail-equivalent', 0, 0, 'estimate'),
+                status: 'unavailable',
+                amount: null,
+                records: 0,
+                knownRecords: 0,
+                amountCoverage: null,
+                pricingCoverage: null
+              },
+      retailShare: index === 0 ? 1 : index === 1 ? 0.5 / comparison.retail : null,
+      authorities: index === 0 ? ['official-account'] : [],
+      lastObservedAt: index === 0 ? '2026-08-28T01:57:00.000Z' : null
+    })),
     modelRanking: modelRankingFixture(currency, bucketCount)
   };
 }

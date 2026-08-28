@@ -2310,6 +2310,137 @@ function buildTokenMoneyWorkbench(
   const reportedEstimate = metric('reported-estimate');
   const retailEquivalent = metric('retail-equivalent');
   const emptyIntervals = buildHistoryIntervals(normalized);
+  const providerSummary = allHistories
+    .flatMap(({ provider, domain, history, includedInHeadline }) => {
+      const domainRetailEquivalent = buildWorkbenchMetric(
+        history.costs,
+        'retail-equivalent',
+        comparisonCurrency,
+        history.tokenEvidence.recordedTokens,
+        history.exchangeRates
+      );
+      if (history.tokenEvidence.observationCount === 0 && domainRetailEquivalent.records === 0) {
+        return [];
+      }
+      return [
+        {
+          providerId: provider.id,
+          providerDisplayName: provider.displayName,
+          billingDomainId: domain.id,
+          billingDomainDisplayName: domain.displayName,
+          includedInHeadline,
+          recordedTokens:
+            history.tokenEvidence.observationCount > 0
+              ? history.tokenEvidence.recordedTokens
+              : null,
+          tokenShare:
+            includedInHeadline && history.tokenEvidence.observationCount > 0 && recordedTokens > 0
+              ? history.tokenEvidence.recordedTokens / recordedTokens
+              : null,
+          retailEquivalent: domainRetailEquivalent,
+          retailShare:
+            includedInHeadline &&
+            domainRetailEquivalent.status === 'available' &&
+            domainRetailEquivalent.amount !== null &&
+            retailEquivalent.status === 'available' &&
+            retailEquivalent.amount !== null &&
+            retailEquivalent.amount !== 0
+              ? domainRetailEquivalent.amount / retailEquivalent.amount
+              : null,
+          authorities: history.authorities ?? [],
+          lastObservedAt: history.lastObservedAt ?? null
+        }
+      ];
+    })
+    .sort(
+      (left, right) =>
+        (right.recordedTokens ?? -1) - (left.recordedTokens ?? -1) ||
+        `${left.providerId}:${left.billingDomainId}`.localeCompare(
+          `${right.providerId}:${right.billingDomainId}`
+        )
+    );
+  const headlineTokenTotals = headlineHistories.reduce(
+    (total, { history }) => addTokenTotals(total, history.tokenTotals),
+    zeroTokenTotals()
+  );
+  const classifiedTokens = headlineHistories.reduce(
+    (total, { history }) => total + history.tokenEvidence.classifiedTokens,
+    0
+  );
+  const unclassifiedTokens = headlineHistories.reduce(
+    (total, { history }) => total + history.tokenEvidence.unclassifiedTokens,
+    0
+  );
+  const classificationDenominator = classifiedTokens + unclassifiedTokens;
+  const tokenBreakdown: UsageOverview['workbench']['tokenBreakdown'] = {
+    status:
+      observationCount === 0
+        ? 'unavailable'
+        : unclassifiedTokens === 0
+          ? 'available'
+          : classifiedTokens > 0
+            ? 'partial'
+            : 'unavailable',
+    tokenTotals: headlineTokenTotals,
+    classificationCoverage:
+      classificationDenominator > 0 ? classifiedTokens / classificationDenominator : null,
+    authorities: [
+      ...new Set(headlineHistories.flatMap(({ history }) => history.authorities ?? []))
+    ].sort(),
+    lastObservedAt:
+      headlineHistories
+        .flatMap(({ history }) => (history.lastObservedAt ? [history.lastObservedAt] : []))
+        .sort((left, right) => right.localeCompare(left))[0] ?? null
+  };
+  const dayBreakdown = emptyIntervals.map((emptyInterval, index) => {
+    const intervals = headlineHistories.flatMap(({ history }) => {
+      const interval = history.intervals[index];
+      return interval ? [{ interval, rates: history.exchangeRates }] : [];
+    });
+    const intervalTokens = intervals.reduce(
+      (total, { interval }) => total + interval.tokenEvidence.recordedTokens,
+      0
+    );
+    const intervalObservations = intervals.reduce(
+      (total, { interval }) => total + interval.tokenEvidence.observationCount,
+      0
+    );
+    const intervalRetailEquivalent = buildWorkbenchMetric(
+      intervals.flatMap(({ interval }) => interval.costs),
+      'retail-equivalent',
+      comparisonCurrency,
+      intervalTokens,
+      uniqueExchangeRates(intervals.flatMap(({ rates }) => rates))
+    );
+    const authorities = [
+      ...new Set(intervals.flatMap(({ interval }) => interval.authorities ?? []))
+    ].sort();
+    const lastObservedAt = intervals
+      .flatMap(({ interval }) => (interval.lastObservedAt ? [interval.lastObservedAt] : []))
+      .sort((left, right) => right.localeCompare(left))[0];
+    return {
+      start: emptyInterval.start.toISOString(),
+      end: emptyInterval.end.toISOString(),
+      label: emptyInterval.label,
+      gap: intervalObservations === 0,
+      recordedTokens: intervalObservations > 0 ? intervalTokens : null,
+      tokenShare:
+        intervalObservations > 0 && recordedTokens !== null && recordedTokens > 0
+          ? intervalTokens / recordedTokens
+          : null,
+      retailEquivalent: intervalRetailEquivalent,
+      retailShare:
+        intervalRetailEquivalent.status === 'available' &&
+        intervalRetailEquivalent.amount !== null &&
+        retailEquivalent.status === 'available' &&
+        retailEquivalent.amount !== null &&
+        retailEquivalent.amount !== 0
+          ? intervalRetailEquivalent.amount / retailEquivalent.amount
+          : null,
+      authorities,
+      lastObservedAt: lastObservedAt ?? null
+    };
+  });
   const buckets = emptyIntervals.map((emptyInterval, index) => {
     const segments = allHistories.flatMap(({ provider, domain, history, includedInHeadline }) => {
       const interval = history.intervals[index];
@@ -2367,6 +2498,9 @@ function buildTokenMoneyWorkbench(
       granularity: normalized.window === '24h' ? 'hour' : 'day',
       buckets
     },
+    providerSummary,
+    tokenBreakdown,
+    dayBreakdown,
     modelRanking: buildWorkbenchModelRanking(
       allHistories,
       buckets,

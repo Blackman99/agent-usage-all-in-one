@@ -513,7 +513,45 @@ export interface TokenMoneyWorkbench {
     granularity: 'hour' | 'day';
     buckets: WorkbenchTrendBucket[];
   };
+  providerSummary: WorkbenchProviderSummary[];
+  tokenBreakdown: WorkbenchTokenBreakdown;
+  dayBreakdown: WorkbenchDayBreakdown[];
   modelRanking: WorkbenchModelRanking;
+}
+
+export interface WorkbenchProviderSummary {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  includedInHeadline: boolean;
+  recordedTokens: number | null;
+  tokenShare: number | null;
+  retailEquivalent: WorkbenchMoneyMetric;
+  retailShare: number | null;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+}
+
+export interface WorkbenchTokenBreakdown {
+  status: 'available' | 'partial' | 'unavailable';
+  tokenTotals: TokenTotals;
+  classificationCoverage: number | null;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+}
+
+export interface WorkbenchDayBreakdown {
+  start: string;
+  end: string;
+  label: string;
+  gap: boolean;
+  recordedTokens: number | null;
+  tokenShare: number | null;
+  retailEquivalent: WorkbenchMoneyMetric;
+  retailShare: number | null;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
 }
 
 export interface WorkbenchModelTrendBucket {
