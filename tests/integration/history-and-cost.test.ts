@@ -74,7 +74,7 @@ describe('history and cost analysis', () => {
           observedAt: '2026-08-27T16:30:00.000Z'
         }),
         expect.objectContaining({
-          kind: 'estimate',
+          kind: 'reported-estimate',
           currency: 'USD',
           amount: 2,
           priceSnapshots: [
@@ -160,7 +160,7 @@ function historySnapshot(): ConnectorSnapshot {
         id: 'estimate-usd',
         billingDomainId: 'subscription',
         observedAt: '2026-08-27T16:30:00.000Z',
-        kind: 'estimate',
+        kind: 'reported-estimate',
         amount: 2,
         currency: 'USD',
         authority: 'estimate',

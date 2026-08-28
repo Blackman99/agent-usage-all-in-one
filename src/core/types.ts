@@ -96,7 +96,8 @@ export interface NormalizedUsageObservation extends UsageObservation {
   totalDerivation: TokenTotalDerivation;
 }
 
-export type CostKind = 'actual' | 'subscription' | 'estimate' | 'retail-equivalent';
+export type CostPurpose = 'actual' | 'subscription' | 'reported-estimate' | 'retail-equivalent';
+export type CostKind = CostPurpose | 'legacy-unknown';
 
 export type RetailTokenKind = 'input' | 'output' | 'reasoning' | 'cache-read' | 'cache-write';
 

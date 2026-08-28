@@ -86,6 +86,7 @@ describe('xAI Management API connector', () => {
         sourceId: 'team-123:Chat grok-4.6:2026-08-27T00:00:00Z',
         billingDomainId: 'xai-api',
         kind: 'actual',
+        model: 'grok-4.6',
         amount: 2.5,
         currency: 'USD',
         authority: 'official-account'

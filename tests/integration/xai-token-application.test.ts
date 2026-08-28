@@ -82,7 +82,13 @@ describe('xAI token application path', () => {
       })
     ]);
     expect(xai.costs).toEqual([
-      expect.objectContaining({ billingDomainId: 'xai-api', kind: 'actual', amount: 2.5 })
+      expect.objectContaining({
+        billingDomainId: 'xai-api',
+        kind: 'actual',
+        amount: 2.5,
+        model: 'grok-4.6',
+        sourceId: 'team-123:Chat grok-4.6:2026-08-28T00:00:00.000Z'
+      })
     ]);
     expect(xai.balances).toEqual(
       expect.arrayContaining([

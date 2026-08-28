@@ -60,7 +60,9 @@ describe('privacy, export, and retention', () => {
         }),
         expect.objectContaining({
           recordType: 'cost',
-          costKind: 'estimate',
+          costKind: 'reported-estimate',
+          costPurpose: 'reported-estimate',
+          legacyPurposeUnknown: false,
           authority: 'estimate',
           amount: 2.5,
           currency: 'USD'
@@ -102,7 +104,7 @@ describe('privacy, export, and retention', () => {
     expect(csvArtifact.body).toContain('window,windowStart,windowEnd');
     expect(csvArtifact.body).toContain('local-observation');
     expect(csvArtifact.body).toContain(',actual,');
-    expect(csvArtifact.body).toContain(',estimate,');
+    expect(csvArtifact.body).toContain(',reported-estimate,');
     expect(csvArtifact.body).not.toContain('fake-secret');
     repository.close();
   });
@@ -283,7 +285,7 @@ function snapshot(): ConnectorSnapshot {
         sourceId: 'oauth-fake-secret',
         billingDomainId: 'subscription',
         observedAt: '2026-08-27T00:00:00.000Z',
-        kind: 'estimate',
+        kind: 'reported-estimate',
         amount: 2.5,
         currency: 'USD',
         authority: 'estimate'

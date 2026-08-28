@@ -450,8 +450,9 @@
     const keys: Record<CostKind, MessageKey> = {
       actual: 'costActual',
       subscription: 'costSubscription',
-      estimate: 'costEstimate',
-      'retail-equivalent': 'costRetailEquivalent'
+      'reported-estimate': 'costReportedEstimate',
+      'retail-equivalent': 'costRetailEquivalent',
+      'legacy-unknown': 'costLegacyUnknown'
     };
     return t(keys[kind]);
   }

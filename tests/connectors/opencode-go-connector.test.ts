@@ -80,21 +80,17 @@ describe('OpenCodeGoConnector', () => {
           authority: 'local-observation'
         }
       ],
-      costs: expect.arrayContaining([
-        expect.objectContaining({
-          id: 'opencode-quota-estimate:rolling',
-          kind: 'estimate',
-          amount: 3,
-          authority: 'estimate',
-          priceSnapshot: expect.objectContaining({ id: 'opencode-go-plan-limits-v1' })
-        }),
+      costs: [
         expect.objectContaining({
           id: 'opencode-session-cost:2026-08-28:opencode-go/deepseek-v4-flash',
-          kind: 'estimate',
+          sourceId: 'opencode-session:2026-08-28:opencode-go/deepseek-v4-flash',
+          kind: 'reported-estimate',
           amount: 0.42,
-          authority: 'local-observation'
+          authority: 'local-observation',
+          model: 'opencode-go/deepseek-v4-flash',
+          usageObservationId: 'opencode-session:2026-08-28:opencode-go/deepseek-v4-flash'
         })
-      ])
+      ]
     });
     expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
   });

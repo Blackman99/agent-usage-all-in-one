@@ -68,7 +68,26 @@ describe('agent-usage CLI', () => {
               authority: 'official-account' as const
             }
           ],
-          costs: [],
+          costs: [
+            cost('actual', 'actual', 1, 'official-account'),
+            { ...cost('unknown-actual', 'actual', null, 'unavailable'), currency: 'JPY' },
+            cost('subscription', 'subscription', 2, 'official-account'),
+            cost('reported', 'reported-estimate', 3, 'local-observation'),
+            {
+              ...cost('retail', 'retail-equivalent', 4, 'estimate'),
+              usageObservationId: 'demo-day',
+              pricedTokens: 100,
+              lineItems: [
+                { tokenKind: 'input' as const, tokens: 100, ratePerMillion: 40_000, amount: 4 }
+              ],
+              priceSnapshot: {
+                id: 'cli-retail-v1',
+                version: '2026-08-01',
+                source: 'CLI fixture retail price',
+                effectiveAt: '2026-08-01T00:00:00.000Z'
+              }
+            }
+          ],
           observedAt: '2026-08-28T02:00:00.000Z'
         };
       }
@@ -101,7 +120,7 @@ describe('agent-usage CLI', () => {
       globalSummary: {
         window: '24h',
         recordedTokens: 100,
-        apiRetailEquivalent: { status: 'unavailable', amount: null },
+        apiRetailEquivalent: { status: 'available', amount: 4 },
         tokenEvidence: { classifiedTokens: 0, unclassifiedTokens: 100 }
       },
       providers: [
@@ -125,8 +144,13 @@ describe('agent-usage CLI', () => {
       '0/100 classified; 100 unclassified; precision day; scope account-wide'
     );
     expect(textStatus.stdout).toContain(
-      'Summary (24h): 100 recorded tokens; API retail equivalent unavailable; 0/100 classified'
+      'Summary (24h): 100 recorded tokens; API retail equivalent 4 USD; 0/100 classified'
     );
+    expect(textStatus.stdout).toContain('actual 1 USD');
+    expect(textStatus.stdout).toContain('actual unknown');
+    expect(textStatus.stdout).toContain('subscription 2 USD');
+    expect(textStatus.stdout).toContain('reported-estimate 3 USD');
+    expect(textStatus.stdout).toContain('retail-equivalent 4 USD');
 
     const sevenDay = await runCli(['--home', home, 'status', '--json', '--window', '7d']);
     expect(sevenDay.exitCode).toBe(0);
@@ -236,6 +260,23 @@ describe('agent-usage CLI', () => {
     expect(JSON.parse(clearedStatus.stdout).providers).toEqual([]);
   });
 });
+
+function cost(
+  id: string,
+  kind: 'actual' | 'subscription' | 'reported-estimate' | 'retail-equivalent',
+  amount: number | null,
+  authority: 'official-account' | 'local-observation' | 'estimate' | 'unavailable'
+) {
+  return {
+    id,
+    billingDomainId: 'subscription',
+    observedAt: '2026-08-28T00:00:00.000Z',
+    kind,
+    amount,
+    currency: 'USD',
+    authority
+  };
+}
 
 async function runCli(arguments_: string[]): Promise<{
   exitCode: number | null;

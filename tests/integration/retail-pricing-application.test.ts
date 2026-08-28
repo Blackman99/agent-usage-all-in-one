@@ -42,7 +42,7 @@ describe('retail-equivalent application tracer', () => {
     expect(domain.tokenTotals.total).toBe(200_000);
     expect(domain.costs).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'estimate', amount: 0.42 }),
+        expect.objectContaining({ kind: 'reported-estimate', amount: 0.42 }),
         expect.objectContaining({
           id: 'retail-equivalent:fable-event:anthropic-fable-5-2026-06-09',
           kind: 'retail-equivalent',
@@ -272,7 +272,7 @@ function application(repository: SqliteUsageRepository): UsageApplication {
             sourceId: 'fable-event',
             billingDomainId: 'subscription',
             observedAt: '2026-08-28T01:00:00.000Z',
-            kind: 'estimate' as const,
+            kind: 'reported-estimate' as const,
             amount: 0.42,
             currency: 'USD',
             authority: 'estimate' as const

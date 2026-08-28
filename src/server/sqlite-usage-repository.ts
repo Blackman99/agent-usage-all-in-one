@@ -430,27 +430,28 @@ export class SqliteUsageRepository implements UsageRepository {
          WHERE cost_records.kind <> 'retail-equivalent'`
       );
       for (const cost of snapshot.costs) {
+        const persistedCost = normalizeCostForPersistence(cost);
         costStatement.run(
           snapshot.provider.id,
-          cost.id,
-          cost.sourceId ?? null,
-          cost.billingDomainId,
-          cost.observedAt,
-          cost.kind,
-          cost.amount,
-          cost.currency,
-          cost.authority,
-          cost.priceSnapshot?.id ?? null,
-          cost.priceSnapshot?.version ?? null,
-          cost.priceSnapshot?.source ?? null,
-          cost.priceSnapshot?.effectiveAt ?? null,
-          cost.priceSnapshot?.sourceUrl ?? null,
-          cost.priceSnapshot?.contextTier ?? null,
-          cost.model ?? null,
-          cost.usageObservationId ?? null,
-          cost.pricedTokens ?? null,
-          cost.lineItems ? JSON.stringify(cost.lineItems) : null,
-          cost.calculatedAt ?? null
+          persistedCost.id,
+          persistedCost.sourceId ?? null,
+          persistedCost.billingDomainId,
+          persistedCost.observedAt,
+          persistedCost.kind,
+          persistedCost.amount,
+          persistedCost.currency,
+          persistedCost.authority,
+          persistedCost.priceSnapshot?.id ?? null,
+          persistedCost.priceSnapshot?.version ?? null,
+          persistedCost.priceSnapshot?.source ?? null,
+          persistedCost.priceSnapshot?.effectiveAt ?? null,
+          persistedCost.priceSnapshot?.sourceUrl ?? null,
+          persistedCost.priceSnapshot?.contextTier ?? null,
+          persistedCost.model ?? null,
+          persistedCost.usageObservationId ?? null,
+          persistedCost.pricedTokens ?? null,
+          persistedCost.lineItems ? JSON.stringify(persistedCost.lineItems) : null,
+          persistedCost.calculatedAt ?? null
         );
       }
 
@@ -1370,7 +1371,9 @@ export class SqliteUsageRepository implements UsageRepository {
         evidence: emptyTokenEvidence(),
         costs: []
       };
-      daily.costs.push(cost);
+      if (cost.kind !== 'subscription' && cost.kind !== 'legacy-unknown') {
+        daily.costs.push(cost);
+      }
       byDay.set(day, daily);
     }
 
@@ -1725,6 +1728,47 @@ export class SqliteUsageRepository implements UsageRepository {
         this.#database.exec(`ALTER TABLE cost_records ADD COLUMN ${name} ${type}`);
       }
     }
+    this.#database.exec(`
+      DELETE FROM cost_records
+      WHERE kind = 'estimate' AND id LIKE 'opencode-quota-estimate:%'
+    `);
+    this.#database.exec(`
+      UPDATE cost_records
+      SET kind = 'retail-equivalent'
+      WHERE kind = 'estimate'
+        AND usage_observation_id IS NOT NULL
+        AND priced_tokens IS NOT NULL
+        AND line_items_json IS NOT NULL
+        AND price_snapshot_id IS NOT NULL
+    `);
+    this.#database.exec(`
+      UPDATE cost_records
+      SET kind = 'reported-estimate'
+      WHERE kind = 'estimate'
+        AND (
+          authority IN ('official-account', 'official-client', 'local-observation')
+          OR id LIKE 'claude-otel-cost:%'
+          OR id LIKE 'opencode-session-cost:%'
+          OR price_snapshot_id IN (
+            'claude-code-otlp-reported-cost-v1',
+            'opencode-export-reported-cost-v1'
+          )
+        )
+    `);
+    this.#database.exec(`
+      UPDATE cost_records
+      SET kind = 'legacy-unknown'
+      WHERE kind = 'estimate'
+    `);
+    this.#database.exec(`
+      UPDATE cost_records
+      SET model = NULL,
+          usage_observation_id = NULL,
+          priced_tokens = NULL,
+          line_items_json = NULL,
+          calculated_at = NULL
+      WHERE kind = 'subscription'
+    `);
     const quotaColumns = this.#database
       .prepare('PRAGMA table_info(quota_buckets)')
       .all() as unknown as Array<{ name: string }>;
@@ -1740,6 +1784,18 @@ export class SqliteUsageRepository implements UsageRepository {
       }
     }
   }
+}
+
+function normalizeCostForPersistence(cost: CostRecord): CostRecord {
+  if (cost.kind !== 'subscription') return cost;
+  return {
+    ...cost,
+    model: null,
+    usageObservationId: null,
+    pricedTokens: null,
+    lineItems: [],
+    calculatedAt: null
+  };
 }
 
 function mapQuotaRow(row: QuotaRow): QuotaBucket {

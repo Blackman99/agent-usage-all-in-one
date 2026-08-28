@@ -685,7 +685,8 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
     provider.getByText('Total').locator('..').getByText('3,000', { exact: true })
   ).toBeVisible();
   await expect(provider.getByText('actual · Native')).toBeVisible();
-  await expect(provider.getByText('estimate · Native')).toBeVisible();
+  await expect(provider.getByText('Subscription · Native')).toBeVisible();
+  await expect(provider.getByText('Reported estimate · Native')).toBeVisible();
   const retailEquivalent = provider.getByText('API retail equivalent · Native').locator('..');
   await expect(retailEquivalent).toContainText('$1.25');
   await expect(retailEquivalent).toContainText('Source: Estimate');
@@ -956,7 +957,18 @@ function historyOverviewFixture(window: string, total: number): unknown {
                   priceSnapshots: []
                 },
                 {
-                  kind: 'estimate',
+                  kind: 'subscription',
+                  currency: 'USD',
+                  amount: 20,
+                  convertedAmount: 144,
+                  comparisonCurrency: 'CNY',
+                  conversionUnavailableReason: null,
+                  priceSnapshots: [],
+                  authorities: ['official-account'],
+                  observedAt: '2026-08-01T00:00:00.000Z'
+                },
+                {
+                  kind: 'reported-estimate',
                   currency: 'USD',
                   amount: 0.42,
                   convertedAmount: 3.02,

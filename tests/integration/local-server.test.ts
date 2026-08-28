@@ -489,7 +489,7 @@ describe('local HTTP server', () => {
               history: {
                 tokenTotals: { total: 575 },
                 days: [{ day: '2026-08-28', tokenTotals: { total: 575 } }],
-                costs: [{ kind: 'estimate', amount: 0.42 }]
+                costs: [{ kind: 'reported-estimate', amount: 0.42 }]
               }
             }
           ]

@@ -9,7 +9,7 @@ Providers expose different quota windows, Token kinds, billing scopes, and evide
 
 ## Decision
 
-Normalize connector output into provider, billing domain, dynamic quota bucket, usage observation, and cost record values. Every observation carries one authority: official account, official client, local observation, estimate, or unavailable. Actual, subscription, and estimated cost remain separate. Grok Build/SuperGrok and xAI API are independent billing domains under one Grok provider.
+Normalize connector output into provider, billing domain, dynamic quota bucket, usage observation, and cost record values. Every observation carries one authority: official account, official client, local observation, estimate, or unavailable. Actual, subscription, Provider/client-reported estimate, and API retail equivalent remain separate. Grok Build/SuperGrok and xAI API are independent billing domains under one Grok provider.
 
 ## Consequences
 

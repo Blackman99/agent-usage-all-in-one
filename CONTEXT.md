@@ -53,6 +53,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Cost record**: An amount with one explicit purpose: actual billed cost,
   fixed subscription cost, Provider/client-reported estimate, or calculated API
   retail equivalent. These purposes remain separate.
+- **Legacy unknown cost**: Transitional evidence from an old generic estimate
+  whose purpose cannot be proved. It is not a fifth purpose and does not enter
+  any of the four current purpose totals.
 - **Reported estimate**: A monetary estimate stated by a Provider or official
   client. It keeps its upstream authority and is never relabelled as an actual
   charge or as Agent Usage's retail calculation.
@@ -120,3 +123,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 19. Retained observations may be backfilled with the catalog entry effective at
     their observation time. Once recorded, a retail price snapshot is immutable;
     a later catalog release adds a new version instead of rewriting history.
+20. Actual, subscription, reported-estimate, and retail-equivalent are mutually
+    exclusive cost purposes. No aggregate combines unlike purposes.
+21. OpenCode Go allowance values belong to quota context. Five-hour, weekly, and
+    monthly overlapping allowance values never become time-range cost records.
+22. Fixed subscription cost is billing-domain evidence only. It is never
+    allocated to a Token observation, model, session, or daily bucket.

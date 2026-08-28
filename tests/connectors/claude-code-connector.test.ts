@@ -271,9 +271,11 @@ describe('Claude Code OTLP metrics', () => {
     ]);
     expect(snapshot.costs).toEqual([
       expect.objectContaining({
-        kind: 'estimate',
+        kind: 'reported-estimate',
         amount: 0.42,
         sourceId: 'claude-otel:1787878800000000000:claude-fable-5',
+        model: 'claude-fable-5',
+        usageObservationId: 'claude-otel:1787878800000000000:claude-fable-5',
         currency: 'USD',
         authority: 'local-observation'
       })

@@ -384,7 +384,8 @@ function mapUsageCosts(account: XaiApiAccountPayload): CostRecord[] {
           kind: 'actual' as const,
           amount,
           currency: 'USD',
-          authority: 'official-account' as const
+          authority: 'official-account' as const,
+          model: modelFromDescription(model)
         }
       ];
     });

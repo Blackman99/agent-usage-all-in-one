@@ -126,7 +126,22 @@ describe('OpenCode Go application path', () => {
             timePrecisions: ['day'],
             usageScopes: ['this-mac']
           },
-          tokenAuthority: 'local-observation'
+          tokenAuthority: 'local-observation',
+          billingDomains: [
+            {
+              id: 'go-subscription',
+              costs: [
+                expect.objectContaining({
+                  kind: 'reported-estimate',
+                  amount: 0.42,
+                  model: 'opencode-go/deepseek-v4-flash'
+                })
+              ],
+              history: {
+                costs: [expect.objectContaining({ kind: 'reported-estimate', amount: 0.42 })]
+              }
+            }
+          ]
         }
       ]
     });

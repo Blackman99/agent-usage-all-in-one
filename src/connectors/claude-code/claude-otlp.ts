@@ -87,10 +87,12 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
           sourceId: `claude-otel:${key}`,
           billingDomainId: 'subscription',
           observedAt: timestamp,
-          kind: 'estimate',
+          kind: 'reported-estimate',
           amount: value,
           currency: 'USD',
           authority: 'local-observation',
+          model,
+          usageObservationId: `claude-otel:${key}`,
           priceSnapshot: {
             id: 'claude-code-otlp-reported-cost-v1',
             version: '2026-08-28',

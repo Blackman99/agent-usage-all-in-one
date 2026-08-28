@@ -71,10 +71,7 @@ export class OpenCodeGoConnector implements Connector {
       billingDomains: [{ id: 'go-subscription', displayName: 'OpenCode Go subscription' }],
       quotaBuckets: account ? mapQuota(account) : [],
       usage: local.map(mapLocalUsage),
-      costs: [
-        ...(account ? mapQuotaEstimates(account, observedAt) : []),
-        ...local.map(mapLocalCost)
-      ],
+      costs: local.map(mapLocalCost),
       warnings,
       observedAt
     };
@@ -94,25 +91,6 @@ function mapQuota(response: OpenCodeGoUsageResponse): QuotaBucket[] {
     limitAmount: LIMITS[id].amount,
     limitCurrency: 'USD',
     fallbackStatus: 'unknown'
-  }));
-}
-
-function mapQuotaEstimates(response: OpenCodeGoUsageResponse, observedAt: string): CostRecord[] {
-  return (Object.keys(LIMITS) as Array<keyof typeof LIMITS>).map((id) => ({
-    id: `opencode-quota-estimate:${id}`,
-    sourceId: `opencode-go-plan-window:${id}`,
-    billingDomainId: 'go-subscription',
-    observedAt,
-    kind: 'estimate',
-    amount: (LIMITS[id].amount * response.usage[id].percent) / 100,
-    currency: 'USD',
-    authority: 'estimate',
-    priceSnapshot: {
-      id: 'opencode-go-plan-limits-v1',
-      version: '2026-08-28',
-      source: 'Documented OpenCode Go plan window limits',
-      effectiveAt: '2026-08-28T00:00:00.000Z'
-    }
   }));
 }
 
@@ -140,14 +118,18 @@ function mapLocalUsage(session: OpenCodeLocalSession): UsageObservation {
 }
 
 function mapLocalCost(session: OpenCodeLocalSession): CostRecord {
+  const usageObservationId = `opencode-session:${session.id}`;
   return {
     id: `opencode-session-cost:${session.id}`,
+    sourceId: usageObservationId,
     billingDomainId: 'go-subscription',
     observedAt: new Date(session.observedAtMs).toISOString(),
-    kind: 'estimate',
+    kind: 'reported-estimate',
     amount: session.cost,
     currency: 'USD',
     authority: 'local-observation',
+    model: session.model,
+    usageObservationId,
     priceSnapshot: {
       id: 'opencode-export-reported-cost-v1',
       version: '2026-08-28',
