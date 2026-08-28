@@ -1316,6 +1316,70 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   expect(externalRequests).toEqual([]);
 });
 
+test('presents the dashboard as a cohesive hierarchy across its primary views', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 12_400, 'CNY'))
+    });
+  });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(freshLaunch.stdout.trim());
+
+  const logo = page.locator('.product-logo');
+  const primaryViews = page.getByRole('tablist', { name: 'Main views' });
+  const headerActions = page.locator('.header-actions');
+  const controlCenterSpread = async () => {
+    const boxes = await Promise.all([
+      logo.boundingBox(),
+      primaryViews.boundingBox(),
+      headerActions.boundingBox()
+    ]);
+    if (boxes.some((box) => box === null)) return Number.POSITIVE_INFINITY;
+    const centers = boxes.map((box) => box!.y + box!.height / 2);
+    return Math.round(Math.max(...centers) - Math.min(...centers));
+  };
+  await expect.poll(controlCenterSpread).toBeLessThanOrEqual(4);
+
+  const providerSurface = await page
+    .locator('.provider-card')
+    .first()
+    .evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderRadius: Number.parseFloat(style.borderRadius)
+      };
+    });
+  const pageBackground = await page
+    .locator('body')
+    .evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(providerSurface.backgroundColor).not.toBe(pageBackground);
+  expect(providerSurface.borderRadius).toBeGreaterThanOrEqual(22);
+
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  for (const selector of [
+    '.usage-summary',
+    '.workbench-trend',
+    '.usage-totals',
+    '.model-ranking'
+  ]) {
+    const surface = await page.locator(selector).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderRadius: Number.parseFloat(style.borderRadius)
+      };
+    });
+    expect(surface.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(surface.borderRadius).toBeGreaterThanOrEqual(16);
+  }
+});
+
 test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe', async ({
   page
 }) => {

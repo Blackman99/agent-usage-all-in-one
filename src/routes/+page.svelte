@@ -1330,6 +1330,28 @@
     <header class="product-header">
       <img class="product-logo" src="/brand/agent-usage-logo.svg" alt={t('bannerAlt')} />
       <h1 class="visually-hidden">{t('title')}</h1>
+      <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
+        <button
+          id="agent-usage-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeDashboardView === 'agents'}
+          aria-controls="agent-usage-panel"
+          tabindex={activeDashboardView === 'agents' ? 0 : -1}
+          on:click={() => (activeDashboardView = 'agents')}
+          on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
+        >
+        <button
+          id="token-model-costs-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeDashboardView === 'models'}
+          aria-controls="token-model-costs-panel"
+          tabindex={activeDashboardView === 'models' ? 0 : -1}
+          on:click={() => (activeDashboardView = 'models')}
+          on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
+        >
+      </div>
       <div class="header-actions">
         <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
           {t('settings')}
@@ -1343,29 +1365,6 @@
         </button>
       </div>
     </header>
-
-    <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
-      <button
-        id="agent-usage-tab"
-        type="button"
-        role="tab"
-        aria-selected={activeDashboardView === 'agents'}
-        aria-controls="agent-usage-panel"
-        tabindex={activeDashboardView === 'agents' ? 0 : -1}
-        on:click={() => (activeDashboardView = 'agents')}
-        on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
-      >
-      <button
-        id="token-model-costs-tab"
-        type="button"
-        role="tab"
-        aria-selected={activeDashboardView === 'models'}
-        aria-controls="token-model-costs-panel"
-        tabindex={activeDashboardView === 'models' ? 0 : -1}
-        on:click={() => (activeDashboardView = 'models')}
-        on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
-      >
-    </div>
 
     {#if loading}
       <div class="state section-loading" aria-live="polite">
@@ -2740,20 +2739,22 @@
   }
 
   :global(html) {
-    --page: #f5f5f2;
+    --page: #f3f5f8;
     --surface: #ffffff;
-    --surface-subtle: #f7f7f4;
-    --surface-inset: #eeeeea;
-    --text: #171817;
-    --text-strong: #080908;
-    --muted: #60645f;
-    --border: #d7d8d2;
-    --border-soft: #e5e5df;
+    --surface-subtle: #f7f8fb;
+    --surface-inset: #edf0f5;
+    --text: #252a34;
+    --text-strong: #10131a;
+    --muted: #697386;
+    --border: #dce1e9;
+    --border-soft: #e8ebf1;
     --button: #ffffff;
-    --selected: #e5e8f0;
-    --selected-text: #18213a;
-    --primary: #4f64c4;
-    --progress-track: #dedfd9;
+    --selected: #e8ecff;
+    --selected-text: #273c80;
+    --primary: #647cf0;
+    --progress-track: #e2e6ed;
+    --shadow-soft: 0 12px 34px rgba(31, 38, 56, 0.08);
+    --shadow-raised: 0 18px 48px rgba(31, 38, 56, 0.12);
     --backdrop: rgba(18, 19, 18, 0.45);
     --warning-bg: #fff8ed;
     --warning-border: #d9b47d;
@@ -2774,6 +2775,7 @@
   }
 
   :global(body) {
+    position: relative;
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
@@ -2782,27 +2784,47 @@
     color: var(--text);
   }
 
+  :global(body)::before {
+    position: fixed;
+    z-index: 0;
+    inset: 0;
+    background:
+      radial-gradient(circle at 8% 4%, rgba(100, 124, 240, 0.1), transparent 26rem),
+      radial-gradient(circle at 92% 18%, rgba(74, 210, 162, 0.07), transparent 24rem);
+    content: '';
+    pointer-events: none;
+  }
+
   .shell {
+    position: relative;
+    z-index: 1;
     width: min(1600px, calc(100% - 40px));
     margin: 0 auto;
-    padding: 48px 0 80px;
+    padding: 24px 0 80px;
   }
 
   header {
-    margin-bottom: 28px;
+    margin-bottom: 22px;
   }
 
   .product-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
     align-items: center;
-    justify-content: space-between;
-    gap: 24px;
+    gap: 18px;
+    min-height: 68px;
+    padding: 10px 12px 10px 10px;
+    border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+    border-radius: 22px;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(18px) saturate(1.25);
   }
 
   .product-logo {
     display: block;
-    width: 64px;
-    height: 64px;
+    width: 48px;
+    height: 48px;
   }
 
   .visually-hidden {
@@ -2843,8 +2865,8 @@
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    min-height: 44px;
-    padding: 0 18px;
+    min-height: 38px;
+    padding: 0 15px;
     border: 1px solid #2c3342;
     border-radius: 999px;
     background: rgba(20, 24, 32, 0.8);
@@ -2857,12 +2879,13 @@
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
+    justify-self: end;
   }
 
   .locale-toggle,
   .settings-toggle {
-    min-height: 44px;
-    padding: 0 14px;
+    min-height: 38px;
+    padding: 0 13px;
     border: 1px solid #2c3342;
     border-radius: 999px;
     background: rgba(20, 24, 32, 0.8);
@@ -2892,42 +2915,48 @@
   .dashboard-tabs {
     display: inline-flex;
     gap: 5px;
-    margin-bottom: 20px;
-    padding: 5px;
+    margin: 0;
+    padding: 4px;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 13px;
     background: var(--surface-inset);
   }
 
   .dashboard-tabs button {
-    min-height: 40px;
-    padding: 0 18px;
+    min-height: 36px;
+    padding: 0 16px;
     border: 0;
     border-radius: 10px;
     background: transparent;
     color: var(--muted);
     cursor: pointer;
     font-weight: 650;
+    transition:
+      background 160ms ease,
+      color 160ms ease,
+      box-shadow 160ms ease;
   }
 
   .dashboard-tabs button[aria-selected='true'] {
     background: var(--selected);
+    box-shadow: 0 4px 12px rgba(44, 62, 128, 0.12);
     color: var(--selected-text);
   }
 
   .providers {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
+    gap: 20px;
     margin-bottom: 48px;
   }
 
   .token-money-workbench {
     margin-bottom: 48px;
-    padding: 24px;
+    padding: 18px;
     border: 1px solid rgba(122, 136, 164, 0.2);
-    border-radius: 18px;
+    border-radius: 26px;
     background: rgba(14, 17, 24, 0.88);
+    box-shadow: var(--shadow-soft);
   }
 
   .workbench-skeleton {
@@ -3029,7 +3058,9 @@
   }
 
   .usage-toolbar {
-    margin-bottom: 34px;
+    margin-bottom: 18px;
+    padding: 2px 2px 18px;
+    border-bottom: 1px solid var(--border-soft);
   }
 
   .usage-toolbar h2,
@@ -3070,7 +3101,7 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 7px;
   }
 
   .segmented-control {
@@ -3078,15 +3109,15 @@
     gap: 4px;
     padding: 4px;
     border: 1px solid rgba(122, 136, 164, 0.18);
-    border-radius: 11px;
+    border-radius: 13px;
     background: rgba(8, 10, 15, 0.58);
   }
 
   .segmented-control button {
-    min-height: 32px;
-    padding: 0 10px;
+    min-height: 34px;
+    padding: 0 11px;
     border: 0;
-    border-radius: 7px;
+    border-radius: 9px;
     background: transparent;
     color: #929baa;
     cursor: pointer;
@@ -3101,7 +3132,7 @@
   .usage-overview-grid {
     display: grid;
     grid-template-columns: minmax(230px, 0.36fr) minmax(0, 1fr);
-    gap: 38px;
+    gap: 14px;
     align-items: stretch;
   }
 
@@ -3110,7 +3141,10 @@
     align-content: space-between;
     gap: 24px;
     min-width: 0;
-    padding: 18px 0 16px 12px;
+    padding: 22px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--surface-subtle);
   }
 
   .usage-headline {
@@ -3121,7 +3155,7 @@
   .usage-headline > strong {
     overflow-wrap: anywhere;
     color: #f7f8fb;
-    font-size: clamp(2rem, 4vw, 3.25rem);
+    font-size: clamp(2.2rem, 4vw, 3.5rem);
     font-variant-numeric: tabular-nums;
     font-weight: 570;
     letter-spacing: -0.055em;
@@ -3141,7 +3175,7 @@
 
   .provider-usage-list {
     display: grid;
-    gap: 15px;
+    gap: 4px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -3152,6 +3186,14 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
+    min-height: 52px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    transition: background 160ms ease;
+  }
+
+  .provider-usage-list li:hover {
+    background: color-mix(in srgb, var(--primary) 7%, transparent);
   }
 
   .provider-usage-identity,
@@ -3222,7 +3264,10 @@
 
   .workbench-trend {
     min-width: 0;
-    padding: 14px 0 0;
+    padding: 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--surface-subtle);
   }
 
   .trend-heading > div:first-child {
@@ -3245,7 +3290,7 @@
     display: inline-flex;
     overflow: hidden;
     border: 1px solid rgba(122, 136, 164, 0.2);
-    border-radius: 8px;
+    border-radius: 10px;
     background: rgba(8, 10, 15, 0.58);
   }
 
@@ -3280,7 +3325,7 @@
     grid-template-columns: 72px minmax(0, 1fr);
     grid-template-rows: 250px auto;
     column-gap: 10px;
-    margin-top: 16px;
+    margin-top: 20px;
   }
 
   .trend-y-axis {
@@ -3340,7 +3385,7 @@
     fill: none;
     stroke-linecap: round;
     stroke-linejoin: round;
-    stroke-width: 2.2;
+    stroke-width: 2.5;
     vector-effect: non-scaling-stroke;
   }
 
@@ -3432,10 +3477,11 @@
   }
 
   .usage-totals {
-    margin-top: 30px;
-    padding: 24px 12px 26px;
-    border-top: 1px solid rgba(122, 136, 164, 0.14);
-    border-bottom: 1px solid rgba(122, 136, 164, 0.14);
+    margin-top: 14px;
+    padding: 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--surface-subtle);
   }
 
   .usage-totals h3 {
@@ -3455,6 +3501,8 @@
   .usage-totals dl div {
     display: grid;
     gap: 7px;
+    padding-left: 12px;
+    border-left: 2px solid color-mix(in srgb, var(--primary) 38%, var(--border));
   }
 
   .usage-totals dt {
@@ -3478,8 +3526,11 @@
   }
 
   .model-ranking {
-    margin-top: 28px;
-    padding: 0 12px 8px;
+    margin-top: 14px;
+    padding: 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--surface-subtle);
   }
 
   .ranking-heading {
@@ -3537,7 +3588,7 @@
     padding: 10px 12px;
     border: 0;
     border-bottom: 1px solid rgba(122, 136, 164, 0.11);
-    border-radius: 0;
+    border-radius: 12px;
     background: transparent;
     color: inherit;
     cursor: pointer;
@@ -3547,7 +3598,7 @@
   .ranking-list button:hover,
   .ranking-list button:focus-visible {
     outline: none;
-    background: rgba(81, 104, 186, 0.08);
+    background: color-mix(in srgb, var(--primary) 9%, transparent);
   }
 
   .ranking-identity,
@@ -3682,15 +3733,15 @@
     margin: 0;
     padding: 4px;
     border: 1px solid rgba(122, 136, 164, 0.16);
-    border-radius: 12px;
+    border-radius: 13px;
     background: rgba(14, 17, 24, 0.78);
   }
 
   .history-toolbar button {
     min-width: 52px;
-    min-height: 32px;
+    min-height: 34px;
     border: 0;
-    border-radius: 8px;
+    border-radius: 9px;
     background: transparent;
     color: #929baa;
     cursor: pointer;
@@ -4011,13 +4062,35 @@
   .provider-card,
   .state {
     border: 1px solid var(--border);
-    border-radius: 18px;
+    border-radius: 24px;
     background: var(--surface);
-    box-shadow: 0 8px 24px rgba(15, 18, 16, 0.06);
+    box-shadow: var(--shadow-soft);
   }
 
   .provider-card {
+    position: relative;
+    overflow: hidden;
     padding: 26px;
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease,
+      transform 180ms ease;
+  }
+
+  .provider-card::before {
+    position: absolute;
+    inset: 0 20px auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(100, 124, 240, 0.55), transparent);
+    content: '';
+  }
+
+  @media (hover: hover) {
+    .provider-card:hover {
+      border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+      box-shadow: var(--shadow-raised);
+      transform: translateY(-2px);
+    }
   }
 
   .state.compact {
@@ -4071,7 +4144,7 @@
     height: 46px;
     flex: 0 0 46px;
     padding: 5px;
-    border-radius: 9px;
+    border-radius: 12px;
     background: transparent;
   }
 
@@ -4124,8 +4197,8 @@
   }
 
   .section-label {
-    margin-top: 30px;
-    padding-top: 22px;
+    margin-top: 26px;
+    padding-top: 20px;
     border-top: 1px solid rgba(122, 136, 164, 0.13);
   }
 
@@ -4147,6 +4220,7 @@
     padding: 10px 12px;
     border: 1px solid rgba(122, 136, 164, 0.13);
     border-radius: 11px;
+    background: var(--surface-subtle);
     color: #aeb6c4;
     font-size: 0.7rem;
   }
@@ -4178,7 +4252,7 @@
   }
 
   .progress {
-    height: 7px;
+    height: 8px;
     margin: 10px 0 9px;
     overflow: hidden;
     border-radius: 999px;
@@ -4190,6 +4264,7 @@
     height: 100%;
     border-radius: inherit;
     background: var(--primary);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--primary) 34%, transparent);
   }
 
   .progress.progress-warning span {
@@ -4233,8 +4308,8 @@
     margin: 18px 0 4px;
     padding: 10px 12px;
     border: 1px solid rgba(73, 208, 151, 0.18);
-    border-radius: 12px;
-    background: rgba(15, 27, 23, 0.58);
+    border-radius: 14px;
+    background: color-mix(in srgb, #4bd29a 7%, var(--surface-subtle));
   }
 
   .connected-summary > span {
@@ -4727,20 +4802,22 @@
 
   @media (prefers-color-scheme: dark) {
     :global(html) {
-      --page: #0d0f11;
-      --surface: #15181b;
-      --surface-subtle: #1b1f23;
-      --surface-inset: #101316;
-      --text: #eef0f2;
+      --page: #090c11;
+      --surface: #12161d;
+      --surface-subtle: #171c25;
+      --surface-inset: #0d1118;
+      --text: #e8ecf3;
       --text-strong: #ffffff;
-      --muted: #a1a8b1;
-      --border: #353b42;
-      --border-soft: #292e34;
-      --button: #171a1e;
-      --selected: #293249;
+      --muted: #9aa4b4;
+      --border: #2b3441;
+      --border-soft: #222a35;
+      --button: #151a22;
+      --selected: #2b3552;
       --selected-text: #f2f5ff;
-      --primary: #7d93ef;
-      --progress-track: #2a3036;
+      --primary: #8398ff;
+      --progress-track: #272e39;
+      --shadow-soft: 0 16px 42px rgba(0, 0, 0, 0.2);
+      --shadow-raised: 0 22px 58px rgba(0, 0, 0, 0.32);
       --backdrop: rgba(3, 5, 7, 0.7);
       --warning-bg: #211912;
       --warning-border: #684722;
@@ -4751,9 +4828,8 @@
       --focus: #9bb1ff;
     }
 
-    .provider-card,
-    .state {
-      box-shadow: none;
+    :global(body)::before {
+      opacity: 0.78;
     }
   }
 
@@ -4802,17 +4878,46 @@
   @media (max-width: 680px) {
     .shell {
       width: min(100% - 24px, 1180px);
-      padding: 44px 0 64px;
+      padding: 12px 0 64px;
     }
 
-    header {
-      align-items: flex-start;
-      flex-direction: column;
+    .product-header {
+      grid-template-areas:
+        'logo actions'
+        'tabs tabs';
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px 12px;
+      padding: 9px;
+      border-radius: 20px;
+    }
+
+    .product-logo {
+      grid-area: logo;
+      width: 44px;
+      height: 44px;
+    }
+
+    .dashboard-tabs {
+      grid-area: tabs;
+      width: 100%;
+    }
+
+    .dashboard-tabs button {
+      flex: 1;
+      min-width: 0;
+      padding: 0 10px;
     }
 
     .header-actions {
+      grid-area: actions;
       flex-wrap: wrap;
-      justify-content: flex-start;
+      justify-content: flex-end;
+    }
+
+    .refresh,
+    .locale-toggle,
+    .settings-toggle {
+      min-height: 36px;
     }
 
     .settings-header,
@@ -4835,6 +4940,11 @@
       justify-content: flex-start;
     }
 
+    .token-money-workbench {
+      padding: 10px;
+      border-radius: 20px;
+    }
+
     .usage-overview-grid,
     .skeleton-overview {
       grid-template-columns: 1fr;
@@ -4842,7 +4952,22 @@
     }
 
     .usage-summary {
-      padding-left: 0;
+      padding: 16px;
+    }
+
+    .workbench-trend,
+    .usage-totals,
+    .model-ranking {
+      padding: 16px;
+    }
+
+    .trend-chart {
+      grid-template-columns: 54px minmax(0, 1fr);
+    }
+
+    .provider-card {
+      padding: 20px;
+      border-radius: 22px;
     }
 
     .usage-totals dl {
