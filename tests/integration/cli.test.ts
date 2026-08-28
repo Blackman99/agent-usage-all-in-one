@@ -195,7 +195,10 @@ describe('agent-usage CLI', () => {
     const first = await runCli(['--home', home, '--no-open']);
 
     expect(first.exitCode).toBe(0);
-    expect(first.stderr).toBe('');
+    expect(first.stderr).toContain('Agent Usage: starting local web service…');
+    expect(first.stderr).toContain(
+      'Agent Usage: web service ready; usage data is updating in the background.'
+    );
     expect(first.stdout.trim()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/launch\?token=/);
     const firstState = JSON.parse(await readFile(join(home, 'daemon.json'), 'utf8')) as {
       pid: number;

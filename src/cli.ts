@@ -296,6 +296,7 @@ async function ensureDaemon(home: string): Promise<DaemonState> {
   try {
     return await requireDaemonState(home);
   } catch {
+    process.stderr.write('Agent Usage: starting local web service…\n');
     const child = spawn(
       process.execPath,
       [...process.execArgv, process.argv[1], '--home', home, 'serve'],
@@ -312,7 +313,12 @@ async function ensureDaemon(home: string): Promise<DaemonState> {
   while (Date.now() < deadline) {
     try {
       const state = await readDaemonState(home);
-      if (await isHealthy(state)) return state;
+      if (await isHealthy(state)) {
+        process.stderr.write(
+          'Agent Usage: web service ready; usage data is updating in the background.\n'
+        );
+        return state;
+      }
     } catch {
       // The child has not written a valid state file yet.
     }
