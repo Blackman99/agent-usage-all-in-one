@@ -94,10 +94,8 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   });
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.goto(freshLaunch.stdout.trim());
-  await expect(page.locator('.product-banner-art')).toHaveAttribute(
-    'src',
-    '/brand/agent-usage-banner.svg'
-  );
+  await expect(page.locator('.product-logo')).toHaveAttribute('src', '/brand/agent-usage-logo.svg');
+  await expect(page.locator('.product-banner-art')).toHaveCount(0);
 
   const mainViews = page.getByRole('tablist', { name: 'Main views' });
   const agentUsageTab = mainViews.getByRole('tab', { name: 'Agent usage' });
@@ -1026,7 +1024,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
     .click();
   await expect(rows.first()).toContainText('fable-model');
   const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
-  await expect(grokRow.locator('img')).toHaveCount(0);
+  await expect(grokRow.locator('img')).toHaveAttribute('src', '/brands/grok-light.svg');
   await expect(grokRow).toContainText('Separate domain · not included in headline');
   await expect(grokRow).toContainText('Provider-reported estimate');
   await expect(grokRow).toContainText('$3.00');
@@ -1120,7 +1118,7 @@ test('follows system theme and keeps the usage dashboard responsive with local o
         .evaluate((element) => getComputedStyle(element).backgroundImage)
     )
     .toBe('none');
-  for (const providerId of ['codex', 'claude-code', 'opencode-go']) {
+  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
     const logo = page.locator(`picture[data-provider-logo="${providerId}"]`).first();
     await expect(logo).toBeVisible();
     await expect(logo.locator('img')).toHaveAttribute('src', /^\/brands\//);
@@ -1128,10 +1126,9 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   await expect(
     page.locator('picture[data-provider-logo="opencode-go"] source').first()
   ).toHaveAttribute('srcset', '/brands/opencode-light.svg');
-  await expect(page.locator('picture[data-provider-logo="grok"]')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Grok', exact: true })).toHaveAttribute(
-    'data-provider-logo',
-    'grok'
+  await expect(page.locator('picture[data-provider-logo="grok"] source').first()).toHaveAttribute(
+    'srcset',
+    '/brands/grok-dark.svg'
   );
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   await page
@@ -1150,6 +1147,12 @@ test('follows system theme and keeps the usage dashboard responsive with local o
       .first()
       .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
   ).toBe('/brands/opencode-light.svg');
+  expect(
+    await page
+      .locator('picture[data-provider-logo="grok"] img')
+      .first()
+      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+  ).toBe('/brands/grok-dark.svg');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect.poll(gridColumnCount).toBe(2);
   await page.setViewportSize({ width: 1680, height: 1000 });
@@ -1193,6 +1196,17 @@ test('follows system theme and keeps the usage dashboard responsive with local o
         })
     )
     .toBe('/brands/opencode-dark.svg');
+  await expect
+    .poll(() =>
+      page
+        .locator('picture[data-provider-logo="grok"] img')
+        .first()
+        .evaluate((image) => {
+          const source = (image as HTMLImageElement).currentSrc;
+          return source ? new URL(source).pathname : '';
+        })
+    )
+    .toBe('/brands/grok-light.svg');
   expect(externalRequests).toEqual([]);
 });
 

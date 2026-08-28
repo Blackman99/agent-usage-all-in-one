@@ -117,11 +117,10 @@ are recorded in [`connector-receipts-2026-08-28.md`](connector-receipts-2026-08-
 
 ## Brand evidence
 
-OpenAI Blossom, Claude, and OpenCode light/dark assets are bundled under
-`static/brands/`. Grok uses the documented plain-text fallback because the official
-product-mark package rejected the audited retrieval; the separate xAI corporate
-mark is not substituted. Official sources, audited retrieval dates, SHA-256 values,
-theme selection, fallback behavior, and trademark constraints are recorded in
+OpenAI Blossom, Claude, OpenCode light/dark, and Grok black/white assets are bundled
+under `static/brands/`. Grok uses the official product Logomark rather than the
+separate xAI corporate mark. Official sources, audited retrieval details, SHA-256
+values, theme selection, fallback behavior, and trademark constraints are recorded in
 [`../../static/brands/README.md`](../../static/brands/README.md). Browser regression
 also proves that rendering these marks makes no third-party network request.
 

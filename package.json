@@ -37,7 +37,8 @@
     "CODE_OF_CONDUCT.md",
     "SECURITY.md",
     "docs/open-source.md",
-    "static/brand"
+    "static/brand",
+    "static/brands"
   ],
   "publishConfig": {
     "access": "public",

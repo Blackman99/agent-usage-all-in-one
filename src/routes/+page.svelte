@@ -795,6 +795,10 @@
       'opencode-go': {
         dark: '/brands/opencode-dark.svg',
         light: '/brands/opencode-light.svg'
+      },
+      grok: {
+        dark: '/brands/grok-light.svg',
+        light: '/brands/grok-dark.svg'
       }
     };
     return paths[providerId] ?? null;
@@ -1145,8 +1149,8 @@
 
 {#key locale}
   <main class="shell" inert={settingsOpen || selectedModelEntry !== null}>
-    <header class="product-banner">
-      <img class="product-banner-art" src="/brand/agent-usage-banner.svg" alt={t('bannerAlt')} />
+    <header class="product-header">
+      <img class="product-logo" src="/brand/agent-usage-logo.svg" alt={t('bannerAlt')} />
       <h1 class="visually-hidden">{t('title')}</h1>
       <div class="header-actions">
         <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
@@ -2463,16 +2467,20 @@
   }
 
   header {
-    margin-bottom: 42px;
+    margin-bottom: 28px;
   }
 
-  .product-banner-art {
+  .product-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .product-logo {
     display: block;
-    width: 100%;
-    height: auto;
-    border: 1px solid #263556;
-    border-radius: 28px;
-    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.25);
+    width: 64px;
+    height: 64px;
   }
 
   .visually-hidden {
@@ -2527,7 +2535,6 @@
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 16px;
   }
 
   .locale-toggle,
@@ -4283,6 +4290,11 @@
     header {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .header-actions {
+      flex-wrap: wrap;
+      justify-content: flex-start;
     }
 
     .settings-header,
