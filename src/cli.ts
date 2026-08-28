@@ -68,7 +68,8 @@ program
         'export OTEL_METRICS_EXPORTER=otlp',
         'export OTEL_EXPORTER_OTLP_PROTOCOL=http/json',
         `export OTEL_EXPORTER_OTLP_ENDPOINT=${state.origin}`,
-        `export OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer ${state.apiToken}'`
+        `export OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer ${state.apiToken}'`,
+        'export OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta'
       ].join('\n') + '\n'
     );
   });
@@ -391,7 +392,11 @@ function formatTokenEvidence(
   const precisions =
     evidence.timePrecisions.length > 0 ? evidence.timePrecisions.join('+') : 'unknown';
   const scopes = evidence.usageScopes.length > 0 ? evidence.usageScopes.join('+') : 'unknown';
-  return `${evidence.classifiedTokens}/${evidence.recordedTokens} classified; ${evidence.unclassifiedTokens} unclassified; precision ${precisions}; scope ${scopes}`;
+  const temporalities =
+    evidence.aggregationTemporalities.length > 0
+      ? evidence.aggregationTemporalities.join('+')
+      : 'unknown';
+  return `${evidence.classifiedTokens}/${evidence.recordedTokens} classified; ${evidence.unclassifiedTokens} unclassified; precision ${precisions}; scope ${scopes}; temporality ${temporalities}`;
 }
 
 function formatEvidence(authority: string, observedAt: string | null | undefined): string {

@@ -100,6 +100,7 @@ describe('OpenCode Go application path', () => {
         {
           id: 'opencode-go',
           health: { status: 'healthy' },
+          coverage: { tokens: 'partial', history: 'partial' },
           quotaBuckets: [
             expect.objectContaining({
               id: 'monthly',

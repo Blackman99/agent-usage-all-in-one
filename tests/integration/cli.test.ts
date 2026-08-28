@@ -199,6 +199,7 @@ describe('agent-usage CLI', () => {
     expect(telemetry.stdout).toContain('CLAUDE_CODE_ENABLE_TELEMETRY=1');
     expect(telemetry.stdout).toContain(`OTEL_EXPORTER_OTLP_ENDPOINT=${firstState.origin}`);
     expect(telemetry.stdout).toContain('Authorization=Bearer ');
+    expect(telemetry.stdout).toContain('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta');
 
     const grokTelemetry = await runCli(['--home', home, 'telemetry-env', '--provider', 'grok']);
     expect(grokTelemetry.exitCode).toBe(0);

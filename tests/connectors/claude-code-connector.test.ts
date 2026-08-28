@@ -251,13 +251,21 @@ describe('Claude Code OTLP metrics', () => {
     expect(snapshot.provider).toEqual({ id: 'claude-code', displayName: 'Claude Code' });
     expect(snapshot.usage).toEqual([
       expect.objectContaining({
-        id: 'claude-otel:1756346400000000000:claude-fable-5',
+        id: 'claude-otel:1787878800000000000:claude-fable-5',
         model: 'claude-fable-5',
         inputTokens: 100,
         outputTokens: 25,
         cacheReadTokens: 400,
         cacheWriteTokens: 50,
-        totalTokens: 575,
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        modelAttribution: 'known',
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
         authority: 'local-observation'
       })
     ]);
@@ -265,11 +273,23 @@ describe('Claude Code OTLP metrics', () => {
       expect.objectContaining({
         kind: 'estimate',
         amount: 0.42,
+        sourceId: 'claude-otel:1787878800000000000:claude-fable-5',
         currency: 'USD',
         authority: 'local-observation'
       })
     ]);
     expect(JSON.stringify(snapshot)).not.toContain('person@example.com');
+    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
+  });
+
+  it('rejects cumulative metrics instead of adding successive account totals', () => {
+    const cumulative = structuredClone(otlpFixture);
+    cumulative.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.aggregationTemporality =
+      'AGGREGATION_TEMPORALITY_CUMULATIVE';
+
+    expect(() => parseClaudeOtlpMetrics(cumulative, new Date('2026-08-28T02:00:00.000Z'))).toThrow(
+      expect.objectContaining({ code: 'claude-otel-temporality-unsupported' })
+    );
   });
 });
 
@@ -320,9 +340,10 @@ const otlpFixture = {
             ...(['input', 'output', 'cacheRead', 'cacheCreation'] as const).map((type, index) => ({
               name: 'claude_code.token.usage',
               sum: {
+                aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
                 dataPoints: [
                   {
-                    timeUnixNano: '1756346400000000000',
+                    timeUnixNano: '1787878800000000000',
                     asInt: [100, 25, 400, 50][index].toString(),
                     attributes: [
                       { key: 'type', value: { stringValue: type } },
@@ -336,9 +357,10 @@ const otlpFixture = {
             {
               name: 'claude_code.cost.usage',
               sum: {
+                aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
                 dataPoints: [
                   {
-                    timeUnixNano: '1756346400000000000',
+                    timeUnixNano: '1787878800000000000',
                     asDouble: 0.42,
                     attributes: [{ key: 'model', value: { stringValue: 'claude-fable-5' } }]
                   }

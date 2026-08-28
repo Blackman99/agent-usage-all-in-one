@@ -378,9 +378,9 @@ test('keeps Claude All models and Fable-only quota separate from local OTLP toke
               },
               coverage: {
                 quota: 'complete',
-                tokens: 'complete',
+                tokens: 'partial',
                 actualCost: 'unavailable',
-                history: 'complete'
+                history: 'partial'
               },
               quotaBuckets: [
                 {
@@ -418,6 +418,15 @@ test('keeps Claude All models and Fable-only quota separate from local OTLP toke
                 cacheRead: 400,
                 cacheWrite: 50
               },
+              tokenEvidence: tokenEvidenceFixture(
+                { total: 575 },
+                {
+                  totalDerivations: ['categorized'],
+                  timePrecisions: ['event'],
+                  usageScopes: ['this-mac'],
+                  aggregationTemporalities: ['delta']
+                }
+              ),
               tokenAuthority: 'local-observation'
             },
             'subscription',
@@ -435,7 +444,9 @@ test('keeps Claude All models and Fable-only quota separate from local OTLP toke
   await expect(provider.getByText('Week · Fable only')).toBeVisible();
   await expect(provider.getByText('Source: Official Client')).toHaveCount(3);
   await expect(provider).toContainText('Source: Local observation');
-  await expect(provider).toContainText(/Scope:\s*Unknown/);
+  await expect(provider).toContainText(/Scope:\s*This Mac only/);
+  await expect(provider).toContainText(/Precision:\s*Event/);
+  await expect(provider).toContainText(/Aggregation:\s*Delta/);
   await expect(provider.getByText('575')).toBeVisible();
 });
 
@@ -461,9 +472,9 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
             },
             coverage: {
               quota: 'complete',
-              tokens: 'complete',
+              tokens: 'partial',
               actualCost: 'unavailable',
-              history: 'complete'
+              history: 'partial'
             },
             quotaBuckets: [
               {
@@ -485,6 +496,15 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
               cacheRead: 400,
               cacheWrite: 0
             },
+            tokenEvidence: tokenEvidenceFixture(
+              { total: 525 },
+              {
+                totalDerivations: ['categorized'],
+                timePrecisions: ['event'],
+                usageScopes: ['this-mac'],
+                aggregationTemporalities: ['delta']
+              }
+            ),
             tokenAuthority: 'local-observation',
             billingDomains: grokBillingDomains
           }
@@ -499,7 +519,9 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expect(provider.getByText('Plan: SuperGrok Heavy')).toBeVisible();
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
   await expect(provider).toContainText('Source: Local observation');
-  await expect(provider).toContainText(/Scope:\s*Unknown/);
+  await expect(provider).toContainText(/Scope:\s*This Mac only/);
+  await expect(provider).toContainText(/Precision:\s*Event/);
+  await expect(provider).toContainText(/Aggregation:\s*Delta/);
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
   await expect(
     provider.getByText('Open Grok Build and run /usage, then retry refresh.')
@@ -784,6 +806,7 @@ function tokenEvidenceFixture(
     totalDerivations: tokenTotals.total > 0 ? ['legacy-total'] : [],
     timePrecisions: tokenTotals.total > 0 ? ['unknown'] : [],
     usageScopes: tokenTotals.total > 0 ? ['unknown'] : [],
+    aggregationTemporalities: tokenTotals.total > 0 ? ['unknown'] : [],
     ...overrides
   };
 }
@@ -919,6 +942,15 @@ const grokBillingDomains = [
       cacheRead: 400,
       cacheWrite: 0
     },
+    tokenEvidence: tokenEvidenceFixture(
+      { total: 525 },
+      {
+        totalDerivations: ['categorized'],
+        timePrecisions: ['event'],
+        usageScopes: ['this-mac'],
+        aggregationTemporalities: ['delta']
+      }
+    ),
     tokenAuthority: 'local-observation',
     costs: [],
     balances: [],
@@ -933,7 +965,17 @@ const grokBillingDomains = [
         cacheWrite: 0
       },
       ['local-observation'],
-      '2026-08-28T01:56:00.000Z'
+      '2026-08-28T01:56:00.000Z',
+      [],
+      tokenEvidenceFixture(
+        { total: 525 },
+        {
+          totalDerivations: ['categorized'],
+          timePrecisions: ['event'],
+          usageScopes: ['this-mac'],
+          aggregationTemporalities: ['delta']
+        }
+      )
     )
   },
   {

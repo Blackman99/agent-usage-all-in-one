@@ -111,6 +111,14 @@ describe('token normalization', () => {
     expect(normalized.unclassifiedTokens).toBe(25);
   });
 
+  it('treats provider unknown-model placeholders as unclassified', () => {
+    const normalized = normalizeTokenObservation(
+      observation({ model: 'unknown-model', modelAttribution: 'known', totalTokens: 25 })
+    );
+
+    expect(normalized.modelAttribution).toBe('unclassified');
+  });
+
   it('interprets the old total field without claiming source-total or time precision evidence', () => {
     const normalized = normalizeTokenObservation(
       observation({ totalTokens: 125, timePrecision: undefined })

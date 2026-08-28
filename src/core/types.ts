@@ -55,6 +55,7 @@ export type TokenTimePrecision = 'event' | 'hour' | 'day' | 'billing-period' | '
 export type TokenTotalDerivation = 'source-reported' | 'categorized' | 'legacy-total';
 export type TokenModelAttribution = 'known' | 'unclassified';
 export type TokenUsageScope = 'account-wide' | 'this-mac' | 'unknown';
+export type TokenAggregationTemporality = 'delta' | 'cumulative' | 'unknown';
 
 export interface TokenSemantics {
   reasoning: ReasoningTokenSemantics;
@@ -79,6 +80,7 @@ export interface UsageObservation {
   modelAttribution?: TokenModelAttribution;
   timePrecision?: TokenTimePrecision;
   usageScope?: TokenUsageScope;
+  aggregationTemporality?: TokenAggregationTemporality;
   authority: DataAuthority;
 }
 
@@ -89,6 +91,7 @@ export interface NormalizedUsageObservation extends UsageObservation {
   modelAttribution: TokenModelAttribution;
   timePrecision: TokenTimePrecision;
   usageScope: TokenUsageScope;
+  aggregationTemporality: TokenAggregationTemporality;
   recordedTokens: number;
   unclassifiedTokens: number;
   totalDerivation: TokenTotalDerivation;
@@ -203,6 +206,7 @@ export interface TokenEvidence {
   totalDerivations: TokenTotalDerivation[];
   timePrecisions: TokenTimePrecision[];
   usageScopes: TokenUsageScope[];
+  aggregationTemporalities: TokenAggregationTemporality[];
 }
 
 export interface BillingDomainOverview extends BillingDomain {

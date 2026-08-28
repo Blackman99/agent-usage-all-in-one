@@ -360,17 +360,33 @@ describe('local HTTP server', () => {
           scopeMetrics: [
             {
               metrics: [
+                ...(['input', 'output', 'cacheRead', 'cacheCreation'] as const).map(
+                  (type, index) => ({
+                    name: 'claude_code.token.usage',
+                    sum: {
+                      aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
+                      dataPoints: [
+                        {
+                          timeUnixNano: '1787878800000000000',
+                          asInt: [100, 25, 400, 50][index].toString(),
+                          attributes: [
+                            { key: 'type', value: { stringValue: type } },
+                            { key: 'model', value: { stringValue: 'claude-fable-5' } }
+                          ]
+                        }
+                      ]
+                    }
+                  })
+                ),
                 {
-                  name: 'claude_code.token.usage',
+                  name: 'claude_code.cost.usage',
                   sum: {
+                    aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
                     dataPoints: [
                       {
-                        timeUnixNano: '1756346400000000000',
-                        asInt: '125',
-                        attributes: [
-                          { key: 'type', value: { stringValue: 'input' } },
-                          { key: 'model', value: { stringValue: 'claude-fable-5' } }
-                        ]
+                        timeUnixNano: '1787878800000000000',
+                        asDouble: 0.42,
+                        attributes: [{ key: 'model', value: { stringValue: 'claude-fable-5' } }]
                       }
                     ]
                   }
@@ -401,6 +417,33 @@ describe('local HTTP server', () => {
     });
     expect(ingest.status).toBe(200);
     expect(await ingest.json()).toEqual({ partialSuccess: {} });
+    const duplicate = await fetch(`${server.origin}/v1/metrics`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer otlp-token',
+        'content-type': 'application/json'
+      },
+      body
+    });
+    expect(duplicate.status).toBe(200);
+    const cumulativePayload = JSON.parse(body) as {
+      resourceMetrics: Array<{
+        scopeMetrics: Array<{
+          metrics: Array<{ sum: { aggregationTemporality: string } }>;
+        }>;
+      }>;
+    };
+    cumulativePayload.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.aggregationTemporality =
+      'AGGREGATION_TEMPORALITY_CUMULATIVE';
+    const rejected = await fetch(`${server.origin}/v1/metrics`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer otlp-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(cumulativePayload)
+    });
+    expect(rejected.status).toBe(500);
 
     const overview = await fetch(`${server.origin}/api/overview`, {
       headers: { authorization: 'Bearer otlp-token' }
@@ -409,14 +452,39 @@ describe('local HTTP server', () => {
       providers: [
         {
           id: 'claude-code',
-          tokenTotals: { total: 125, input: 125 },
-          tokenEvidence: {
-            recordedTokens: 125,
-            unclassifiedTokens: 0,
-            totalDerivations: ['legacy-total'],
-            timePrecisions: ['unknown']
+          coverage: { tokens: 'partial', history: 'partial' },
+          tokenTotals: {
+            total: 575,
+            input: 100,
+            output: 25,
+            cacheRead: 400,
+            cacheWrite: 50
           },
-          tokenAuthority: 'local-observation'
+          tokenEvidence: {
+            recordedTokens: 575,
+            unclassifiedTokens: 0,
+            totalDerivations: ['categorized'],
+            timePrecisions: ['event'],
+            usageScopes: ['this-mac'],
+            aggregationTemporalities: ['delta']
+          },
+          tokenAuthority: 'local-observation',
+          billingDomains: [
+            {
+              id: 'subscription',
+              costs: [
+                {
+                  sourceId: 'claude-otel:1787878800000000000:claude-fable-5',
+                  amount: 0.42
+                }
+              ],
+              history: {
+                tokenTotals: { total: 575 },
+                days: [{ day: '2026-08-28', tokenTotals: { total: 575 } }],
+                costs: [{ kind: 'estimate', amount: 0.42 }]
+              }
+            }
+          ]
         }
       ]
     });
@@ -445,7 +513,7 @@ describe('local HTTP server', () => {
     });
     const server = await startLocalServer({ application, apiToken: 'grok-otlp-token' });
     servers.push(server);
-    const encoded = encodeOtlpMetricsProtobuf({
+    const grokPayload = {
       resourceMetrics: [
         {
           resource: {
@@ -457,29 +525,30 @@ describe('local HTTP server', () => {
           scopeMetrics: [
             {
               metrics: [
-                {
+                ...(['input', 'output', 'reasoning', 'cache_read'] as const).map((type, index) => ({
                   name: 'grok_code.token.usage',
                   sum: {
                     aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
                     dataPoints: [
                       {
-                        timeUnixNano: '1756346400000000000',
-                        asInt: '125',
+                        timeUnixNano: '1787878800000000000',
+                        asInt: [100, 25, 12, 400][index].toString(),
                         attributes: [
-                          { key: 'type', value: { stringValue: 'input' } },
+                          { key: 'type', value: { stringValue: type } },
                           { key: 'model', value: { stringValue: 'grok-build' } },
                           { key: 'session.id', value: { stringValue: 'session-protobuf' } }
                         ]
                       }
                     ]
                   }
-                }
+                }))
               ]
             }
           ]
         }
       ]
-    });
+    };
+    const encoded = encodeOtlpMetricsProtobuf(grokPayload);
     const body = Uint8Array.from(encoded).buffer;
 
     const anonymous = await fetch(`${server.origin}/grok/v1/metrics`, {
@@ -499,13 +568,39 @@ describe('local HTTP server', () => {
     });
     expect(ingest.status).toBe(200);
     expect(ingest.headers.get('content-type')).toContain('application/x-protobuf');
+    const duplicate = await fetch(`${server.origin}/grok/v1/metrics`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer grok-otlp-token',
+        'content-type': 'application/x-protobuf'
+      },
+      body
+    });
+    expect(duplicate.status).toBe(200);
+    const changedSchema = structuredClone(grokPayload);
+    changedSchema.resourceMetrics[0].resource.attributes[0].value.stringValue = 'v2';
+    const rejected = await fetch(`${server.origin}/grok/v1/metrics`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer grok-otlp-token',
+        'content-type': 'application/x-protobuf'
+      },
+      body: Uint8Array.from(encodeOtlpMetricsProtobuf(changedSchema)).buffer
+    });
+    expect(rejected.status).toBe(500);
 
     const overview = await fetch(`${server.origin}/api/overview`, {
       headers: { authorization: 'Bearer grok-otlp-token' }
     });
     const serialized = JSON.stringify(await overview.json());
     expect(serialized).toContain('"id":"grok"');
-    expect(serialized).toContain('"total":125');
+    expect(serialized).toContain('"total":525');
+    expect(serialized).toContain('"reasoning":12');
+    expect(serialized).not.toContain('"total":537');
+    expect(serialized).toContain('"aggregationTemporalities":["delta"]');
+    expect(serialized).toContain('"tokens":"partial"');
+    expect(serialized).toContain('"id":"grok-build-subscription"');
+    expect(serialized).not.toContain('"id":"xai-api"');
     expect(serialized).not.toContain('private-user');
     repository.close();
   });

@@ -179,7 +179,7 @@ describe('Grok Build usage observations', () => {
     expect(snapshot.provider).toEqual({ id: 'grok', displayName: 'Grok' });
     expect(snapshot.usage).toEqual([
       expect.objectContaining({
-        id: 'grok-otel:1756346400000000000:session-123:grok-build',
+        id: 'grok-otel:1787878800000000000:session-123:grok-build',
         billingDomainId: 'grok-build-subscription',
         model: 'grok-build',
         sessionId: 'session-123',
@@ -188,12 +188,21 @@ describe('Grok Build usage observations', () => {
         reasoningTokens: 12,
         cacheReadTokens: 400,
         cacheWriteTokens: 0,
-        totalTokens: 525,
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        modelAttribution: 'known',
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
         authority: 'local-observation'
       })
     ]);
     expect(snapshot.costs).toEqual([]);
     expect(JSON.stringify(snapshot)).not.toContain('person@example.com');
+    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
   });
 
   it('rejects unknown alpha OTLP schema versions instead of silently miscounting', () => {
@@ -226,7 +235,8 @@ describe('Grok Build usage observations', () => {
             cacheCreationInputTokens: 40,
             modelCalls: 2
           }
-        }
+        },
+        usage_is_incomplete: true
       },
       new Date('2026-08-28T02:00:00.000Z')
     );
@@ -239,10 +249,22 @@ describe('Grok Build usage observations', () => {
         outputTokens: 20,
         cacheReadTokens: 300,
         cacheWriteTokens: 40,
-        totalTokens: 460
+        sourceReportedTotalTokens: 460,
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta'
       })
     ]);
+    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
     expect(snapshot.costs).toEqual([]);
+    expect(snapshot.warnings).toEqual([
+      expect.objectContaining({ code: 'grok-headless-usage-incomplete' })
+    ]);
   });
 });
 
@@ -287,7 +309,7 @@ const grokOtlpFixture = {
               aggregationTemporality: 'AGGREGATION_TEMPORALITY_DELTA',
               dataPoints: [
                 {
-                  timeUnixNano: '1756346400000000000',
+                  timeUnixNano: '1787878800000000000',
                   asInt: [100, 25, 12, 400][index].toString(),
                   attributes: [
                     { key: 'type', value: { stringValue: type } },

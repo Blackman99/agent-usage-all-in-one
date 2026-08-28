@@ -14,16 +14,28 @@ interface OtlpPoint {
 
 interface OtlpMetric {
   name?: unknown;
-  sum?: { dataPoints?: unknown };
+  sum?: { dataPoints?: unknown; aggregationTemporality?: unknown };
 }
 
 interface UsageAggregate {
   timestamp: string;
-  model: string;
+  timePrecision: 'event' | 'unknown';
+  model: string | null;
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
+}
+
+export class ClaudeTelemetryError extends Error {
+  readonly code = 'claude-otel-temporality-unsupported';
+  readonly recovery =
+    'Use agent-usage telemetry-env --provider claude-code to configure delta metrics.';
+
+  constructor() {
+    super('Cumulative Claude Code metrics cannot be safely added to local history.');
+    this.name = 'ClaudeTelemetryError';
+  }
 }
 
 export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): ConnectorSnapshot {
@@ -35,9 +47,15 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
     const points = Array.isArray(metric.sum?.dataPoints)
       ? (metric.sum.dataPoints as OtlpPoint[])
       : [];
+    if (
+      ['claude_code.token.usage', 'claude_code.cost.usage'].includes(String(metric.name)) &&
+      !isDelta(metric.sum?.aggregationTemporality)
+    ) {
+      throw new ClaudeTelemetryError();
+    }
     for (const point of points) {
       const attributes = attributeMap(point.attributes);
-      const model = attributes.get('model') ?? 'unknown-model';
+      const model = attributes.get('model') ?? null;
       const nano = typeof point.timeUnixNano === 'string' ? point.timeUnixNano : null;
       const timestamp = nano ? nanoToIso(nano) : receivedAt.toISOString();
       const value = numericPointValue(point);
@@ -46,9 +64,10 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
       if (metric.name === 'claude_code.token.usage') {
         const type = attributes.get('type');
         if (!['input', 'output', 'cacheRead', 'cacheCreation'].includes(type ?? '')) continue;
-        const key = `${nano ?? receivedAt.getTime()}:${model}`;
+        const key = `${nano ?? receivedAt.getTime()}:${model ?? 'unknown-model'}`;
         const aggregate = usage.get(key) ?? {
           timestamp,
+          timePrecision: nano ? 'event' : 'unknown',
           model,
           input: 0,
           output: 0,
@@ -62,8 +81,10 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
         usage.set(key, aggregate);
       }
       if (metric.name === 'claude_code.cost.usage') {
+        const key = `${nano ?? receivedAt.getTime()}:${model ?? 'unknown-model'}`;
         costs.push({
-          id: `claude-otel-cost:${nano ?? receivedAt.getTime()}:${model}`,
+          id: `claude-otel-cost:${key}`,
+          sourceId: `claude-otel:${key}`,
           billingDomainId: 'subscription',
           observedAt: timestamp,
           kind: 'estimate',
@@ -86,11 +107,19 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
     billingDomainId: 'subscription',
     model: item.model,
     observedAt: item.timestamp,
-    totalTokens: item.input + item.output + item.cacheRead + item.cacheWrite,
     inputTokens: item.input,
     outputTokens: item.output,
     cacheReadTokens: item.cacheRead,
     cacheWriteTokens: item.cacheWrite,
+    tokenSemantics: {
+      reasoning: 'included-in-output',
+      cacheRead: 'separate',
+      cacheWrite: 'separate'
+    },
+    modelAttribution: item.model ? 'known' : 'unclassified',
+    timePrecision: item.timePrecision,
+    usageScope: 'this-mac',
+    aggregationTemporality: 'delta',
     authority: 'local-observation'
   }));
 
@@ -102,6 +131,10 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
     costs,
     observedAt: receivedAt.toISOString()
   };
+}
+
+function isDelta(value: unknown): boolean {
+  return value === 1 || value === 'AGGREGATION_TEMPORALITY_DELTA';
 }
 
 function extractMetrics(payload: unknown): OtlpMetric[] {

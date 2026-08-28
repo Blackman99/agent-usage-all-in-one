@@ -37,6 +37,11 @@ included in output with cache reads and writes separate. Usage scope is also
 independent evidence: account-wide, this Mac, or unknown. Legacy rows default
 to unknown rather than inferring scope from authority.
 
+Telemetry also declares aggregation temporality. Delta observations can be
+stored by stable event identity and added across distinct times. Cumulative
+observations are rejected unless a Connector implements an explicit
+reconciliation boundary; treating them as deltas would inflate history.
+
 SQLite migration is additive and idempotent. It adds evidence columns with
 honest defaults, backfills only recognized aggregate model placeholders, and
 preserves the observation id, authority, and observed timestamp. Overview,

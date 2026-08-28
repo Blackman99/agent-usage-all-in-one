@@ -46,6 +46,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Usage scope**: The population represented by a Token observation:
   account-wide, this Mac, or unknown. Local authority does not by itself prove
   that a value is limited to one machine.
+- **Aggregation temporality**: Whether a telemetry observation is a delta for
+  one interval, a cumulative running total, or unknown. Only delta telemetry is
+  additive across observation times.
 - **Cost record**: An actual billed amount, a fixed subscription cost, or an API
   retail-price estimate. These cost kinds remain separate.
 - **Data authority**: The provenance level of a value: official account,
@@ -81,3 +84,6 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
     does not invent source totals, model attribution, or time precision.
 12. Account-wide and this-Mac observations retain their scope through history,
     CLI output, and export; unlike scopes are never presented as interchangeable.
+13. Cumulative telemetry is rejected before persistence unless a Connector has
+    an explicit non-overlapping reconciliation algorithm; it is never summed as
+    though it were delta data.

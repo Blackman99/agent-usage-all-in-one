@@ -22,6 +22,7 @@ import type {
   QuotaForecast,
   RetentionStatus,
   TokenEvidence,
+  TokenAggregationTemporality,
   TokenModelAttribution,
   TokenTimePrecision,
   TokenTotalDerivation,
@@ -85,6 +86,7 @@ interface TokenRow {
   total_derivations: string | null;
   time_precisions: string | null;
   usage_scopes: string | null;
+  aggregation_temporalities: string | null;
   authorities: string | null;
 }
 
@@ -124,6 +126,7 @@ interface UsageHistoryRow {
   model_attribution: TokenModelAttribution;
   time_precision: TokenTimePrecision;
   usage_scope: TokenUsageScope;
+  aggregation_temporality: TokenAggregationTemporality;
 }
 
 interface MutableTokenEvidence {
@@ -135,6 +138,7 @@ interface MutableTokenEvidence {
   totalDerivations: Set<TokenTotalDerivation>;
   timePrecisions: Set<TokenTimePrecision>;
   usageScopes: Set<TokenUsageScope>;
+  aggregationTemporalities: Set<TokenAggregationTemporality>;
 }
 
 interface ExchangeRateRow {
@@ -321,8 +325,8 @@ export class SqliteUsageRepository implements UsageRepository {
            cache_read_tokens, cache_write_tokens, authority,
            source_reported_total_tokens, unclassified_tokens, total_derivation,
            reasoning_semantics, cache_read_semantics, cache_write_semantics,
-           model_attribution, time_precision, usage_scope
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           model_attribution, time_precision, usage_scope, aggregation_temporality
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            billing_domain_id = excluded.billing_domain_id,
            model = excluded.model,
@@ -343,7 +347,8 @@ export class SqliteUsageRepository implements UsageRepository {
            cache_write_semantics = excluded.cache_write_semantics,
            model_attribution = excluded.model_attribution,
            time_precision = excluded.time_precision,
-           usage_scope = excluded.usage_scope`
+           usage_scope = excluded.usage_scope,
+           aggregation_temporality = excluded.aggregation_temporality`
       );
       for (const observation of snapshot.usage) {
         const normalized = normalizeTokenObservation(observation);
@@ -369,7 +374,8 @@ export class SqliteUsageRepository implements UsageRepository {
           normalized.tokenSemantics.cacheWrite,
           normalized.modelAttribution,
           normalized.timePrecision,
-          normalized.usageScope
+          normalized.usageScope,
+          normalized.aggregationTemporality
         );
       }
 
@@ -862,6 +868,7 @@ export class SqliteUsageRepository implements UsageRepository {
            GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
            GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
            GROUP_CONCAT(DISTINCT usage_scope) AS usage_scopes,
+           GROUP_CONCAT(DISTINCT aggregation_temporality) AS aggregation_temporalities,
            GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations WHERE provider_id = ?`
       )
@@ -889,9 +896,9 @@ export class SqliteUsageRepository implements UsageRepository {
       },
       coverage: {
         quota: coverageFromCount(quotaRows.length),
-        tokens: coverageFromCount(tokens.observation_count),
+        tokens: tokenCoverage(tokens),
         actualCost: coverageFromCount(actualCostCount.count),
-        history: coverageFromCount(tokens.observation_count)
+        history: tokenCoverage(tokens)
       },
       quotaBuckets,
       tokenTotals: {
@@ -948,6 +955,7 @@ export class SqliteUsageRepository implements UsageRepository {
                 GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
                 GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
                 GROUP_CONCAT(DISTINCT usage_scope) AS usage_scopes,
+                GROUP_CONCAT(DISTINCT aggregation_temporality) AS aggregation_temporalities,
                 GROUP_CONCAT(DISTINCT authority) AS authorities
          FROM usage_observations WHERE provider_id = ? AND billing_domain_id = ?`
       )
@@ -1121,7 +1129,7 @@ export class SqliteUsageRepository implements UsageRepository {
         `SELECT model, observed_at, authority, total_tokens, input_tokens, output_tokens, reasoning_tokens,
                 cache_read_tokens, cache_write_tokens, source_reported_total_tokens,
                 unclassified_tokens, total_derivation, model_attribution, time_precision,
-                usage_scope
+                usage_scope, aggregation_temporality
          FROM usage_observations
          WHERE provider_id = ? AND billing_domain_id = ?
            AND observed_at >= ? AND observed_at < ?
@@ -1306,6 +1314,7 @@ export class SqliteUsageRepository implements UsageRepository {
         model_attribution TEXT NOT NULL DEFAULT 'known',
         time_precision TEXT NOT NULL DEFAULT 'unknown',
         usage_scope TEXT NOT NULL DEFAULT 'unknown',
+        aggregation_temporality TEXT NOT NULL DEFAULT 'unknown',
         PRIMARY KEY (provider_id, id),
         FOREIGN KEY (provider_id, billing_domain_id)
           REFERENCES billing_domains(provider_id, id) ON DELETE CASCADE
@@ -1465,7 +1474,8 @@ export class SqliteUsageRepository implements UsageRepository {
       ['cache_write_semantics', "TEXT NOT NULL DEFAULT 'separate'"],
       ['model_attribution', "TEXT NOT NULL DEFAULT 'known'"],
       ['time_precision', "TEXT NOT NULL DEFAULT 'unknown'"],
-      ['usage_scope', "TEXT NOT NULL DEFAULT 'unknown'"]
+      ['usage_scope', "TEXT NOT NULL DEFAULT 'unknown'"],
+      ['aggregation_temporality', "TEXT NOT NULL DEFAULT 'unknown'"]
     ] as const) {
       if (!usageColumns.some((column) => column.name === name)) {
         this.#database.exec(`ALTER TABLE usage_observations ADD COLUMN ${name} ${definition}`);
@@ -1483,7 +1493,32 @@ export class SqliteUsageRepository implements UsageRepository {
       UPDATE usage_observations
       SET model_attribution = 'unclassified',
           unclassified_tokens = total_tokens
-      WHERE lower(trim(model)) IN ('all-models', 'unknown', '__unclassified__')
+      WHERE lower(trim(model)) IN ('all-models', 'unknown', 'unknown-model', '__unclassified__')
+    `);
+    this.#database.exec(`
+      UPDATE usage_observations
+      SET usage_scope = 'this-mac',
+          total_derivation = 'categorized'
+      WHERE usage_scope = 'unknown'
+        AND (
+          (provider_id = 'claude-code' AND id LIKE 'claude-otel:%')
+          OR (provider_id = 'grok' AND id LIKE 'grok-otel:%')
+          OR (provider_id = 'grok' AND id LIKE 'grok-headless:%')
+        )
+    `);
+    this.#database.exec(`
+      UPDATE usage_observations
+      SET aggregation_temporality = 'delta'
+      WHERE aggregation_temporality = 'unknown'
+        AND provider_id = 'grok'
+        AND (id LIKE 'grok-otel:%' OR id LIKE 'grok-headless:%')
+    `);
+    this.#database.exec(`
+      UPDATE usage_observations
+      SET time_precision = 'event'
+      WHERE time_precision = 'unknown'
+        AND provider_id = 'grok'
+        AND id LIKE 'grok-headless:%'
     `);
     const providerColumns = this.#database
       .prepare('PRAGMA table_info(providers)')
@@ -1581,7 +1616,10 @@ function mapTokenEvidence(tokens: TokenRow): TokenEvidence {
     classificationCoverage: recordedTokens === 0 ? null : classifiedTokens / recordedTokens,
     totalDerivations: commaSeparatedValues<TokenTotalDerivation>(tokens.total_derivations),
     timePrecisions: commaSeparatedValues<TokenTimePrecision>(tokens.time_precisions),
-    usageScopes: commaSeparatedValues<TokenUsageScope>(tokens.usage_scopes)
+    usageScopes: commaSeparatedValues<TokenUsageScope>(tokens.usage_scopes),
+    aggregationTemporalities: commaSeparatedValues<TokenAggregationTemporality>(
+      tokens.aggregation_temporalities
+    )
   };
 }
 
@@ -1594,7 +1632,8 @@ function emptyTokenEvidence(): MutableTokenEvidence {
     unclassifiedTokens: 0,
     totalDerivations: new Set(),
     timePrecisions: new Set(),
-    usageScopes: new Set()
+    usageScopes: new Set(),
+    aggregationTemporalities: new Set()
   };
 }
 
@@ -1609,6 +1648,7 @@ function addTokenEvidence(target: MutableTokenEvidence, row: UsageHistoryRow): v
   target.totalDerivations.add(row.total_derivation);
   target.timePrecisions.add(row.time_precision);
   target.usageScopes.add(row.usage_scope);
+  target.aggregationTemporalities.add(row.aggregation_temporality);
 }
 
 function finishTokenEvidence(evidence: MutableTokenEvidence): TokenEvidence {
@@ -1624,7 +1664,8 @@ function finishTokenEvidence(evidence: MutableTokenEvidence): TokenEvidence {
       evidence.recordedTokens === 0 ? null : classifiedTokens / evidence.recordedTokens,
     totalDerivations: [...evidence.totalDerivations].sort(),
     timePrecisions: [...evidence.timePrecisions].sort(),
-    usageScopes: [...evidence.usageScopes].sort()
+    usageScopes: [...evidence.usageScopes].sort(),
+    aggregationTemporalities: [...evidence.aggregationTemporalities].sort()
   };
 }
 
@@ -1929,6 +1970,15 @@ function tokenAuthority(authorities: string | null): ProviderOverview['tokenAuth
 
 function coverageFromCount(count: number): CoverageLevel {
   return count > 0 ? 'complete' : 'unavailable';
+}
+
+function tokenCoverage(tokens: TokenRow): CoverageLevel {
+  if (tokens.observation_count === 0) return 'unavailable';
+  const scopes = commaSeparatedValues<TokenUsageScope>(tokens.usage_scopes);
+  const temporalities = commaSeparatedValues<TokenAggregationTemporality>(
+    tokens.aggregation_temporalities
+  );
+  return scopes.includes('this-mac') || temporalities.includes('delta') ? 'partial' : 'complete';
 }
 
 function freshnessStatus(

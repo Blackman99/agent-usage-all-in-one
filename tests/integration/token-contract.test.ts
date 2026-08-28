@@ -39,7 +39,8 @@ describe('expanded token contract', () => {
       unclassifiedTokens: 1_565,
       classifiedTokens: 345,
       totalDerivations: ['categorized', 'legacy-total', 'source-reported'],
-      timePrecisions: ['billing-period', 'day', 'event', 'hour', 'unknown']
+      timePrecisions: ['billing-period', 'day', 'event', 'hour', 'unknown'],
+      aggregationTemporalities: ['unknown']
     });
     expect(provider.tokenEvidence.classificationCoverage).toBeCloseTo(345 / 1_910);
     expect(domain.tokenEvidence).toEqual(provider.tokenEvidence);
@@ -59,7 +60,8 @@ describe('expanded token contract', () => {
       recordedTokens: 1_910,
       sourceReportedTokens: 1_600,
       unclassifiedTokens: 1_565,
-      timePrecisions: ['billing-period', 'day', 'event', 'hour', 'unknown']
+      timePrecisions: ['billing-period', 'day', 'event', 'hour', 'unknown'],
+      aggregationTemporalities: ['unknown']
     });
     repository.close();
   });
@@ -78,7 +80,7 @@ describe('expanded token contract', () => {
       .prepare(
         `SELECT id, authority, observed_at, total_tokens, source_reported_total_tokens,
                 unclassified_tokens, total_derivation, model_attribution, time_precision,
-                usage_scope
+                usage_scope, aggregation_temporality
          FROM usage_observations WHERE provider_id = 'legacy' AND id = 'legacy-observation'`
       )
       .get() as Record<string, unknown>;
@@ -92,7 +94,8 @@ describe('expanded token contract', () => {
       total_derivation: 'legacy-total',
       model_attribution: 'unclassified',
       time_precision: 'unknown',
-      usage_scope: 'unknown'
+      usage_scope: 'unknown',
+      aggregation_temporality: 'unknown'
     });
     const knownRemainder = database
       .prepare(

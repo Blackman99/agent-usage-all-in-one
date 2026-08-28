@@ -414,6 +414,16 @@
         : t('unknown');
   }
 
+  function aggregationTemporalityLabel(
+    temporality: ProviderOverview['tokenEvidence']['aggregationTemporalities'][number]
+  ): string {
+    return temporality === 'delta'
+      ? t('temporalityDelta')
+      : temporality === 'cumulative'
+        ? t('temporalityCumulative')
+        : t('temporalityUnknown');
+  }
+
   function coverageDimensionLabel(coverage: CoverageDimension): string {
     const keys: Record<CoverageDimension, MessageKey> = {
       quota: 'quota',
@@ -642,7 +652,8 @@
       classificationCoverage: null,
       totalDerivations: [],
       timePrecisions: [],
-      usageScopes: []
+      usageScopes: [],
+      aggregationTemporalities: []
     };
   }
 
@@ -1011,6 +1022,10 @@
                   .join(' + ') || t('unknown')}
                 · {t('unclassified')}:
                 {formatNumber(history.tokenEvidence?.unclassifiedTokens ?? 0)}
+                · {t('aggregationTemporality')}:
+                {(history.tokenEvidence?.aggregationTemporalities ?? [])
+                  .map(aggregationTemporalityLabel)
+                  .join(' + ') || t('unknown')}
               </p>
               <dl class="tokens">
                 <div>

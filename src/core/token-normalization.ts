@@ -60,6 +60,7 @@ export function normalizeTokenObservation(
     modelAttribution,
     timePrecision: observation.timePrecision ?? 'unknown',
     usageScope: observation.usageScope ?? 'unknown',
+    aggregationTemporality: observation.aggregationTemporality ?? 'unknown',
     recordedTokens,
     unclassifiedTokens,
     totalDerivation
@@ -68,7 +69,10 @@ export function normalizeTokenObservation(
 
 function inferModelAttribution(model: string | null): TokenModelAttribution {
   const normalized = model?.trim().toLowerCase();
-  return !normalized || normalized === 'all-models' || normalized === 'unknown'
+  return !normalized ||
+    normalized === 'all-models' ||
+    normalized === 'unknown' ||
+    normalized === 'unknown-model'
     ? 'unclassified'
     : 'known';
 }

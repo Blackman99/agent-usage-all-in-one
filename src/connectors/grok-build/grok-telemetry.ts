@@ -25,7 +25,8 @@ interface OtlpMetric {
 
 interface UsageAggregate {
   timestamp: string;
-  model: string;
+  timePrecision: 'event' | 'unknown';
+  model: string | null;
   sessionId: string | null;
   input: number;
   output: number;
@@ -83,11 +84,12 @@ export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): Connec
         const value = numericPointValue(point);
         if (value === null || value < 0) continue;
         const nano = typeof point.timeUnixNano === 'string' ? point.timeUnixNano : null;
-        const model = attributes.get('model') ?? 'unknown-model';
+        const model = attributes.get('model') ?? null;
         const sessionId = attributes.get('session.id') ?? null;
-        const key = `${nano ?? receivedAt.getTime()}:${sessionId ?? 'unknown-session'}:${model}`;
+        const key = `${nano ?? receivedAt.getTime()}:${sessionId ?? 'unknown-session'}:${model ?? 'unknown-model'}`;
         const aggregate = usage.get(key) ?? {
           timestamp: nano ? nanoToIso(nano) : receivedAt.toISOString(),
+          timePrecision: nano ? 'event' : 'unknown',
           model,
           sessionId,
           input: 0,
@@ -116,7 +118,15 @@ export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): Connec
       reasoningTokens: item.reasoning,
       cacheReadTokens: item.cacheRead,
       cacheWriteTokens: 0,
-      totalTokens: item.input + item.output + item.cacheRead,
+      tokenSemantics: {
+        reasoning: 'included-in-output',
+        cacheRead: 'separate',
+        cacheWrite: 'separate'
+      },
+      modelAttribution: item.model ? 'known' : 'unclassified',
+      timePrecision: item.timePrecision,
+      usageScope: 'this-mac',
+      aggregationTemporality: 'delta',
       authority: 'local-observation'
     })),
     [],
@@ -129,6 +139,7 @@ export function parseGrokHeadlessResult(payload: unknown, receivedAt: Date): Con
   const sessionId = stringValue(payload.sessionId) ?? stringValue(payload.session_id);
   const requestId = stringValue(payload.requestId) ?? stringValue(payload.request_id) ?? 'unknown';
   const aggregateUsage = isRecord(payload.usage) ? payload.usage : {};
+  const aggregateTotal = optionalNonNegativeNumber(aggregateUsage.total_tokens);
   const reasoningTotal = nonNegativeNumber(aggregateUsage.reasoning_tokens);
   const modelUsage = isRecord(payload.modelUsage) ? payload.modelUsage : {};
   const modelEntries = Object.entries(modelUsage).filter(
@@ -147,10 +158,13 @@ export function parseGrokHeadlessResult(payload: unknown, receivedAt: Date): Con
     const cacheWrite = nonNegativeNumber(
       values.cacheCreationInputTokens ?? values.cache_creation_input_tokens
     );
+    const sourceReportedTotalTokens =
+      optionalNonNegativeNumber(values.totalTokens ?? values.total_tokens) ??
+      (entries.length === 1 ? aggregateTotal : null);
     return {
       id: `grok-headless:${sessionId ?? 'unknown-session'}:${requestId}:${model}`,
       billingDomainId: 'grok-build-subscription',
-      model,
+      model: model === 'unknown-model' ? null : model,
       sessionId: sessionId ?? null,
       observedAt: receivedAt.toISOString(),
       inputTokens: input,
@@ -158,7 +172,16 @@ export function parseGrokHeadlessResult(payload: unknown, receivedAt: Date): Con
       reasoningTokens: entries.length === 1 ? reasoningTotal : 0,
       cacheReadTokens: cacheRead,
       cacheWriteTokens: cacheWrite,
-      totalTokens: input + output + cacheRead + cacheWrite,
+      sourceReportedTotalTokens,
+      tokenSemantics: {
+        reasoning: 'included-in-output',
+        cacheRead: 'separate',
+        cacheWrite: 'separate'
+      },
+      modelAttribution: model === 'unknown-model' ? 'unclassified' : 'known',
+      timePrecision: 'event',
+      usageScope: 'this-mac',
+      aggregationTemporality: 'delta',
       authority: 'local-observation'
     };
   });
@@ -232,6 +255,11 @@ function numericPointValue(point: OtlpPoint): number | null {
 function nonNegativeNumber(value: unknown): number {
   const parsed = typeof value === 'number' || typeof value === 'string' ? Number(value) : 0;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function optionalNonNegativeNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function stringValue(value: unknown): string | null {
