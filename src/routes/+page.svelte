@@ -1423,46 +1423,24 @@
                       aria-valuetext={bucket.usedPercent === null
                         ? t('notAvailable')
                         : `${formatNumber(bucket.usedPercent)}% ${t('used')}`}
+                      aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
                     >
                       <span style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
                       ></span>
                     </div>
+                    <span hidden id={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}>
+                      {t('source')}: {authorityLabel(bucket.authority)} ·
+                      {formatReset(
+                        bucket.observedAt ??
+                          domain.freshness?.lastSuccessAt ??
+                          provider.freshness.lastSuccessAt
+                      )}
+                    </span>
                     <div class="quota-meta">
                       <span>
                         {t('resets')}
                         {formatReset(bucket.resetsAt)} · {formatRelativeReset(bucket.resetsAt)}
                       </span>
-                      <span>{t('source')}: {authorityLabel(bucket.authority)}</span>
-                      <span
-                        >{formatReset(
-                          bucket.observedAt ??
-                            domain.freshness?.lastSuccessAt ??
-                            provider.freshness.lastSuccessAt
-                        )}</span
-                      >
-                      {#if bucket.scope}
-                        <span
-                          >{t('scope')}: {bucket.scope === 'account-wide'
-                            ? t('accountWide')
-                            : t('localOnly')}</span
-                        >
-                      {/if}
-                      {#if bucket.status}
-                        <span>{t('plan')}: {bucket.status}</span>
-                      {/if}
-                      {#if bucket.limitAmount !== null && bucket.limitAmount !== undefined}
-                        <span>{t('limit')}: ${bucket.limitAmount} {bucket.limitCurrency ?? ''}</span
-                        >
-                      {/if}
-                      {#if bucket.fallbackStatus}
-                        <span
-                          >{t('fallback')}: {bucket.fallbackStatus === 'unknown'
-                            ? t('unknown')
-                            : bucket.fallbackStatus === 'enabled'
-                              ? t('enabled')
-                              : t('disabled')}</span
-                        >
-                      {/if}
                     </div>
                   </div>
                 {/each}

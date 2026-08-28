@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 
 let home: string;
 let launchUrl: string;
@@ -282,6 +282,7 @@ test('renders Codex quota, total tokens, and the same actionable degraded state'
   await expect(provider.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible();
   await expect(provider.getByText('5 hour', { exact: true })).toBeVisible();
   await expect(provider.getByText('Week', { exact: true })).toBeVisible();
+  await expectQuotaShowsOnlyReset(provider, 2);
   await expect(provider.getByText('1,250', { exact: true })).toBeVisible();
   await expect(provider).toContainText(/Scope:\s*Account-wide/);
   await expect(provider).toContainText(/Precision:\s*Day/);
@@ -384,9 +385,10 @@ test('labels OpenCode Go account quota separately from this-Mac token history', 
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'OpenCode Go' });
-  await expect(provider.getByText('Scope: Account-wide')).toBeVisible();
-  await expect(provider.getByText('Limit: $12 USD')).toBeVisible();
-  await expect(provider.getByText('Use balance: Unknown')).toBeVisible();
+  await expectQuotaShowsOnlyReset(provider, 1);
+  await expect(provider.getByRole('progressbar', { name: '5 hour' })).toHaveAccessibleDescription(
+    /Source: Official account.*Aug 28/
+  );
   await expect(provider).toContainText('Source: Local observation');
   await expect(provider).toContainText(/Scope:\s*This Mac only/);
   await expect(provider).toContainText(/Precision:\s*Day/);
@@ -480,7 +482,10 @@ test('keeps Claude All models and Fable-only quota separate from local OTLP toke
   const provider = page.locator('.provider-card').filter({ hasText: 'Claude Code' });
   await expect(provider.getByText('Week · All models')).toBeVisible();
   await expect(provider.getByText('Week · Fable only')).toBeVisible();
-  await expect(provider.getByText('Source: Official Client')).toHaveCount(3);
+  await expectQuotaShowsOnlyReset(provider, 3);
+  const quotaEvidence = provider.getByText('Source: Official Client');
+  await expect(quotaEvidence).toHaveCount(3);
+  for (const evidence of await quotaEvidence.all()) await expect(evidence).toBeHidden();
   await expect(provider).toContainText('Source: Local observation');
   await expect(provider).toContainText(/Scope:\s*This Mac only/);
   await expect(provider).toContainText(/Precision:\s*Event/);
@@ -609,7 +614,8 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   await expect(page.getByTestId('settings-diagnostic-grok')).toBeFocused();
   await page.getByRole('button', { name: 'Close settings' }).click();
-  await expect(provider.getByText('Plan: SuperGrok Heavy')).toBeVisible();
+  await expectQuotaShowsOnlyReset(provider, 1);
+  await expect(provider.getByText('Plan: SuperGrok Heavy')).toHaveCount(0);
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
   await expect(provider).toContainText('Source: Local observation');
   await expect(provider).toContainText(/Scope:\s*This Mac only/);
@@ -1122,6 +1128,16 @@ test('switches the complete catalog to Simplified Chinese without translating pr
   await page.getByRole('button', { name: 'EN', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 });
+
+async function expectQuotaShowsOnlyReset(provider: Locator, bucketCount: number): Promise<void> {
+  const quotaMetadata = provider.locator('.quota-meta');
+  await expect(quotaMetadata).toHaveCount(bucketCount);
+  await expect(quotaMetadata.locator('span')).toHaveCount(bucketCount);
+  for (const metadata of await quotaMetadata.all()) {
+    await expect(metadata).toContainText('Resets');
+    await expect(metadata).not.toContainText(/Source:|Scope:|Plan:|Limit:|Use balance:/);
+  }
+}
 
 function withTokenDomain<
   T extends {
