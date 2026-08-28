@@ -181,11 +181,17 @@ export interface InvoiceRecord {
   authority: DataAuthority;
 }
 
+export interface UsageReconciliationPolicy {
+  authoritativeIdPrefix: string;
+  retiredIdPrefixes: string[];
+}
+
 export interface ConnectorSnapshot {
   provider: ProviderIdentity;
   billingDomains: BillingDomain[];
   quotaBuckets: QuotaBucket[];
   usage: UsageObservation[];
+  usageReconciliation?: UsageReconciliationPolicy;
   costs: CostRecord[];
   balances?: BalanceRecord[];
   invoices?: InvoiceRecord[];

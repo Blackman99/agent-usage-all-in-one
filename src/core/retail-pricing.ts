@@ -107,7 +107,74 @@ const XAI_PRICING_SOURCE = {
   url: 'https://docs.x.ai/developers/pricing',
   retrievedAt: '2026-08-28'
 };
-const OPEN_CODE_EFFECTIVE = '2026-08-28T00:00:00.000Z';
+const OPEN_CODE_GO_SOURCE_PATH = 'packages/web/src/content/docs/go.mdx';
+const openCodeHistory = (commit: string, effectiveFrom: string) => ({
+  effectiveFrom,
+  sourceUrl: `https://github.com/anomalyco/opencode/blob/${commit}/${OPEN_CODE_GO_SOURCE_PATH}`
+});
+const OPEN_CODE_BASE_HISTORY = openCodeHistory(
+  '51213520f5f69ce2c6c741adcb2785e017488ade',
+  '2026-07-16T23:20:17.000Z'
+);
+const OPEN_CODE_PRICE_HISTORY: Record<string, { effectiveFrom: string; sourceUrl: string }> = {
+  'glm-5.3-flash': openCodeHistory(
+    '830aaf2059e87eab3105dda4c19556206d60c443',
+    '2026-08-26T13:49:06.000Z'
+  ),
+  'glm-5.3': openCodeHistory(
+    'e23586af2623f1bc2e8e6965d2d7acf7bd03d5c3',
+    '2026-08-14T05:48:32.000Z'
+  ),
+  'glm-5.2': OPEN_CODE_BASE_HISTORY,
+  'glm-5.1': OPEN_CODE_BASE_HISTORY,
+  'kimi-k3': OPEN_CODE_BASE_HISTORY,
+  'kimi-k2.7-code': OPEN_CODE_BASE_HISTORY,
+  'kimi-k2.6': OPEN_CODE_BASE_HISTORY,
+  'longcat-2.0': openCodeHistory(
+    '6bb772215b08b4b7d9243c27286950d85b9f678d',
+    '2026-08-24T10:02:51.000Z'
+  ),
+  'mimo-v2.5': OPEN_CODE_BASE_HISTORY,
+  'mimo-v2.5-pro': openCodeHistory(
+    'be08207a88f3ae208b782832dc071863375cf734',
+    '2026-07-17T15:15:48.000Z'
+  ),
+  'minimax-m3': OPEN_CODE_BASE_HISTORY,
+  'minimax-m2.7': OPEN_CODE_BASE_HISTORY,
+  'minimax-m2.5': OPEN_CODE_BASE_HISTORY,
+  'muse-spark-1.2-contributor': openCodeHistory(
+    'e2505d434a6d78904ecfe546c4a1980d26bd8cd1',
+    '2026-08-19T19:03:41.000Z'
+  ),
+  'qwen3.8-max': openCodeHistory(
+    'e9e747245681127c9f3e300aa8c46f2554fdb294',
+    '2026-08-03T06:48:57.000Z'
+  ),
+  'qwen3.7-max': OPEN_CODE_BASE_HISTORY,
+  'qwen3.7-plus': OPEN_CODE_BASE_HISTORY,
+  'qwen3.6-plus': OPEN_CODE_BASE_HISTORY,
+  hy3: openCodeHistory('411eff73f026d4950c07947c4d983788cb615baa', '2026-07-22T16:41:48.000Z'),
+  'grok-4.6': openCodeHistory(
+    'ac1c048e6420eb4c728fd3e343a1ba7b076cba92',
+    '2026-08-25T17:27:48.000Z'
+  ),
+  'gpt-5.6-luna': openCodeHistory(
+    'da59457ca4ff55aca0147d4ddb33c495dc72be31',
+    '2026-07-31T05:23:25.000Z'
+  ),
+  'deepseek-v4-pro': openCodeHistory(
+    'a0f8dccbfe139ffc7137d1eaf6fee6e4195af599',
+    '2026-08-16T16:01:15.000Z'
+  ),
+  'deepseek-v4-flash': openCodeHistory(
+    'a0f8dccbfe139ffc7137d1eaf6fee6e4195af599',
+    '2026-08-16T16:01:15.000Z'
+  ),
+  'deepseek-v4-flash-vision-exp': openCodeHistory(
+    '813e6f3cec1bfb2cec4f50ca6cb19e225e747e95',
+    '2026-08-21T12:57:25.000Z'
+  )
+};
 const OPEN_CODE_FLAT_MODELS: Array<
   [model: string, input: number, output: number, cacheRead: number, cacheWrite?: number]
 > = [
@@ -260,15 +327,19 @@ function openCodeGoEntry(
   cacheWrite: number | null,
   contextRule: RetailPriceContextRule
 ): RetailPriceCatalogEntry {
+  const history = OPEN_CODE_PRICE_HISTORY[model];
+  if (!history) throw new Error(`Missing pinned OpenCode Go price history for ${model}.`);
+  const effectiveFrom = history.effectiveFrom;
+  const versionDate = effectiveFrom.slice(0, 10);
   return {
-    id: `opencode-go-${model}-${tier}-2026-08-28`,
-    priceVersion: 'opencode-go-2026-08-28',
+    id: `opencode-go-${model}-${tier}-${versionDate}`,
+    priceVersion: `opencode-go-${versionDate}`,
     providerId: 'opencode-go',
     billingDomainId: 'go-subscription',
     canonicalModel: model,
     aliases: [`opencode-go/${model}`],
     currency: 'USD',
-    effectiveFrom: OPEN_CODE_EFFECTIVE,
+    effectiveFrom,
     effectiveUntil: null,
     contextTier: tier === 'peak' ? 'weekday-peak-utc' : tier === 'off-peak' ? 'off-peak-utc' : tier,
     contextRule,
@@ -279,7 +350,7 @@ function openCodeGoEntry(
       'cache-read': cacheRead,
       'cache-write': cacheWrite
     },
-    source: OPENCODE_GO_SOURCE
+    source: { ...OPENCODE_GO_SOURCE, url: history.sourceUrl }
   };
 }
 

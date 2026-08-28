@@ -366,6 +366,55 @@ export class SqliteUsageRepository implements UsageRepository {
         );
       }
 
+      const usageReconciliation = snapshot.usageReconciliation;
+      if (usageReconciliation) {
+        const prefixes = [
+          usageReconciliation.authoritativeIdPrefix,
+          ...usageReconciliation.retiredIdPrefixes
+        ];
+        if (prefixes.some((prefix) => prefix.length === 0)) {
+          throw new Error('Usage reconciliation prefixes must not be empty.');
+        }
+        if (new Set(prefixes).size !== prefixes.length) {
+          throw new Error('Usage reconciliation prefixes must be distinct.');
+        }
+
+        const storedUsageIdsStatement = this.#database.prepare(
+          `SELECT id
+           FROM usage_observations
+           WHERE provider_id = ? AND substr(id, 1, length(?)) = ?`
+        );
+        const deleteUsageCostsStatement = this.#database.prepare(
+          `DELETE FROM cost_records WHERE provider_id = ? AND usage_observation_id = ?`
+        );
+        const deleteUsageStatement = this.#database.prepare(
+          `DELETE FROM usage_observations WHERE provider_id = ? AND id = ?`
+        );
+        const deleteStoredUsage = (prefix: string, keepIds: ReadonlySet<string>) => {
+          const stored = storedUsageIdsStatement.all(
+            snapshot.provider.id,
+            prefix,
+            prefix
+          ) as unknown as Array<{ id: string }>;
+          for (const { id } of stored) {
+            if (keepIds.has(id)) continue;
+            deleteUsageCostsStatement.run(snapshot.provider.id, id);
+            deleteUsageStatement.run(snapshot.provider.id, id);
+          }
+        };
+
+        for (const prefix of usageReconciliation.retiredIdPrefixes) {
+          deleteStoredUsage(prefix, new Set());
+        }
+        const authoritativePrefix = usageReconciliation.authoritativeIdPrefix;
+        const incomingAuthoritativeIds = new Set(
+          snapshot.usage
+            .map((observation) => observation.id)
+            .filter((id) => id.startsWith(authoritativePrefix))
+        );
+        deleteStoredUsage(authoritativePrefix, incomingAuthoritativeIds);
+      }
+
       const usageStatement = this.#database.prepare(
         `INSERT INTO usage_observations (
            provider_id, id, billing_domain_id, model, session_id, observed_at,

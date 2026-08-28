@@ -29,12 +29,36 @@ modifiers are outside this tracer and must not be inferred.
 - [OpenCode session cost implementation](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/session.ts)
   keeps reasoning separate from visible output and applies the selected model's
   output rate to reasoning Tokens.
+- [OpenCode message history implementation](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/message-v2.ts)
+  hydrates each stored message from its local database row. Assistant message
+  data retains provider/model attribution, request time, categorized Tokens,
+  and the client-reported cost used by the read-only local import.
+- Every supported OpenCode Go model is tied to a reviewed repository commit,
+  never the date this research was retrieved. The pinned history includes the
+  [base table and Kimi K3](https://github.com/anomalyco/opencode/blob/51213520f5f69ce2c6c741adcb2785e017488ade/packages/web/src/content/docs/go.mdx),
+  [MiMo V2.5 Pro](https://github.com/anomalyco/opencode/blob/be08207a88f3ae208b782832dc071863375cf734/packages/web/src/content/docs/go.mdx),
+  [Hy3](https://github.com/anomalyco/opencode/blob/411eff73f026d4950c07947c4d983788cb615baa/packages/web/src/content/docs/go.mdx),
+  [GPT 5.6 Luna](https://github.com/anomalyco/opencode/blob/da59457ca4ff55aca0147d4ddb33c495dc72be31/packages/web/src/content/docs/go.mdx),
+  [Qwen3.8 Max](https://github.com/anomalyco/opencode/blob/e9e747245681127c9f3e300aa8c46f2554fdb294/packages/web/src/content/docs/go.mdx),
+  [GLM 5.3](https://github.com/anomalyco/opencode/blob/e23586af2623f1bc2e8e6965d2d7acf7bd03d5c3/packages/web/src/content/docs/go.mdx),
+  [DeepSeek V4](https://github.com/anomalyco/opencode/blob/a0f8dccbfe139ffc7137d1eaf6fee6e4195af599/packages/web/src/content/docs/go.mdx),
+  [Muse Spark](https://github.com/anomalyco/opencode/blob/e2505d434a6d78904ecfe546c4a1980d26bd8cd1/packages/web/src/content/docs/go.mdx),
+  [DeepSeek Vision](https://github.com/anomalyco/opencode/blob/813e6f3cec1bfb2cec4f50ca6cb19e225e747e95/packages/web/src/content/docs/go.mdx),
+  [LongCat](https://github.com/anomalyco/opencode/blob/6bb772215b08b4b7d9243c27286950d85b9f678d/packages/web/src/content/docs/go.mdx),
+  [Grok 4.6](https://github.com/anomalyco/opencode/blob/ac1c048e6420eb4c728fd3e343a1ba7b076cba92/packages/web/src/content/docs/go.mdx),
+  and [GLM 5.3 Flash](https://github.com/anomalyco/opencode/blob/830aaf2059e87eab3105dda4c19556206d60c443/packages/web/src/content/docs/go.mdx).
 
 The catalog records all fixed-price models in that reviewed table. Models with
 request-length tiers require event-level evidence. DeepSeek peak/off-peak rates
-require exact event time; current local day aggregates therefore remain
-unpriced. Separate reasoning Tokens use the output rate, matching OpenCode's
-published cost calculation behavior. Missing cache-write rates remain unknown.
+require exact event time. The connector asks the official CLI for the database
+path, opens it read-only, reads only completed assistant-message rows, hashes
+source message identifiers before they leave the adapter, and imports each
+request as an event-level delta. A successful import atomically reconciles
+disappeared requests and removes legacy model/day aggregates; a failed import
+leaves cached history intact. Missing source cost omits the reported estimate,
+while a missing required Token field fails closed. Separate reasoning Tokens use
+the output rate, matching OpenCode's published cost calculation behavior.
+Missing cache-write rates remain unknown.
 
 ## xAI API and Grok Build
 

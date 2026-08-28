@@ -296,6 +296,93 @@ describe('API retail-equivalent pricing', () => {
       priceSnapshot: { contextTier: 'off-peak-utc' }
     });
   });
+
+  it('uses pinned OpenCode price history instead of the catalog retrieval date', () => {
+    const price = (model: string, observedAt: string) =>
+      deriveRetailEquivalentCosts(
+        snapshot(
+          observation({
+            id: `${model}:${observedAt}`,
+            model: `opencode-go/${model}`,
+            billingDomainId: 'go-subscription',
+            observedAt,
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+            reasoningTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            tokenSemantics: {
+              reasoning: 'separate',
+              cacheRead: 'separate',
+              cacheWrite: 'separate'
+            }
+          }),
+          { providerId: 'opencode-go', domainId: 'go-subscription', domainName: 'OpenCode Go' }
+        ),
+        OFFICIAL_PRICING_CATALOG
+      );
+
+    expect(price('kimi-k3', '2026-08-19T00:00:00.000Z').costs[0]).toMatchObject({
+      amount: 3,
+      priceSnapshot: { effectiveAt: '2026-07-16T23:20:17.000Z' }
+    });
+    expect(price('deepseek-v4-flash', '2026-08-17T00:00:00.000Z').costs[0]).toMatchObject({
+      amount: 0.22,
+      priceSnapshot: { effectiveAt: '2026-08-16T16:01:15.000Z' }
+    });
+    expect(
+      price('deepseek-v4-flash-vision-exp', '2026-08-22T00:00:00.000Z').costs[0]
+    ).toMatchObject({
+      amount: 0.22,
+      priceSnapshot: { effectiveAt: '2026-08-21T12:57:25.000Z' }
+    });
+    expect(price('deepseek-v4-flash', '2026-08-16T16:01:14.999Z').decisions[0]).toMatchObject({
+      status: 'unavailable',
+      reason: 'price-not-effective'
+    });
+  });
+
+  it('pins every supported OpenCode Go model to reviewed repository history', () => {
+    const expectedModels = [
+      'deepseek-v4-flash',
+      'deepseek-v4-flash-vision-exp',
+      'deepseek-v4-pro',
+      'glm-5.1',
+      'glm-5.2',
+      'glm-5.3',
+      'glm-5.3-flash',
+      'gpt-5.6-luna',
+      'grok-4.6',
+      'hy3',
+      'kimi-k2.6',
+      'kimi-k2.7-code',
+      'kimi-k3',
+      'longcat-2.0',
+      'mimo-v2.5',
+      'mimo-v2.5-pro',
+      'minimax-m2.5',
+      'minimax-m2.7',
+      'minimax-m3',
+      'muse-spark-1.2-contributor',
+      'qwen3.6-plus',
+      'qwen3.7-max',
+      'qwen3.7-plus',
+      'qwen3.8-max'
+    ];
+    const entries = OFFICIAL_PRICING_CATALOG.entries.filter(
+      (entry) => entry.providerId === 'opencode-go'
+    );
+
+    expect([...new Set(entries.map((entry) => entry.canonicalModel))].sort()).toEqual(
+      expectedModels
+    );
+    for (const entry of entries) {
+      expect(entry.effectiveFrom).not.toBe('2026-08-28T00:00:00.000Z');
+      expect(entry.source.url).toMatch(
+        /^https:\/\/github\.com\/anomalyco\/opencode\/blob\/[0-9a-f]{40}\/packages\/web\/src\/content\/docs\/go\.mdx$/
+      );
+    }
+  });
 });
 
 function observation(overrides: Partial<UsageObservation> = {}): UsageObservation {

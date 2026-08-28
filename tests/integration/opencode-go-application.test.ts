@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { OpenCodeGoConnector } from '../../src/connectors/opencode-go/opencode-go-connector.js';
+import type { RetailPriceCatalog } from '$core/retail-pricing.js';
 import { UsageApplication } from '$core/usage-application.js';
 import { startLocalServer, type LocalServer } from '$server/local-server.js';
 import { SqliteUsageRepository } from '$server/sqlite-usage-repository.js';
@@ -123,7 +124,7 @@ describe('OpenCode Go application path', () => {
             unclassifiedTokens: 0,
             classificationCoverage: 1,
             totalDerivations: ['categorized'],
-            timePrecisions: ['day'],
+            timePrecisions: ['event'],
             usageScopes: ['this-mac']
           },
           tokenAuthority: 'local-observation',
@@ -135,10 +136,26 @@ describe('OpenCode Go application path', () => {
                   kind: 'reported-estimate',
                   amount: 0.42,
                   model: 'opencode-go/deepseek-v4-flash'
+                }),
+                expect.objectContaining({
+                  kind: 'retail-equivalent',
+                  amount: 0.0003534,
+                  pricedTokens: 1200,
+                  priceSnapshot: expect.objectContaining({
+                    version: 'opencode-go-2026-08-16',
+                    contextTier: 'off-peak-utc'
+                  })
                 })
               ],
               history: {
-                costs: [expect.objectContaining({ kind: 'reported-estimate', amount: 0.42 })]
+                costs: [
+                  expect.objectContaining({ kind: 'reported-estimate', amount: 0.42 }),
+                  expect.objectContaining({
+                    kind: 'retail-equivalent',
+                    amount: 0.0003534,
+                    pricingEvidence: expect.objectContaining({ pricingCoverage: 1 })
+                  })
+                ]
               }
             }
           ]
@@ -147,4 +164,240 @@ describe('OpenCode Go application path', () => {
     });
     repository.close();
   });
+
+  it('replaces legacy day aggregates and prices historical request-level usage', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'opencode-go-request-pricing-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveConnectorStatus({
+      id: 'opencode-go',
+      state: 'connected',
+      installed: true,
+      binaryPath: '/usr/local/bin/opencode',
+      officialCredentialPresent: true,
+      errorCode: null,
+      lastDiscoveredAt: '2026-08-28T02:00:00.000Z',
+      secretReference: null
+    });
+    repository.saveSnapshot({
+      provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
+      billingDomains: [{ id: 'go-subscription', displayName: 'OpenCode Go subscription' }],
+      quotaBuckets: [],
+      usage: [
+        {
+          id: 'opencode-session:2026-08-27:opencode-go/deepseek-v4-flash',
+          billingDomainId: 'go-subscription',
+          model: 'opencode-go/deepseek-v4-flash',
+          observedAt: '2026-08-27T00:00:00.000Z',
+          inputTokens: 999,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          modelAttribution: 'known',
+          timePrecision: 'day',
+          usageScope: 'this-mac',
+          aggregationTemporality: 'cumulative',
+          authority: 'local-observation'
+        }
+      ],
+      costs: [
+        {
+          id: 'opencode-session-cost:2026-08-27:opencode-go/deepseek-v4-flash',
+          sourceId: 'opencode-session:2026-08-27:opencode-go/deepseek-v4-flash',
+          billingDomainId: 'go-subscription',
+          observedAt: '2026-08-27T00:00:00.000Z',
+          kind: 'reported-estimate',
+          amount: 9.99,
+          currency: 'USD',
+          authority: 'local-observation',
+          model: 'opencode-go/deepseek-v4-flash',
+          usageObservationId: 'opencode-session:2026-08-27:opencode-go/deepseek-v4-flash'
+        }
+      ],
+      observedAt: '2026-08-28T01:00:00.000Z'
+    });
+    const connector = new OpenCodeGoConnector({
+      accountClient: {
+        async readUsage() {
+          return {
+            usage: {
+              rolling: { status: 'ok', percent: 25, resetsAt: '2026-08-28T05:00:00.000Z' },
+              weekly: { status: 'ok', percent: 40, resetsAt: '2026-09-01T00:00:00.000Z' },
+              monthly: { status: 'ok', percent: 50, resetsAt: '2026-09-28T00:00:00.000Z' }
+            }
+          };
+        }
+      },
+      localHistoryClient: {
+        async readHistory() {
+          return [
+            {
+              id: 'v2:off-peak-request',
+              model: 'opencode-go/deepseek-v4-flash',
+              cost: 0.22,
+              inputTokens: 1_000_000,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              observedAtMs: Date.parse('2026-08-27T00:30:00.000Z')
+            },
+            {
+              id: 'v2:peak-request',
+              model: 'opencode-go/deepseek-v4-flash',
+              cost: 0.22,
+              inputTokens: 1_000_000,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              observedAtMs: Date.parse('2026-08-27T01:30:00.000Z')
+            }
+          ];
+        }
+      },
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+    const application = new UsageApplication({
+      repository,
+      connectors: [connector],
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await application.refresh({ userInitiated: true });
+    await application.refresh({ userInitiated: true });
+
+    const overview = await application.getOverview({ window: '7d' });
+    const provider = overview.providers.find((candidate) => candidate.id === 'opencode-go')!;
+    const domain = provider.billingDomains[0];
+    expect(provider.tokenTotals.total).toBe(2_000_000);
+    expect(provider.tokenEvidence).toMatchObject({
+      observationCount: 2,
+      timePrecisions: ['event'],
+      aggregationTemporalities: ['delta']
+    });
+    expect(domain.costs.filter((cost) => cost.kind === 'reported-estimate')).toHaveLength(2);
+    expect(domain.history.costs.find((cost) => cost.kind === 'retail-equivalent')).toMatchObject({
+      amount: 0.66,
+      pricingEvidence: {
+        pricedTokens: 2_000_000,
+        unpricedTokens: 0,
+        recordedTokens: 2_000_000,
+        pricingCoverage: 1
+      }
+    });
+    expect(overview.globalSummary.apiRetailEquivalent).toEqual({
+      status: 'available',
+      amount: 0.66,
+      currency: 'USD',
+      pricingCoverage: 1
+    });
+    expect(await application.getRetentionStatus()).toMatchObject({ rawObservations: 2 });
+    repository.close();
+  });
+
+  it('preserves an existing immutable price snapshot across authoritative refresh', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'opencode-go-immutable-price-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveConnectorStatus({
+      id: 'opencode-go',
+      state: 'connected',
+      installed: true,
+      binaryPath: '/usr/local/bin/opencode',
+      officialCredentialPresent: true,
+      errorCode: null,
+      lastDiscoveredAt: '2026-08-28T02:00:00.000Z',
+      secretReference: null
+    });
+    const connector = new OpenCodeGoConnector({
+      accountClient: {
+        async readUsage() {
+          return {
+            usage: {
+              rolling: { status: 'ok', percent: 25, resetsAt: '2026-08-28T05:00:00.000Z' },
+              weekly: { status: 'ok', percent: 40, resetsAt: '2026-09-01T00:00:00.000Z' },
+              monthly: { status: 'ok', percent: 50, resetsAt: '2026-09-28T00:00:00.000Z' }
+            }
+          };
+        }
+      },
+      localHistoryClient: {
+        async readHistory() {
+          return [
+            {
+              id: 'v2:immutable-request',
+              model: 'opencode-go/deepseek-v4-flash',
+              cost: 0.22,
+              inputTokens: 1_000_000,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              observedAtMs: Date.parse('2026-08-27T00:30:00.000Z')
+            }
+          ];
+        }
+      },
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    await new UsageApplication({
+      repository,
+      connectors: [connector],
+      priceCatalog: fixedOpenCodeCatalog(0.22),
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).refresh({ userInitiated: true });
+    const restarted = new UsageApplication({
+      repository,
+      connectors: [connector],
+      priceCatalog: fixedOpenCodeCatalog(9),
+      clock: () => new Date('2026-08-28T03:00:00.000Z')
+    });
+    await restarted.refresh({ userInitiated: true });
+
+    const retailCosts = (await restarted.getOverview({ window: '7d' })).providers
+      .find((provider) => provider.id === 'opencode-go')!
+      .billingDomains[0].costs.filter((cost) => cost.kind === 'retail-equivalent');
+    expect(retailCosts).toHaveLength(1);
+    expect(retailCosts[0]).toMatchObject({
+      amount: 0.22,
+      priceSnapshot: { id: 'immutable-price-entry', ratesPerMillion: { input: 0.22 } }
+    });
+    repository.close();
+  });
 });
+
+function fixedOpenCodeCatalog(inputRate: number): RetailPriceCatalog {
+  return {
+    version: 'immutable-price-catalog',
+    entries: [
+      {
+        id: 'immutable-price-entry',
+        priceVersion: 'immutable-price-v1',
+        providerId: 'opencode-go',
+        billingDomainId: 'go-subscription',
+        canonicalModel: 'deepseek-v4-flash',
+        aliases: ['opencode-go/deepseek-v4-flash'],
+        currency: 'USD',
+        effectiveFrom: '2026-08-01T00:00:00.000Z',
+        effectiveUntil: null,
+        contextTier: 'fixed-test',
+        contextRule: { kind: 'fixed' },
+        ratesPerMillion: {
+          input: inputRate,
+          output: null,
+          reasoning: null,
+          'cache-read': null,
+          'cache-write': null
+        },
+        source: {
+          title: 'Immutable price fixture',
+          url: 'https://example.com/immutable-price',
+          retrievedAt: '2026-08-28'
+        }
+      }
+    ]
+  };
+}

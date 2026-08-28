@@ -44,6 +44,17 @@ Day and billing-period aggregates therefore remain unpriced when they span a
 possible tier boundary. Claude cache writes remain unavailable until the
 observation proves the 5-minute or 1-hour lifetime.
 
+OpenCode Go asks the official CLI for its local database path, then reads
+categorized, completed assistant-message usage through a read-only SQLite
+connection. The adapter discards source message identifiers after deriving a
+stable hash, marks each request as event-level delta evidence, and keeps the
+client-reported estimate separate from the calculated retail equivalent. Missing
+cost omits that estimate; a missing required Token category fails closed instead
+of becoming zero. A successful authoritative read reconciles disappeared rows
+and removes the earlier model/day import in one transaction. Existing request
+rows retain their immutable retail price snapshots, while a failed read never
+erases cached history.
+
 On startup, retained raw observations pass through the same derivation path.
 Derived inserts use immutable stable identities and ignore a conflict with an
 already recorded retail snapshot. A reviewed price change must use a new catalog
