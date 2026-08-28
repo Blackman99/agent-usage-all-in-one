@@ -1,21 +1,13 @@
 import type { ConnectorSnapshot, CostRecord, UsageObservation } from '../../core/types.js';
-
-interface OtlpAttribute {
-  key?: unknown;
-  value?: { stringValue?: unknown };
-}
-
-interface OtlpPoint {
-  timeUnixNano?: unknown;
-  asInt?: unknown;
-  asDouble?: unknown;
-  attributes?: unknown;
-}
-
-interface OtlpMetric {
-  name?: unknown;
-  sum?: { dataPoints?: unknown; aggregationTemporality?: unknown };
-}
+import {
+  extractOtlpMetrics,
+  extractOtlpResources,
+  isDeltaTemporality,
+  numericOtlpPointValue,
+  otlpNanoToIso,
+  otlpStringAttributes,
+  type OtlpPoint
+} from '../otlp.js';
 
 interface UsageAggregate {
   timestamp: string;
@@ -39,7 +31,7 @@ export class ClaudeTelemetryError extends Error {
 }
 
 export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): ConnectorSnapshot {
-  const metrics = extractMetrics(payload);
+  const metrics = extractOtlpResources(payload).flatMap(extractOtlpMetrics);
   const usage = new Map<string, UsageAggregate>();
   const costs: CostRecord[] = [];
 
@@ -49,16 +41,16 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
       : [];
     if (
       ['claude_code.token.usage', 'claude_code.cost.usage'].includes(String(metric.name)) &&
-      !isDelta(metric.sum?.aggregationTemporality)
+      !isDeltaTemporality(metric.sum?.aggregationTemporality)
     ) {
       throw new ClaudeTelemetryError();
     }
     for (const point of points) {
-      const attributes = attributeMap(point.attributes);
+      const attributes = otlpStringAttributes(point.attributes);
       const model = attributes.get('model') ?? null;
       const nano = typeof point.timeUnixNano === 'string' ? point.timeUnixNano : null;
-      const timestamp = nano ? nanoToIso(nano) : receivedAt.toISOString();
-      const value = numericPointValue(point);
+      const timestamp = nano ? otlpNanoToIso(nano) : receivedAt.toISOString();
+      const value = numericOtlpPointValue(point);
       if (value === null || value < 0) continue;
 
       if (metric.name === 'claude_code.token.usage') {
@@ -143,52 +135,4 @@ export function parseClaudeOtlpMetrics(payload: unknown, receivedAt: Date): Conn
     costs,
     observedAt: receivedAt.toISOString()
   };
-}
-
-function isDelta(value: unknown): boolean {
-  return value === 1 || value === 'AGGREGATION_TEMPORALITY_DELTA';
-}
-
-function extractMetrics(payload: unknown): OtlpMetric[] {
-  if (!payload || typeof payload !== 'object' || !('resourceMetrics' in payload)) return [];
-  const resources: unknown[] = Array.isArray(payload.resourceMetrics)
-    ? payload.resourceMetrics
-    : [];
-  return resources.flatMap((resource) => {
-    if (!resource || typeof resource !== 'object' || !('scopeMetrics' in resource)) return [];
-    const scopes: unknown[] = Array.isArray(resource.scopeMetrics) ? resource.scopeMetrics : [];
-    return scopes.flatMap((scope) => {
-      if (!scope || typeof scope !== 'object' || !('metrics' in scope)) return [];
-      return Array.isArray(scope.metrics) ? (scope.metrics as OtlpMetric[]) : [];
-    });
-  });
-}
-
-function attributeMap(value: unknown): Map<string, string> {
-  const result = new Map<string, string>();
-  if (!Array.isArray(value)) return result;
-  for (const attribute of value as OtlpAttribute[]) {
-    if (
-      typeof attribute.key === 'string' &&
-      typeof attribute.value?.stringValue === 'string' &&
-      ['type', 'model'].includes(attribute.key)
-    ) {
-      result.set(attribute.key, attribute.value.stringValue);
-    }
-  }
-  return result;
-}
-
-function numericPointValue(point: OtlpPoint): number | null {
-  const value = point.asDouble ?? point.asInt;
-  const number = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
-  return Number.isFinite(number) ? number : null;
-}
-
-function nanoToIso(value: string): string {
-  try {
-    return new Date(Number(BigInt(value) / 1_000_000n)).toISOString();
-  } catch {
-    throw new Error('Invalid OTLP nanosecond timestamp');
-  }
 }

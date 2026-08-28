@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 建立用量优先的 Provider 卡与官方品牌.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Connections、Monitoring、完整 Diagnostics、Privacy、导出、retention 和 clear-data 控件进入一个设置抽屉。
 - [x] 抽屉支持页头入口、关闭操作、焦点返回和直接聚焦指定 Connector 或 diagnostic 的深链接状态。

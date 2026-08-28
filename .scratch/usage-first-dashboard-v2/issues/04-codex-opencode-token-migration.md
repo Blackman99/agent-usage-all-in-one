@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — 扩展 Token 语义与时间精度契约.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Codex 只有账户总量时保留 recorded Token，并将模型与分类 coverage 标为未分类而不是伪造输入/输出。
 - [x] Codex 日桶使用 day precision，24 小时视图不会把午夜时间戳描述为精确事件时刻。

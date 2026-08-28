@@ -4,7 +4,7 @@
 
 **Blocked by:** 07 — 提供可信的 7 天全局摘要; 09 — 补全 Provider 定价映射与历史回算; 10 — 严格分离四类费用语义.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] 工作台将 recorded Token、actual、reported estimate 与 retail equivalent 分成清晰指标，不生成混合“总花费”。
 - [x] Fixed subscription cost 位于 billing detail，不进入三项 Token 金额或趋势总计。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 13 — 完成系统深浅色与响应式视觉.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Simplified Chinese 与 English catalog 覆盖全部新摘要、费用、coverage、time precision、图表、排行、连接和设置文案，key 集合完全一致。
 - [x] Provider 官方名称与 billing-domain 原生标签按领域规则保留，不被错误翻译或合并。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — 贯通 API 等价零售价 tracer.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Cost contract 显式表达 actual、subscription、reported-estimate 与 retail-equivalent 四种互斥 purpose。
 - [x] 旧 generic estimate 通过 expand-contract 迁移到可证明的 reported-estimate 或 retail-equivalent；无法证明的记录保留未知证据而不猜测。

@@ -36,7 +36,11 @@ Current result:
   and temporary application Home.
 - Playwright: 14 Dashboard scenarios passed.
 - Lighthouse desktop navigation audit: Accessibility 100 and Best Practices 100.
-- Independent Standards/Spec review: pending final fixed-point review from `41710fd`.
+- Independent Standards/Spec review: the first fixed-point pass from `41710fd`
+  identified migration evidence, model/unclassified conservation, alias pricing,
+  export auditability, recovery actions, preference persistence, and numeric-evidence
+  gaps. Those hard findings are fixed and regression-tested; the final pass remains
+  pending until the complete gate below is rerun.
 
 Security coverage injects recognizable fake secrets through connectors, sessions,
 source ids, Keychain references, HTTP, CLI, browser, diagnostics, and export paths.
@@ -51,6 +55,11 @@ Token/retail trends, Top 5 ranking, model detail, unclassified usage, independen
 Grok billing-domain tabs, redacted export, scoped clear, degraded-state isolation,
 complete Chinese/English catalogs, keyboard focus, reduced motion, and local-only
 official artwork.
+
+Connection recovery now refreshes usage and diagnostics for connect, retry, and skip;
+an already connected product-managed credential can be replaced in place. Currency and
+time-window preferences both survive reload. Provider cards keep the recorded total and
+its evidence visible while detailed Token categories remain collapsed until requested.
 
 Responsive evidence uses one column at 390px, two columns at 1280px and 1440px,
 and four columns at 1680px. A live-data review found 1440px too narrow for four
@@ -74,6 +83,9 @@ regression before this receipt was completed.
 - `token-money-workbench` and `model-ranking` prove total/ranking conservation,
   separate classification/pricing coverage, isolated Provider/domain identity,
   and `unavailable` rather than false zero for unpriced data.
+- V2 JSON/CSV export includes observation ids, models, observed time, precision,
+  authority, per-observation Token totals, and complete immutable price-snapshot
+  evidence without exporting sessions or secrets.
 
 The runtime catalog is bundled and deterministic; it never scrapes vendor pricing
 at runtime. Reviewed official sources and excluded pricing cases are recorded in
@@ -122,3 +134,7 @@ also proves that rendering these marks makes no third-party network request.
 - Provider cost remains unknown when an official source does not expose it; unknown
   is never converted to zero.
 - Recommendations are read-only and never switch agents.
+- The P0 route remains a single Svelte composition root. Moving the Provider cards,
+  workbench, and drawers into separate visual components is tracked as post-P0
+  maintainability work; shared telemetry parsing and all domain/data seams are already
+  outside the page, so this does not change runtime behavior or release evidence.

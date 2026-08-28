@@ -4,7 +4,7 @@
 
 **Blocked by:** 11 — 构建 Token 与金额工作台.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Top 5 默认按 recorded Token 降序，支持切换到 retail-equivalent 排序并保持确定性的同值顺序。
 - [x] 每行同时显示官方 Provider Logo、Provider/billing-domain 标签、模型、Token、可得金额和占比。

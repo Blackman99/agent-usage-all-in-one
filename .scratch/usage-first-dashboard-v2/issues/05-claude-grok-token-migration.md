@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — 扩展 Token 语义与时间精度契约.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Claude Code observation 保留模型、input、output、cache-read、cache-write、authority 和实际可得的时间精度。
 - [x] Claude reported cost 保留来源估算语义，并能在后续 cost migration 中关联对应模型或 observation。

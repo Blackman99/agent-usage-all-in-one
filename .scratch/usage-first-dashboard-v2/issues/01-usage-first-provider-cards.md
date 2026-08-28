@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Dashboard 的主要 DOM 与视觉顺序是页头、Provider 用量卡、其余现有内容，用量不再排在管理区块之后。
 - [x] Provider 卡通过显式 connection target 映射关联 Connector 与可选 billing domain，不依赖 Connector id 与 Provider id 相同。

@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — 贯通 API 等价零售价 tracer.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] 目录覆盖当前受支持且可从 observation 可靠识别的模型，价格只来自官方 Provider 资料并记录来源证据。
 - [x] 模型别名按 Provider 与 billing domain 解析，同名模型不会跨 Provider 自动合并。

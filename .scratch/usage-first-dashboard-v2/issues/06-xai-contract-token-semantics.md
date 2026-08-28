@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — 迁移 Codex 与 OpenCode Go Token 数据; 05 — 迁移 Claude Code 与 Grok Build Token 数据.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] xAI API Token 保留官方账户 authority、模型和 billing-period/invoice time precision，不再冒充请求发生时间。
 - [x] 当前未开票或无精确事件的数据明确标记 coverage 缺口，不推导不存在的实时 Token。

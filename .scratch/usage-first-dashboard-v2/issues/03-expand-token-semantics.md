@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Domain Context 增加 recorded Token、source-reported total、unclassified usage、Token semantics 与 time precision 的统一定义和不变量。
 - [x] 新 ADR 记录 Token 单次计数、reasoning/cache 语义、时间精度以及 expand-contract 迁移选择。

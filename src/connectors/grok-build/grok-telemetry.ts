@@ -4,24 +4,18 @@ import type {
   CostRecord,
   UsageObservation
 } from '../../core/types.js';
+import {
+  extractOtlpMetrics,
+  extractOtlpResources,
+  isDeltaTemporality,
+  isRecord,
+  numericOtlpPointValue,
+  otlpNanoToIso,
+  otlpStringAttributes,
+  readRecord,
+  type OtlpPoint
+} from '../otlp.js';
 import { grokBuildBillingDomain } from './grok-build-connector.js';
-
-interface OtlpAttribute {
-  key?: unknown;
-  value?: { stringValue?: unknown };
-}
-
-interface OtlpPoint {
-  timeUnixNano?: unknown;
-  asInt?: unknown;
-  asDouble?: unknown;
-  attributes?: unknown;
-}
-
-interface OtlpMetric {
-  name?: unknown;
-  sum?: { dataPoints?: unknown; aggregationTemporality?: unknown };
-}
 
 interface UsageAggregate {
   timestamp: string;
@@ -47,11 +41,13 @@ export class GrokTelemetryError extends Error {
 }
 
 export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): ConnectorSnapshot {
-  const resources = extractResources(payload);
+  const resources = extractOtlpResources(payload);
   const versions = new Set(
     resources
       .map((resource) =>
-        attributeMap(readProperty(resource, 'resource')?.attributes).get('grok_code.schema.version')
+        otlpStringAttributes(readRecord(resource, 'resource')?.attributes).get(
+          'grok_code.schema.version'
+        )
       )
       .filter((version): version is string => Boolean(version))
   );
@@ -65,9 +61,9 @@ export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): Connec
 
   const usage = new Map<string, UsageAggregate>();
   for (const resource of resources) {
-    for (const metric of extractMetrics(resource)) {
+    for (const metric of extractOtlpMetrics(resource)) {
       if (metric.name !== 'grok_code.token.usage') continue;
-      if (!isDelta(metric.sum?.aggregationTemporality)) {
+      if (!isDeltaTemporality(metric.sum?.aggregationTemporality)) {
         throw new GrokTelemetryError(
           'grok-otel-temporality-unsupported',
           'Cumulative Grok Build metrics cannot be safely added to local history.',
@@ -78,17 +74,17 @@ export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): Connec
         ? (metric.sum.dataPoints as OtlpPoint[])
         : [];
       for (const point of points) {
-        const attributes = attributeMap(point.attributes);
+        const attributes = otlpStringAttributes(point.attributes);
         const type = attributes.get('type');
         if (!['input', 'output', 'reasoning', 'cache_read'].includes(type ?? '')) continue;
-        const value = numericPointValue(point);
+        const value = numericOtlpPointValue(point);
         if (value === null || value < 0) continue;
         const nano = typeof point.timeUnixNano === 'string' ? point.timeUnixNano : null;
         const model = attributes.get('model') ?? null;
         const sessionId = attributes.get('session.id') ?? null;
         const key = `${nano ?? receivedAt.getTime()}:${sessionId ?? 'unknown-session'}:${model ?? 'unknown-model'}`;
         const aggregate = usage.get(key) ?? {
-          timestamp: nano ? nanoToIso(nano) : receivedAt.toISOString(),
+          timestamp: nano ? otlpNanoToIso(nano) : receivedAt.toISOString(),
           timePrecision: nano ? 'event' : 'unknown',
           model,
           sessionId,
@@ -213,45 +209,6 @@ function snapshot(
   };
 }
 
-function extractResources(payload: unknown): Record<string, unknown>[] {
-  if (!isRecord(payload) || !Array.isArray(payload.resourceMetrics)) return [];
-  return payload.resourceMetrics.filter(isRecord);
-}
-
-function extractMetrics(resource: Record<string, unknown>): OtlpMetric[] {
-  if (!Array.isArray(resource.scopeMetrics)) return [];
-  return resource.scopeMetrics
-    .filter(isRecord)
-    .flatMap((scope) => (Array.isArray(scope.metrics) ? (scope.metrics as OtlpMetric[]) : []));
-}
-
-function readProperty(value: Record<string, unknown>, key: string): Record<string, unknown> | null {
-  return isRecord(value[key]) ? value[key] : null;
-}
-
-function attributeMap(value: unknown): Map<string, string> {
-  const result = new Map<string, string>();
-  if (!Array.isArray(value)) return result;
-  for (const attribute of value as OtlpAttribute[]) {
-    if (typeof attribute.key === 'string' && typeof attribute.value?.stringValue === 'string') {
-      if (['grok_code.schema.version', 'type', 'model', 'session.id'].includes(attribute.key)) {
-        result.set(attribute.key, attribute.value.stringValue);
-      }
-    }
-  }
-  return result;
-}
-
-function isDelta(value: unknown): boolean {
-  return value === 1 || value === 'AGGREGATION_TEMPORALITY_DELTA';
-}
-
-function numericPointValue(point: OtlpPoint): number | null {
-  const value = point.asDouble ?? point.asInt;
-  const number = typeof value === 'number' || typeof value === 'string' ? Number(value) : NaN;
-  return Number.isFinite(number) ? number : null;
-}
-
 function nonNegativeNumber(value: unknown): number {
   const parsed = typeof value === 'number' || typeof value === 'string' ? Number(value) : 0;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
@@ -264,16 +221,4 @@ function optionalNonNegativeNumber(value: unknown): number | null {
 
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function nanoToIso(value: string): string {
-  try {
-    return new Date(Number(BigInt(value) / 1_000_000n)).toISOString();
-  } catch {
-    throw new Error('Invalid OTLP nanosecond timestamp');
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

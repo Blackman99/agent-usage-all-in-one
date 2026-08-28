@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 建立用量优先的 Provider 卡与官方品牌; 06 — 迁移 xAI API 并收缩旧 Token 契约.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] 首次打开默认查询 7 天；24 小时、7 天和 30 天切换后，本地记住最后选择且不进入 export。
 - [x] 紧凑摘要显示 selected-window recorded Token、API retail equivalent/不可估算状态、most constrained quota 和最新数据时间。

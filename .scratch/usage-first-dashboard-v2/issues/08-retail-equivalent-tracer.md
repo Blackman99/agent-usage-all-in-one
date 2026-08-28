@@ -4,7 +4,7 @@
 
 **Blocked by:** 07 — 提供可信的 7 天全局摘要.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] Domain Context 与新 ADR 定义 API retail equivalent、reported estimate、price snapshot、pricing coverage 和历史派生不变量。
 - [x] 版本化官方价格目录至少包含一个已支持 Provider 的代表模型、模型别名、币种、生效区间、上下文档位和 Token-kind 单价。

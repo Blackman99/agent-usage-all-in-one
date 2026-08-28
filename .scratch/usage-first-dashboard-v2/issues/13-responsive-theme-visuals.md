@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 下沉管理功能到设置抽屉; 12 — 提供模型排行与详情抽屉.
 
-**Status:** implemented
+**Status:** complete
 
 - [x] 页面跟随系统 light/dark appearance，使用中性表面和高可读对比度，不依赖固定 dark-only 配色。
 - [x] Provider 卡使用具有实际最小宽度的响应式网格：常规桌面两列、空间充足时最多四列、窄屏单列且无水平滚动。
