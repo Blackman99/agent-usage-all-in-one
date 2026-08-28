@@ -110,6 +110,7 @@ interface TokenRow {
 interface BillingDomainRow {
   id: string;
   display_name: string;
+  last_success_at: string | null;
 }
 
 interface CostRow {
@@ -289,15 +290,18 @@ export class SqliteUsageRepository implements UsageRepository {
         );
 
       const billingDomainStatement = this.#database.prepare(
-        `INSERT INTO billing_domains (provider_id, id, display_name)
-         VALUES (?, ?, ?)
-         ON CONFLICT(provider_id, id) DO UPDATE SET display_name = excluded.display_name`
+        `INSERT INTO billing_domains (provider_id, id, display_name, last_success_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(provider_id, id) DO UPDATE SET
+           display_name = excluded.display_name,
+           last_success_at = excluded.last_success_at`
       );
       for (const billingDomain of snapshot.billingDomains) {
         billingDomainStatement.run(
           snapshot.provider.id,
           billingDomain.id,
-          billingDomain.displayName
+          billingDomain.displayName,
+          snapshot.observedAt
         );
       }
 
@@ -1047,111 +1051,69 @@ export class SqliteUsageRepository implements UsageRepository {
 
   #getProviderOverview(provider: ProviderRow, now: Date, query: UsageQuery): ProviderOverview {
     const forecastAnalysis = this.#getQuotaForecasts(provider.id, now);
-    const degradedDiagnostic = this.#database
+    const degradedDiagnostics = this.#database
       .prepare(
         `SELECT id, provider_id, billing_domain_id, status, category, message, recovery,
                 affected_coverage, last_attempt_at, last_success_at
          FROM connector_diagnostics
          WHERE provider_id = ? AND status = 'degraded'
-         ORDER BY id LIMIT 1`
+         ORDER BY id`
       )
-      .get(provider.id) as unknown as ConnectorDiagnosticRow | undefined;
+      .all(provider.id) as unknown as ConnectorDiagnosticRow[];
     const domainRows = this.#database
-      .prepare(`SELECT id, display_name FROM billing_domains WHERE provider_id = ? ORDER BY id`)
+      .prepare(
+        `SELECT id, display_name, last_success_at
+         FROM billing_domains WHERE provider_id = ? ORDER BY id`
+      )
       .all(provider.id) as unknown as BillingDomainRow[];
     const summaryBillingDomainId = selectSummaryBillingDomainId(provider.id, domainRows);
-    const quotaRows = this.#database
-      .prepare(
-        `SELECT id, billing_domain_id, label, used_percent, resets_at, authority, observed_at,
-                scope, status, limit_amount, limit_currency, fallback_status
-         FROM quota_buckets WHERE provider_id = ? ORDER BY id`
+    const billingDomains = domainRows.map((domain) =>
+      this.#getBillingDomainOverview(
+        provider.id,
+        domain,
+        now,
+        query,
+        forecastAnalysis.forecasts.filter((forecast) => forecast.billingDomainId === domain.id),
+        forecastAnalysis.coverageByDomain.get(domain.id) ?? 'insufficient',
+        degradedDiagnostics.find((diagnostic) => diagnostic.billing_domain_id === domain.id),
+        domainRows.length === 1 ? provider : null
       )
-      .all(provider.id) as unknown as QuotaRow[];
-    const tokens = this.#database
-      .prepare(
-        `SELECT
-           COALESCE(SUM(total_tokens), 0) AS total_tokens,
-           COALESCE(SUM(input_tokens), 0) AS input_tokens,
-           COALESCE(SUM(output_tokens), 0) AS output_tokens,
-           COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-           COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
-           COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
-           COUNT(*) AS observation_count,
-           COALESCE(SUM(source_reported_total_tokens), 0) AS source_reported_tokens,
-           SUM(CASE WHEN source_reported_total_tokens IS NOT NULL THEN 1 ELSE 0 END)
-             AS source_reported_observation_count,
-           COALESCE(SUM(unclassified_tokens), 0) AS unclassified_tokens,
-           GROUP_CONCAT(DISTINCT total_derivation) AS total_derivations,
-           GROUP_CONCAT(DISTINCT time_precision) AS time_precisions,
-           GROUP_CONCAT(DISTINCT usage_scope) AS usage_scopes,
-           GROUP_CONCAT(DISTINCT aggregation_temporality) AS aggregation_temporalities,
-           GROUP_CONCAT(DISTINCT authority) AS authorities
-         FROM usage_observations
-         WHERE provider_id = ? AND (? IS NULL OR billing_domain_id = ?)
-           AND ${additiveUsagePredicate()}`
-      )
-      .get(provider.id, summaryBillingDomainId, summaryBillingDomainId) as unknown as TokenRow;
-    const actualCostCount = this.#database
-      .prepare(
-        "SELECT COUNT(*) AS count FROM cost_records WHERE provider_id = ? AND kind = 'actual'"
-      )
-      .get(provider.id) as unknown as {
-      count: number;
+    );
+    const summaryDomain = billingDomains.find((domain) => domain.id === summaryBillingDomainId);
+    const emptyTotals = zeroTokenTotals();
+    const emptyEvidence = finishTokenEvidence(emptyTokenEvidence());
+    const emptyCoverage: ProviderOverview['coverage'] = {
+      quota: 'unavailable',
+      tokens: 'unavailable',
+      actualCost: 'unavailable',
+      history: 'unavailable'
     };
-    const nonAdditiveTokenCount = this.#database
-      .prepare(
-        `SELECT COUNT(*) AS count FROM usage_observations
-         WHERE provider_id = ? AND (? IS NULL OR billing_domain_id = ?)
-           AND NOT (${additiveUsagePredicate()})`
-      )
-      .get(provider.id, summaryBillingDomainId, summaryBillingDomainId) as unknown as {
-      count: number;
-    };
-
-    const quotaBuckets = quotaRows.map(mapQuotaRow);
+    const providerFallbackHealth: ProviderOverview['health'] = provider.last_error
+      ? {
+          status: 'degraded',
+          errorCode: provider.last_error_code,
+          message: provider.last_error,
+          recovery: provider.last_recovery
+        }
+      : { status: 'healthy', errorCode: null, message: null, recovery: null };
 
     return {
       id: provider.id,
       displayName: provider.display_name,
       summaryBillingDomainId,
-      freshness: {
+      freshness: summaryDomain?.freshness ?? {
         status: freshnessStatus(provider.last_success_at, now),
         lastSuccessAt: provider.last_success_at
       },
-      health: {
-        status: degradedDiagnostic || provider.last_error ? 'degraded' : 'healthy',
-        errorCode: provider.last_error_code ?? degradedDiagnostic?.category ?? null,
-        message: provider.last_error ?? degradedDiagnostic?.message ?? null,
-        recovery: provider.last_recovery ?? degradedDiagnostic?.recovery ?? null
-      },
-      coverage: {
-        quota: coverageFromCount(quotaRows.length),
-        tokens: tokenCoverage(tokens, Number(nonAdditiveTokenCount.count)),
-        actualCost: coverageFromCount(actualCostCount.count),
-        history: tokenCoverage(tokens, Number(nonAdditiveTokenCount.count))
-      },
-      quotaBuckets,
-      tokenTotals: {
-        total: Number(tokens.total_tokens ?? 0),
-        input: Number(tokens.input_tokens ?? 0),
-        output: Number(tokens.output_tokens ?? 0),
-        reasoning: Number(tokens.reasoning_tokens ?? 0),
-        cacheRead: Number(tokens.cache_read_tokens ?? 0),
-        cacheWrite: Number(tokens.cache_write_tokens ?? 0)
-      },
-      tokenEvidence: mapTokenEvidence(tokens),
-      tokenAuthority: tokenAuthority(tokens.authorities),
-      billingDomains: domainRows.map((domain) =>
-        this.#getBillingDomainOverview(
-          provider.id,
-          domain,
-          now,
-          query,
-          forecastAnalysis.forecasts.filter((forecast) => forecast.billingDomainId === domain.id)
-        )
-      ),
-      forecasts: forecastAnalysis.forecasts,
-      forecastCoverage: forecastAnalysis.coverage
+      health: summaryDomain?.health ?? providerFallbackHealth,
+      coverage: summaryDomain?.coverage ?? emptyCoverage,
+      quotaBuckets: summaryDomain?.quotaBuckets ?? [],
+      tokenTotals: summaryDomain?.tokenTotals ?? emptyTotals,
+      tokenEvidence: summaryDomain?.tokenEvidence ?? emptyEvidence,
+      tokenAuthority: summaryDomain?.tokenAuthority ?? null,
+      billingDomains,
+      forecasts: summaryDomain?.forecasts ?? [],
+      forecastCoverage: summaryDomain?.forecastCoverage ?? 'insufficient'
     };
   }
 
@@ -1160,7 +1122,10 @@ export class SqliteUsageRepository implements UsageRepository {
     domain: BillingDomainRow,
     now: Date,
     query: UsageQuery,
-    forecasts: QuotaForecast[]
+    forecasts: QuotaForecast[],
+    forecastCoverage: ProviderOverview['forecastCoverage'],
+    degradedDiagnostic?: ConnectorDiagnosticRow,
+    legacyProviderFailure: ProviderRow | null = null
   ): BillingDomainOverview {
     const quotaRows = this.#database
       .prepare(
@@ -1215,9 +1180,34 @@ export class SqliteUsageRepository implements UsageRepository {
          FROM invoice_records WHERE provider_id = ? AND billing_domain_id = ? ORDER BY created_at DESC, id`
       )
       .all(providerId, domain.id) as unknown as InvoiceRow[];
+    const actualCostCount = costs.filter((cost) => cost.kind === 'actual').length;
+    const nonAdditiveTokenCount = this.#database
+      .prepare(
+        `SELECT COUNT(*) AS count FROM usage_observations
+         WHERE provider_id = ? AND billing_domain_id = ?
+           AND NOT (${additiveUsagePredicate()})`
+      )
+      .get(providerId, domain.id) as unknown as { count: number };
+    const degraded = degradedDiagnostic || legacyProviderFailure?.last_error;
     return {
       id: domain.id,
       displayName: domain.display_name,
+      freshness: {
+        status: freshnessStatus(domain.last_success_at, now),
+        lastSuccessAt: domain.last_success_at
+      },
+      health: {
+        status: degraded ? 'degraded' : 'healthy',
+        errorCode: degradedDiagnostic?.category ?? legacyProviderFailure?.last_error_code ?? null,
+        message: degradedDiagnostic?.message ?? legacyProviderFailure?.last_error ?? null,
+        recovery: degradedDiagnostic?.recovery ?? legacyProviderFailure?.last_recovery ?? null
+      },
+      coverage: {
+        quota: coverageFromCount(quotaRows.length),
+        tokens: tokenCoverage(tokens, Number(nonAdditiveTokenCount.count)),
+        actualCost: coverageFromCount(actualCostCount),
+        history: tokenCoverage(tokens, Number(nonAdditiveTokenCount.count))
+      },
       quotaBuckets: quotaRows.map(mapQuotaRow),
       tokenTotals: mapTokenTotals(tokens),
       tokenEvidence: mapTokenEvidence(tokens),
@@ -1259,7 +1249,8 @@ export class SqliteUsageRepository implements UsageRepository {
         authority: row.authority
       })),
       history: this.#getBillingHistory(providerId, domain.id, now, query),
-      forecasts
+      forecasts,
+      forecastCoverage
     };
   }
 
@@ -1268,7 +1259,7 @@ export class SqliteUsageRepository implements UsageRepository {
     now: Date
   ): {
     forecasts: QuotaForecast[];
-    coverage: ProviderOverview['forecastCoverage'];
+    coverageByDomain: Map<string, ProviderOverview['forecastCoverage']>;
   } {
     const rows = this.#database
       .prepare(
@@ -1289,12 +1280,13 @@ export class SqliteUsageRepository implements UsageRepository {
       grouped.set(row.bucket_id, group);
     }
     const forecasts: QuotaForecast[] = [];
-    let sawDiscontinuous = false;
-    let sawStale = false;
+    const discontinuousDomains = new Set<string>();
+    const staleDomains = new Set<string>();
+    const observedDomains = new Set(rows.map((row) => row.billing_domain_id));
     for (const samples of grouped.values()) {
       const latest = samples.at(-1)!;
       if (now.getTime() - new Date(latest.observed_at).getTime() > FRESHNESS_WINDOW_MS) {
-        sawStale = true;
+        staleDomains.add(latest.billing_domain_id);
         continue;
       }
       let segmentStart = 0;
@@ -1310,7 +1302,7 @@ export class SqliteUsageRepository implements UsageRepository {
             new Date(sample.observed_at).getTime() - new Date(segment[index].observed_at).getTime()
         );
       if (gaps.some((gap) => gap > 2 * 60 * 60 * 1000)) {
-        sawDiscontinuous = true;
+        discontinuousDomains.add(latest.billing_domain_id);
         continue;
       }
       const first = segment[0];
@@ -1342,16 +1334,22 @@ export class SqliteUsageRepository implements UsageRepository {
         }
       });
     }
-    return {
-      forecasts: forecasts.sort((left, right) => left.bucketId.localeCompare(right.bucketId)),
-      coverage:
-        forecasts.length > 0
+    const coverageByDomain = new Map<string, ProviderOverview['forecastCoverage']>();
+    for (const domainId of observedDomains) {
+      coverageByDomain.set(
+        domainId,
+        forecasts.some((forecast) => forecast.billingDomainId === domainId)
           ? 'complete'
-          : sawDiscontinuous
+          : discontinuousDomains.has(domainId)
             ? 'discontinuous'
-            : sawStale
+            : staleDomains.has(domainId)
               ? 'stale'
               : 'insufficient'
+      );
+    }
+    return {
+      forecasts: forecasts.sort((left, right) => left.bucketId.localeCompare(right.bucketId)),
+      coverageByDomain
     };
   }
 
@@ -1613,6 +1611,7 @@ export class SqliteUsageRepository implements UsageRepository {
         provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
         id TEXT NOT NULL,
         display_name TEXT NOT NULL,
+        last_success_at TEXT,
         PRIMARY KEY (provider_id, id)
       );
       CREATE TABLE IF NOT EXISTS quota_buckets (
@@ -1871,6 +1870,12 @@ export class SqliteUsageRepository implements UsageRepository {
     }
     if (!providerColumns.some((column) => column.name === 'last_recovery')) {
       this.#database.exec('ALTER TABLE providers ADD COLUMN last_recovery TEXT');
+    }
+    const billingDomainColumns = this.#database
+      .prepare('PRAGMA table_info(billing_domains)')
+      .all() as unknown as Array<{ name: string }>;
+    if (!billingDomainColumns.some((column) => column.name === 'last_success_at')) {
+      this.#database.exec('ALTER TABLE billing_domains ADD COLUMN last_success_at TEXT');
     }
     const costColumns = this.#database
       .prepare('PRAGMA table_info(cost_records)')
@@ -2150,45 +2155,43 @@ function buildGlobalSummary(
   let retailPricedTokens = 0;
   let sawRetailEquivalent = false;
 
-  for (const provider of providers) {
-    for (const domain of provider.billingDomains) {
-      for (const cost of domain.history.costs) {
-        if (
-          cost.kind !== 'retail-equivalent' ||
-          cost.currency.toUpperCase() !== 'USD' ||
-          cost.amount === null
-        ) {
-          continue;
-        }
-        sawRetailEquivalent = true;
-        retailAmount += cost.amount;
-        retailPricedTokens += cost.pricingEvidence?.pricedTokens ?? 0;
+  for (const { provider, domain } of summaryDomainHistories(providers)) {
+    for (const cost of domain.history.costs) {
+      if (
+        cost.kind !== 'retail-equivalent' ||
+        cost.currency.toUpperCase() !== 'USD' ||
+        cost.amount === null
+      ) {
+        continue;
       }
-      for (const observedAt of [
-        domain.history.lastObservedAt,
-        ...domain.quotaBuckets.map((bucket) => bucket.observedAt ?? null),
-        ...domain.costs.map((cost) => cost.observedAt),
-        ...domain.balances.map((balance) => balance.observedAt),
-        ...domain.invoices.map((invoice) => invoice.createdAt)
-      ]) {
-        if (observedAt && (!latestObservedAt || observedAt > latestObservedAt)) {
-          latestObservedAt = observedAt;
-        }
-      }
-      const domainEvidence = domain.history.tokenEvidence;
-      if (domainEvidence.observationCount === 0) continue;
-      addAggregatedTokenEvidence(evidence, domainEvidence);
-      contributions.push({
-        providerId: provider.id,
-        providerDisplayName: provider.displayName,
-        billingDomainId: domain.id,
-        billingDomainDisplayName: domain.displayName,
-        recordedTokens: domain.history.tokenTotals.total,
-        tokenEvidence: domainEvidence,
-        authorities: domain.history.authorities ?? [],
-        lastObservedAt: domain.history.lastObservedAt ?? null
-      });
+      sawRetailEquivalent = true;
+      retailAmount += cost.amount;
+      retailPricedTokens += cost.pricingEvidence?.pricedTokens ?? 0;
     }
+    for (const observedAt of [
+      domain.history.lastObservedAt,
+      ...domain.quotaBuckets.map((bucket) => bucket.observedAt ?? null),
+      ...domain.costs.map((cost) => cost.observedAt),
+      ...domain.balances.map((balance) => balance.observedAt),
+      ...domain.invoices.map((invoice) => invoice.createdAt)
+    ]) {
+      if (observedAt && (!latestObservedAt || observedAt > latestObservedAt)) {
+        latestObservedAt = observedAt;
+      }
+    }
+    const domainEvidence = domain.history.tokenEvidence;
+    if (domainEvidence.observationCount === 0) continue;
+    addAggregatedTokenEvidence(evidence, domainEvidence);
+    contributions.push({
+      providerId: provider.id,
+      providerDisplayName: provider.displayName,
+      billingDomainId: domain.id,
+      billingDomainDisplayName: domain.displayName,
+      recordedTokens: domain.history.tokenTotals.total,
+      tokenEvidence: domainEvidence,
+      authorities: domain.history.authorities ?? [],
+      lastObservedAt: domain.history.lastObservedAt ?? null
+    });
   }
 
   const tokenEvidence = finishTokenEvidence(evidence);
@@ -2218,9 +2221,7 @@ function buildTokenMoneyWorkbench(
   query: UsageQuery
 ): UsageOverview['workbench'] {
   const normalized = normalizeUsageQuery(now, query);
-  const histories = providers.flatMap((provider) =>
-    provider.billingDomains.map((domain) => ({ provider, domain, history: domain.history }))
-  );
+  const histories = summaryDomainHistories(providers);
   const costs = histories.flatMap(({ history }) => history.costs);
   const rates = uniqueExchangeRates(histories.flatMap(({ history }) => history.exchangeRates));
   const recordedTokens = histories.reduce(
@@ -2302,6 +2303,19 @@ function buildTokenMoneyWorkbench(
       retailEquivalent
     )
   };
+}
+
+function summaryDomainHistories(providers: ProviderOverview[]): Array<{
+  provider: ProviderOverview;
+  domain: BillingDomainOverview;
+  history: BillingHistory;
+}> {
+  return providers.flatMap((provider) => {
+    const domain = provider.billingDomains.find(
+      (candidate) => candidate.id === provider.summaryBillingDomainId
+    );
+    return domain ? [{ provider, domain, history: domain.history }] : [];
+  });
 }
 
 function buildWorkbenchMetric(
@@ -2954,23 +2968,25 @@ function summarizeHistoryCosts(
 
 function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSummary'] {
   const risks = providers.flatMap((provider) =>
-    provider.quotaBuckets.flatMap((bucket) => {
-      if (bucket.usedPercent === null) return [];
-      return [
-        {
-          providerId: provider.id,
-          displayName: provider.displayName,
-          billingDomainId: bucket.billingDomainId,
-          bucketId: bucket.id,
-          label: bucket.label,
-          remainingPercent: Math.max(0, 100 - bucket.usedPercent),
-          resetsAt: bucket.resetsAt,
-          forecast: provider.forecasts.find((forecast) => forecast.bucketId === bucket.id) ?? null,
-          authority: bucket.authority,
-          observedAt: bucket.observedAt ?? provider.freshness.lastSuccessAt
-        }
-      ];
-    })
+    provider.billingDomains.flatMap((domain) =>
+      domain.quotaBuckets.flatMap((bucket) => {
+        if (bucket.usedPercent === null) return [];
+        return [
+          {
+            providerId: provider.id,
+            displayName: provider.displayName,
+            billingDomainId: domain.id,
+            bucketId: bucket.id,
+            label: bucket.label,
+            remainingPercent: Math.max(0, 100 - bucket.usedPercent),
+            resetsAt: bucket.resetsAt,
+            forecast: domain.forecasts.find((forecast) => forecast.bucketId === bucket.id) ?? null,
+            authority: bucket.authority,
+            observedAt: bucket.observedAt ?? domain.freshness.lastSuccessAt
+          }
+        ];
+      })
+    )
   );
   risks.sort(
     (left, right) =>
@@ -2979,37 +2995,43 @@ function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSum
       left.bucketId.localeCompare(right.bucketId)
   );
   const candidates = providers
-    .filter(
-      (provider) =>
-        provider.freshness.status === 'fresh' &&
-        provider.health.status === 'healthy' &&
-        provider.quotaBuckets.some((bucket) => bucket.usedPercent !== null)
+    .flatMap((provider) =>
+      provider.billingDomains.flatMap((domain) => {
+        if (domain.freshness.status !== 'fresh' || domain.health.status !== 'healthy') return [];
+        const buckets = domain.quotaBuckets.filter(
+          (bucket): bucket is QuotaBucket & { usedPercent: number } => bucket.usedPercent !== null
+        );
+        if (buckets.length === 0) return [];
+        const limitingBucket = [...buckets].sort(
+          (left, right) => right.usedPercent - left.usedPercent || left.id.localeCompare(right.id)
+        )[0];
+        const remaining = Math.min(...buckets.map((bucket) => 100 - bucket.usedPercent));
+        const predictsFailure = domain.forecasts.some((forecast) => !forecast.willLastUntilReset);
+        const predictsSuccess =
+          domain.forecasts.length > 0 &&
+          domain.forecasts.every((forecast) => forecast.willLastUntilReset);
+        const coveragePenalty = domain.forecastCoverage === 'discontinuous' ? 40 : 0;
+        return [
+          {
+            provider,
+            domain,
+            limitingBucket,
+            remaining,
+            score:
+              remaining +
+              (predictsSuccess ? 20 : 0) -
+              (predictsFailure ? 100 : 0) -
+              coveragePenalty,
+            predictsSuccess
+          }
+        ];
+      })
     )
-    .map((provider) => {
-      const buckets = provider.quotaBuckets.filter(
-        (bucket): bucket is QuotaBucket & { usedPercent: number } => bucket.usedPercent !== null
-      );
-      const limitingBucket = [...buckets].sort(
-        (left, right) => right.usedPercent - left.usedPercent || left.id.localeCompare(right.id)
-      )[0];
-      const remaining = Math.min(...buckets.map((bucket) => 100 - bucket.usedPercent));
-      const predictsFailure = provider.forecasts.some((forecast) => !forecast.willLastUntilReset);
-      const predictsSuccess =
-        provider.forecasts.length > 0 &&
-        provider.forecasts.every((forecast) => forecast.willLastUntilReset);
-      const coveragePenalty = provider.forecastCoverage === 'discontinuous' ? 40 : 0;
-      return {
-        provider,
-        billingDomainId: limitingBucket.billingDomainId,
-        limitingBucket,
-        remaining,
-        score:
-          remaining + (predictsSuccess ? 20 : 0) - (predictsFailure ? 100 : 0) - coveragePenalty,
-        predictsSuccess
-      };
-    })
     .sort(
-      (left, right) => right.score - left.score || left.provider.id.localeCompare(right.provider.id)
+      (left, right) =>
+        right.score - left.score ||
+        left.provider.id.localeCompare(right.provider.id) ||
+        left.domain.id.localeCompare(right.domain.id)
     );
   const selected = candidates[0];
   return {
@@ -3018,7 +3040,7 @@ function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSum
       ? {
           providerId: selected.provider.id,
           displayName: selected.provider.displayName,
-          billingDomainId: selected.billingDomainId,
+          billingDomainId: selected.domain.id,
           score: round(selected.score),
           readOnly: true,
           reasonKeys: [
@@ -3027,11 +3049,11 @@ function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSum
           ],
           evidence: {
             remainingPercent: round(selected.remaining),
-            freshness: selected.provider.freshness.status,
-            forecastCoverage: selected.provider.forecastCoverage,
+            freshness: selected.domain.freshness.status,
+            forecastCoverage: selected.domain.forecastCoverage,
             authority: selected.limitingBucket.authority,
             observedAt:
-              selected.limitingBucket.observedAt ?? selected.provider.freshness.lastSuccessAt
+              selected.limitingBucket.observedAt ?? selected.domain.freshness.lastSuccessAt
           }
         }
       : null

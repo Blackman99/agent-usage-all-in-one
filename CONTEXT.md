@@ -158,3 +158,7 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 29. Model details retain observation-level Token evidence and immutable price
     snapshots so displayed totals, line items, authority, precision, time, and
     trend can be audited without joining model names across sources.
+30. A Provider with independent billing domains declares one
+    `summaryBillingDomainId`. Provider headlines, the global summary, and the
+    workbench aggregate only that domain; sibling-domain evidence remains
+    visible in its own Provider tab and is never added into the headline total.

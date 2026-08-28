@@ -230,6 +230,9 @@ export interface TokenEvidence {
 }
 
 export interface BillingDomainOverview extends BillingDomain {
+  freshness: ProviderOverview['freshness'];
+  health: ProviderOverview['health'];
+  coverage: ProviderOverview['coverage'];
   quotaBuckets: QuotaBucket[];
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
@@ -239,6 +242,7 @@ export interface BillingDomainOverview extends BillingDomain {
   invoices: InvoiceRecord[];
   history: BillingHistory;
   forecasts: QuotaForecast[];
+  forecastCoverage: ProviderOverview['forecastCoverage'];
 }
 
 export interface HistoryModel {

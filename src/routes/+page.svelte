@@ -538,12 +538,12 @@
     return t(keys[kind]);
   }
 
-  function providerHealthMessage(provider: ProviderOverview): string | null {
-    return locale === 'en' ? provider.health.message : t('providerDegraded');
+  function providerHealthMessage(target: { health: ProviderOverview['health'] }): string | null {
+    return locale === 'en' ? target.health.message : t('providerDegraded');
   }
 
-  function providerHealthRecovery(provider: ProviderOverview): string | null {
-    return locale === 'en' ? provider.health.recovery : t('providerRecovery');
+  function providerHealthRecovery(target: { health: ProviderOverview['health'] }): string | null {
+    return locale === 'en' ? target.health.recovery : t('providerRecovery');
   }
 
   function activeBillingDomain(
@@ -556,6 +556,9 @@
       domains[0] ?? {
         id: 'combined',
         displayName: provider.displayName,
+        freshness: provider.freshness,
+        health: provider.health,
+        coverage: provider.coverage,
         quotaBuckets: provider.quotaBuckets,
         tokenTotals: provider.tokenTotals,
         tokenEvidence: provider.tokenEvidence,
@@ -569,7 +572,8 @@
           provider.tokenAuthority,
           provider.tokenEvidence
         ),
-        forecasts: []
+        forecasts: [],
+        forecastCoverage: provider.forecastCoverage
       }
     );
   }
@@ -762,6 +766,14 @@
     return {
       id,
       displayName,
+      freshness: { status: 'unavailable', lastSuccessAt: null },
+      health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+      coverage: {
+        quota: 'unavailable',
+        tokens: 'unavailable',
+        actualCost: 'unavailable',
+        history: 'unavailable'
+      },
       quotaBuckets: [],
       tokenTotals,
       tokenEvidence: emptyTokenEvidence(),
@@ -770,7 +782,8 @@
       balances: [],
       invoices: [],
       history: fallbackHistory(tokenTotals, [], null),
-      forecasts: []
+      forecasts: [],
+      forecastCoverage: 'insufficient'
     };
   }
 
@@ -840,18 +853,14 @@
         target: `diagnostic:${degradedConnector.id}`
       };
     }
-    const staleProvider = currentOverview.providers.find(
-      (provider) => provider.freshness.status === 'stale'
-    );
-    if (staleProvider) {
+    const staleDomain = currentOverview.providers
+      .flatMap((provider) => provider.billingDomains.map((domain) => ({ provider, domain })))
+      .find(({ provider, domain }) => (domain.freshness ?? provider.freshness).status === 'stale');
+    if (staleDomain) {
       return {
-        title: `${staleProvider.displayName} · ${translate(currentLocale, 'stale')}`,
+        title: `${staleDomain.provider.displayName} · ${staleDomain.domain.displayName} · ${translate(currentLocale, 'stale')}`,
         detail: translate(currentLocale, 'reviewInSettings'),
-        target: diagnosticTargetForProvider(
-          report,
-          staleProvider.id,
-          activeBillingDomain(staleProvider, selectedBillingDomains[staleProvider.id]).id
-        )
+        target: diagnosticTargetForProvider(report, staleDomain.provider.id, staleDomain.domain.id)
       };
     }
     const constrained = currentOverview.riskSummary?.mostConstrained;
@@ -977,7 +986,9 @@
     lastObservedAt: string | null;
   } {
     const histories = currentOverview.providers.flatMap((provider) =>
-      provider.billingDomains.map((domain) => domain.history)
+      provider.billingDomains
+        .filter((domain) => domain.id === provider.summaryBillingDomainId)
+        .map((domain) => domain.history)
     );
     const authorities = [
       ...new Set(histories.flatMap((history) => history.authorities ?? []))
@@ -1213,6 +1224,9 @@
             provider.id,
             selectedDomain.id
           )}
+          {@const domainFreshness = selectedDomain.freshness ?? provider.freshness}
+          {@const domainHealth = selectedDomain.health ?? provider.health}
+          {@const domainCoverage = selectedDomain.coverage ?? provider.coverage}
           <article class="provider-card">
             <div class="provider-heading">
               <div>
@@ -1227,33 +1241,33 @@
                   <h2 data-provider-logo={logo ? undefined : provider.id}>
                     {provider.displayName}
                   </h2>
-                  <p class="freshness" data-status={provider.freshness.status}>
+                  <p class="freshness" data-status={domainFreshness.status}>
                     <span></span>
-                    {provider.freshness.status === 'fresh'
+                    {domainFreshness.status === 'fresh'
                       ? t('updatedNow')
-                      : provider.freshness.status === 'stale'
+                      : domainFreshness.status === 'stale'
                         ? t('stale')
                         : t('unavailable')}
-                    {provider.freshness.lastSuccessAt
-                      ? ` · ${formatReset(provider.freshness.lastSuccessAt)}`
+                    {domainFreshness.lastSuccessAt
+                      ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
                       : ''}
                   </p>
                 </div>
               </div>
-              <div class="coverage">{coverageLevelLabel(provider.coverage.quota)}</div>
+              <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
             </div>
 
-            {#if provider.health.status === 'degraded'}
+            {#if domainHealth.status === 'degraded'}
               <div class="degraded" role="status">
                 <strong>
                   {recoveryDiagnostic
                     ? `${recoveryDiagnostic.id} · ${diagnosticCategoryLabel(recoveryDiagnostic)}`
-                    : providerHealthMessage(provider)}
+                    : providerHealthMessage({ health: domainHealth })}
                 </strong>
                 <code>
                   {recoveryDiagnostic
                     ? diagnosticRecovery(recoveryDiagnostic)
-                    : providerHealthRecovery(provider)}
+                    : providerHealthRecovery({ health: domainHealth })}
                 </code>
                 <button
                   on:click={() =>
@@ -1407,7 +1421,11 @@
                       </span>
                       <span>{t('source')}: {authorityLabel(bucket.authority)}</span>
                       <span
-                        >{formatReset(bucket.observedAt ?? provider.freshness.lastSuccessAt)}</span
+                        >{formatReset(
+                          bucket.observedAt ??
+                            domain.freshness?.lastSuccessAt ??
+                            provider.freshness.lastSuccessAt
+                        )}</span
                       >
                       {#if bucket.scope}
                         <span

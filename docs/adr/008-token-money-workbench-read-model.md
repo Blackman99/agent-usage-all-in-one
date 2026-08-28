@@ -25,6 +25,11 @@ window, time zone, and comparison currency. It contains:
 - per-Provider, per-billing-domain trend segments with explicit gaps and source
   time precision.
 
+Each Provider contributes only its declared `summaryBillingDomainId` to the
+workbench and global headline. This keeps Grok Build/SuperGrok as the Grok
+headline when both Grok domains exist, while xAI API usage remains available in
+its own billing-domain tab. The two domains are never added together.
+
 Subscription costs do not enter workbench metrics or trends. They remain in the
 owning billing-domain detail. A comparison metric is available only when every
 record contributing to it has a known amount and a valid conversion. Partial or

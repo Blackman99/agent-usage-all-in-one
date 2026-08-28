@@ -535,12 +535,13 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
           {
             id: 'grok',
             displayName: 'Grok',
+            summaryBillingDomainId: 'grok-build-subscription',
             freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
             health: {
-              status: 'degraded',
-              errorCode: 'grok-billing-capability-unsupported',
-              message: 'Live Grok billing is temporarily unavailable.',
-              recovery: 'Open Grok Build and run /usage, then retry refresh.'
+              status: 'healthy',
+              errorCode: null,
+              message: null,
+              recovery: null
             },
             coverage: {
               quota: 'complete',
@@ -597,14 +598,10 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeHidden();
   await provider.getByText('Token breakdown', { exact: true }).click();
   await expect(provider.getByText('Reasoning').locator('..').getByText('12')).toBeVisible();
-  await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
-  await expect(
-    provider.getByText('Open Grok Build and run /usage, then retry refresh.')
-  ).toHaveCount(0);
-  await provider.getByRole('button', { name: 'Review in settings' }).click();
-  await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
-  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
+  await expect(provider.getByRole('button', { name: 'Review in settings' })).toHaveCount(0);
   await provider.getByRole('tab', { name: 'xAI API' }).click();
+  await expect(provider.getByText('Replace the xAI API key.')).toBeVisible();
   await provider.getByRole('button', { name: 'Review in settings' }).click();
   await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeFocused();
   await page.getByRole('button', { name: 'Close settings' }).click();
@@ -1643,6 +1640,14 @@ const grokBillingDomains = [
   {
     id: 'grok-build-subscription',
     displayName: 'Build / SuperGrok',
+    freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T01:56:00.000Z' },
+    health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+    coverage: {
+      quota: 'complete',
+      tokens: 'partial',
+      actualCost: 'unavailable',
+      history: 'partial'
+    },
     quotaBuckets: [
       {
         id: 'grok-build:weekly',
@@ -1676,6 +1681,8 @@ const grokBillingDomains = [
     costs: [],
     balances: [],
     invoices: [],
+    forecasts: [],
+    forecastCoverage: 'insufficient',
     history: tokenHistoryFixture(
       {
         total: 525,
@@ -1702,6 +1709,19 @@ const grokBillingDomains = [
   {
     id: 'xai-api',
     displayName: 'xAI API',
+    freshness: { status: 'stale', lastSuccessAt: '2026-08-28T00:00:00.000Z' },
+    health: {
+      status: 'degraded',
+      errorCode: 'unauthorized',
+      message: 'xAI API key rejected.',
+      recovery: 'Replace the xAI API key.'
+    },
+    coverage: {
+      quota: 'unavailable',
+      tokens: 'complete',
+      actualCost: 'complete',
+      history: 'complete'
+    },
     quotaBuckets: [],
     tokenTotals: {
       total: 1742,
@@ -1744,6 +1764,8 @@ const grokBillingDomains = [
       }
     ],
     invoices: [],
+    forecasts: [],
+    forecastCoverage: 'insufficient',
     history: tokenHistoryFixture(
       {
         total: 1742,

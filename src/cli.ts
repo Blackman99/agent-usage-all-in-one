@@ -339,7 +339,7 @@ function formatOverview(overview: UsageOverview): string {
     return `${summary}No providers have reported usage yet.\n`;
   }
   const recommendation = overview.riskSummary.recommendation
-    ? `Recommendation: ${overview.riskSummary.recommendation.displayName} — ${overview.riskSummary.recommendation.reasonKeys
+    ? `Recommendation: ${overview.riskSummary.recommendation.displayName} · ${overview.riskSummary.recommendation.billingDomainId} — ${overview.riskSummary.recommendation.reasonKeys
         .map((reason) =>
           reason === 'forecast-lasts-until-reset'
             ? 'forecast lasts through reset'
@@ -380,7 +380,9 @@ function formatOverview(overview: UsageOverview): string {
             .join(', ');
           return `${domain.displayName}: ${domain.history.window} ${domain.history.tokenTotals.total} tokens (${formatEvidence(
             domain.history.authorities?.join('+') ?? domain.tokenAuthority ?? 'unavailable',
-            domain.history.lastObservedAt ?? provider.freshness.lastSuccessAt
+            domain.history.lastObservedAt ??
+              domain.freshness?.lastSuccessAt ??
+              provider.freshness.lastSuccessAt
           )}; ${formatTokenEvidence(domain.history.tokenEvidence)})${costs ? `; ${costs}` : ''}`;
         })
         .join(' | ');
@@ -394,15 +396,17 @@ function formatGlobalSummary(overview: UsageOverview): string {
   const tokenAuthorities = [
     ...new Set(
       overview.providers.flatMap((provider) =>
-        provider.billingDomains.flatMap((domain) => domain.history.authorities ?? [])
+        provider.billingDomains
+          .filter((domain) => domain.id === provider.summaryBillingDomainId)
+          .flatMap((domain) => domain.history.authorities ?? [])
       )
     )
   ].sort();
   const tokenObservedAt = overview.providers
     .flatMap((provider) =>
-      provider.billingDomains.flatMap((domain) =>
-        domain.history.lastObservedAt ? [domain.history.lastObservedAt] : []
-      )
+      provider.billingDomains
+        .filter((domain) => domain.id === provider.summaryBillingDomainId)
+        .flatMap((domain) => (domain.history.lastObservedAt ? [domain.history.lastObservedAt] : []))
     )
     .sort((left, right) => right.localeCompare(left))[0];
   const tokenEvidence = formatEvidence(

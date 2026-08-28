@@ -29,12 +29,12 @@ describe('token and money workbench', () => {
     expect(cny).toMatchObject({
       window: '24h',
       comparisonCurrency: 'CNY',
-      recordedTokens: 300,
+      recordedTokens: 200,
       costs: {
         actual: {
           purpose: 'actual',
           status: 'available',
-          amount: 3.96,
+          amount: 1.8,
           comparisonCurrency: 'CNY',
           amountCoverage: 1,
           authorities: ['official-account']
@@ -49,19 +49,19 @@ describe('token and money workbench', () => {
         retailEquivalent: {
           purpose: 'retail-equivalent',
           status: 'available',
-          amount: 0.00216,
+          amount: 0.00072,
           comparisonCurrency: 'CNY',
-          pricingCoverage: 2 / 3,
+          pricingCoverage: 0.5,
           authorities: ['estimate']
         }
       },
       trend: { granularity: 'hour' }
     });
     expect(cny.costs.actual.nativeAmounts).toEqual([
-      { currency: 'USD', amount: 0.55, knownRecords: 2, records: 2 }
+      { currency: 'USD', amount: 0.25, knownRecords: 1, records: 1 }
     ]);
     expect(cny.costs.retailEquivalent.nativeAmounts).toEqual([
-      { currency: 'USD', amount: 0.0003, knownRecords: 2, records: 2 }
+      { currency: 'USD', amount: 0.0001, knownRecords: 1, records: 1 }
     ]);
     expect(cny.trend.buckets).toHaveLength(24);
     expect(cny.trend.buckets.some((bucket) => bucket.gap)).toBe(true);
@@ -75,7 +75,7 @@ describe('token and money workbench', () => {
         .flatMap((bucket) => bucket.segments)
         .filter((segment) => segment.providerId === 'grok')
         .map((segment) => segment.billingDomainId)
-    ).toEqual(expect.arrayContaining(['grok-build-subscription', 'xai-api']));
+    ).toEqual(['grok-build-subscription']);
     expect(
       cny.trend.buckets
         .flatMap((bucket) => bucket.segments)
@@ -87,9 +87,12 @@ describe('token and money workbench', () => {
       timeZone: 'UTC',
       comparisonCurrency: 'USD'
     }).workbench;
-    expect(usd.costs.actual).toMatchObject({ status: 'available', amount: 0.55 });
+    expect(usd.costs.actual).toMatchObject({ status: 'available', amount: 0.25 });
     expect(usd.costs.reportedEstimate).toMatchObject({ status: 'available', amount: 0.0004 });
-    expect(usd.costs.retailEquivalent).toMatchObject({ status: 'available', amount: 0.0003 });
+    expect(usd.costs.retailEquivalent).toMatchObject({ status: 'available', amount: 0.0001 });
+    expect(usd.modelRanking.entries.some((entry) => entry.billingDomainId === 'xai-api')).toBe(
+      false
+    );
 
     repository.close();
   });

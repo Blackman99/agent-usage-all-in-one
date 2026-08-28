@@ -155,17 +155,27 @@ describe('UsageApplication', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-domains-'));
     workspaces.push(workspace);
     const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
-    const observedAt = '2026-08-28T02:00:00.000Z';
+    const buildObservedAt = '2026-08-28T01:00:00.000Z';
+    const xaiObservedAt = '2026-08-28T02:00:00.000Z';
     repository.saveSnapshot({
       provider: { id: 'grok', displayName: 'Grok' },
       billingDomains: [{ id: 'grok-build-subscription', displayName: 'Build / SuperGrok' }],
-      quotaBuckets: [],
+      quotaBuckets: [
+        {
+          id: 'grok-build:weekly',
+          billingDomainId: 'grok-build-subscription',
+          label: 'Weekly limit',
+          usedPercent: 40,
+          resetsAt: '2026-09-01T00:00:00.000Z',
+          authority: 'official-client'
+        }
+      ],
       usage: [
         {
           id: 'build-session',
           billingDomainId: 'grok-build-subscription',
           model: 'grok-code-fast-1',
-          observedAt,
+          observedAt: buildObservedAt,
           inputTokens: 100,
           outputTokens: 25,
           cacheReadTokens: 400,
@@ -174,7 +184,7 @@ describe('UsageApplication', () => {
         }
       ],
       costs: [],
-      observedAt
+      observedAt: buildObservedAt
     });
     repository.saveSnapshot({
       provider: { id: 'grok', displayName: 'Grok' },
@@ -185,7 +195,7 @@ describe('UsageApplication', () => {
           id: 'invoice-1-prompt',
           billingDomainId: 'xai-api',
           model: 'invoice',
-          observedAt,
+          observedAt: xaiObservedAt,
           inputTokens: 1_742,
           outputTokens: 0,
           cacheReadTokens: 0,
@@ -198,7 +208,7 @@ describe('UsageApplication', () => {
           id: 'usage-day-1',
           sourceId: 'analytics:2026-08-28',
           billingDomainId: 'xai-api',
-          observedAt,
+          observedAt: xaiObservedAt,
           kind: 'actual',
           amount: 2.5,
           currency: 'USD',
@@ -210,7 +220,7 @@ describe('UsageApplication', () => {
           id: 'prepaid-current',
           sourceId: 'prepaid',
           billingDomainId: 'xai-api',
-          observedAt,
+          observedAt: xaiObservedAt,
           kind: 'prepaid',
           amount: 45,
           currency: 'USD',
@@ -221,7 +231,7 @@ describe('UsageApplication', () => {
         {
           id: 'invoice-1',
           billingDomainId: 'xai-api',
-          createdAt: observedAt,
+          createdAt: xaiObservedAt,
           number: 'INV-1',
           status: 'paid',
           amount: 25,
@@ -229,13 +239,28 @@ describe('UsageApplication', () => {
           authority: 'official-account'
         }
       ],
-      observedAt
+      observedAt: xaiObservedAt
+    });
+    repository.saveConnectorDiagnostic({
+      id: 'xai-api',
+      providerId: 'grok',
+      billingDomainId: 'xai-api',
+      status: 'degraded',
+      category: 'unauthorized',
+      message: 'xAI API key rejected.',
+      recovery: 'Replace the xAI API key.',
+      affectedCoverage: ['tokens', 'actual-cost'],
+      lastAttemptAt: xaiObservedAt,
+      lastSuccessAt: null
     });
 
-    const overview = repository.getOverview(new Date(observedAt));
+    const overview = repository.getOverview(new Date(xaiObservedAt));
     expect(overview.providers[0].billingDomains).toMatchObject([
       {
         id: 'grok-build-subscription',
+        freshness: { status: 'stale', lastSuccessAt: buildObservedAt },
+        health: { status: 'healthy' },
+        coverage: { quota: 'complete', actualCost: 'unavailable' },
         tokenTotals: { total: 525 },
         costs: [],
         balances: [],
@@ -243,6 +268,9 @@ describe('UsageApplication', () => {
       },
       {
         id: 'xai-api',
+        freshness: { status: 'fresh', lastSuccessAt: xaiObservedAt },
+        health: { status: 'degraded', errorCode: 'unauthorized' },
+        coverage: { quota: 'unavailable', actualCost: 'complete' },
         tokenTotals: { total: 1_742 },
         costs: [{ amount: 2.5, sourceId: 'analytics:2026-08-28' }],
         balances: [{ amount: 45, sourceId: 'prepaid' }],
@@ -251,6 +279,9 @@ describe('UsageApplication', () => {
     ]);
     expect(overview.providers[0]).toMatchObject({
       summaryBillingDomainId: 'grok-build-subscription',
+      freshness: { status: 'stale', lastSuccessAt: buildObservedAt },
+      health: { status: 'healthy' },
+      coverage: { quota: 'complete', actualCost: 'unavailable' },
       tokenTotals: { total: 525 }
     });
     repository.close();

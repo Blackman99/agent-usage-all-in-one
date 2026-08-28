@@ -155,15 +155,39 @@ describe('quota forecast and recommendation', () => {
       costs: [],
       observedAt: '2026-08-28T02:05:00.000Z'
     });
+    repository.saveConnectorDiagnostic({
+      id: 'xai-api',
+      providerId: 'grok',
+      billingDomainId: 'xai-api',
+      status: 'degraded',
+      category: 'unauthorized',
+      message: 'xAI API key rejected.',
+      recovery: 'Replace the xAI API key.',
+      affectedCoverage: ['quota'],
+      lastAttemptAt: '2026-08-28T02:05:00.000Z',
+      lastSuccessAt: null
+    });
 
     const overview = repository.getOverview(new Date('2026-08-28T02:05:00.000Z'));
     const grok = overview.providers[0];
     expect(grok.forecasts).toHaveLength(1);
     expect(grok.forecasts[0].billingDomainId).toBe('grok-build-subscription');
-    expect(grok.billingDomains.find((domain) => domain.id === 'xai-api')?.forecasts).toEqual([]);
+    expect(grok).toMatchObject({
+      summaryBillingDomainId: 'grok-build-subscription',
+      health: { status: 'healthy' }
+    });
+    expect(grok.billingDomains.find((domain) => domain.id === 'xai-api')).toMatchObject({
+      health: { status: 'degraded', errorCode: 'unauthorized' },
+      forecasts: [],
+      forecastCoverage: 'insufficient'
+    });
     expect(overview.riskSummary.mostConstrained).toMatchObject({
       billingDomainId: 'grok-build-subscription',
       observedAt: '2026-08-28T02:00:00.000Z'
+    });
+    expect(overview.riskSummary.recommendation).toMatchObject({
+      providerId: 'grok',
+      billingDomainId: 'grok-build-subscription'
     });
     repository.close();
   });
@@ -195,6 +219,48 @@ describe('quota forecast and recommendation', () => {
       evidence: { windowStart: '2026-08-28T01:00:00.000Z', samples: 3 }
     });
     expect(overview.riskSummary.recommendation?.providerId).toBe('alpha-tie');
+    repository.close();
+  });
+
+  it('scores Grok billing domains independently when xAI API is more constrained', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-domain-recommendation-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const observedAt = '2026-08-28T02:00:00.000Z';
+    repository.saveSnapshot({
+      provider: { id: 'grok', displayName: 'Grok' },
+      billingDomains: [
+        { id: 'grok-build-subscription', displayName: 'Build / SuperGrok' },
+        { id: 'xai-api', displayName: 'xAI API' }
+      ],
+      quotaBuckets: [
+        {
+          id: 'grok-build:weekly',
+          billingDomainId: 'grok-build-subscription',
+          label: 'Weekly limit',
+          usedPercent: 20,
+          resetsAt: '2026-09-01T00:00:00.000Z',
+          authority: 'official-client'
+        },
+        {
+          id: 'xai-api:monthly',
+          billingDomainId: 'xai-api',
+          label: 'Monthly spend',
+          usedPercent: 95,
+          resetsAt: '2026-09-01T00:00:00.000Z',
+          authority: 'official-account'
+        }
+      ],
+      usage: [],
+      costs: [],
+      observedAt
+    });
+
+    expect(repository.getOverview(new Date(observedAt)).riskSummary.recommendation).toMatchObject({
+      providerId: 'grok',
+      billingDomainId: 'grok-build-subscription',
+      evidence: { remainingPercent: 80 }
+    });
     repository.close();
   });
 });

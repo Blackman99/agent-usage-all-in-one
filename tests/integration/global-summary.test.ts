@@ -60,8 +60,9 @@ describe('global usage summary', () => {
       })
     ]);
 
-    const thirtyDay = repository.getOverview(NOW, { window: '30d' }).globalSummary;
-    expect(thirtyDay.recordedTokens).toBe(2_367);
+    const thirtyDayOverview = repository.getOverview(NOW, { window: '30d' });
+    const thirtyDay = thirtyDayOverview.globalSummary;
+    expect(thirtyDay.recordedTokens).toBe(625);
     expect(thirtyDay.mostConstrained).toMatchObject({
       bucketId: 'grok:week',
       resetsAt: '2026-09-01T00:00:00.000Z'
@@ -71,10 +72,12 @@ describe('global usage summary', () => {
       thirtyDay.contributions
         .filter((contribution) => contribution.providerId === 'grok')
         .map((contribution) => [contribution.billingDomainId, contribution.recordedTokens])
-    ).toEqual([
-      ['grok-build-subscription', 525],
-      ['xai-api', 1_742]
-    ]);
+    ).toEqual([['grok-build-subscription', 525]]);
+    expect(
+      thirtyDayOverview.providers
+        .find((provider) => provider.id === 'grok')
+        ?.billingDomains.find((domain) => domain.id === 'xai-api')?.history.tokenTotals.total
+    ).toBe(1_742);
     expect(
       thirtyDay.contributions.some((contribution) => contribution.billingDomainId === 'combined')
     ).toBe(false);
