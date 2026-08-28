@@ -33,12 +33,12 @@ describe('expanded token contract', () => {
     expect(provider.tokenTotals.total).toBe(1_910);
     expect(provider.tokenEvidence).toMatchObject({
       recordedTokens: 1_910,
-      sourceReportedTokens: 1_600,
-      sourceReportedObservationCount: 3,
+      sourceReportedTokens: 1_725,
+      sourceReportedObservationCount: 4,
       observationCount: 5,
       unclassifiedTokens: 1_565,
       classifiedTokens: 345,
-      totalDerivations: ['categorized', 'legacy-total', 'source-reported'],
+      totalDerivations: ['categorized', 'source-reported'],
       timePrecisions: ['billing-period', 'day', 'event', 'hour', 'unknown'],
       aggregationTemporalities: ['unknown']
     });
@@ -58,7 +58,7 @@ describe('expanded token contract', () => {
     expect(exported.rows[0]).toMatchObject({
       recordType: 'tokens',
       recordedTokens: 1_910,
-      sourceReportedTokens: 1_600,
+      sourceReportedTokens: 1_725,
       unclassifiedTokens: 1_565,
       timePrecisions: ['billing-period', 'day', 'event', 'hour', 'unknown'],
       aggregationTemporalities: ['unknown']
@@ -176,7 +176,7 @@ function tokenSnapshot(): ConnectorSnapshot {
         billingDomainId: 'subscription',
         model: 'all-models',
         observedAt: '2026-08-26T00:00:00.000Z',
-        totalTokens: 125,
+        sourceReportedTotalTokens: 125,
         inputTokens: 125,
         outputTokens: 0,
         cacheReadTokens: 0,

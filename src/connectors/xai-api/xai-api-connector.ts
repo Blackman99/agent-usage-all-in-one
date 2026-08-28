@@ -409,15 +409,18 @@ function mapInvoiceTokens(invoices: Invoice[]): UsageObservation[] {
         reasoningTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        totalTokens: 0,
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        modelAttribution: 'known',
+        timePrecision: 'billing-period',
+        usageScope: 'account-wide',
+        aggregationTemporality: 'delta',
         authority: 'official-account'
       };
       observation[kind] = (observation[kind] ?? 0) + line.numUnits;
-      observation.totalTokens =
-        observation.inputTokens +
-        observation.outputTokens +
-        observation.cacheReadTokens +
-        observation.cacheWriteTokens;
       byModel.set(model, observation);
     }
     observations.push(...byModel.values());

@@ -74,7 +74,6 @@ export interface UsageObservation {
   reasoningTokens?: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
-  totalTokens?: number | null;
   sourceReportedTotalTokens?: number | null;
   tokenSemantics?: TokenSemantics;
   modelAttribution?: TokenModelAttribution;

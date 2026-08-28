@@ -67,9 +67,19 @@ describe('xAI Management API connector', () => {
         outputTokens: 534,
         cacheReadTokens: 300,
         reasoningTokens: 42,
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        modelAttribution: 'known',
+        timePrecision: 'billing-period',
+        usageScope: 'account-wide',
+        aggregationTemporality: 'delta',
         authority: 'official-account'
       })
     ]);
+    expect(snapshot.usage[0]).not.toHaveProperty('totalTokens');
     expect(snapshot.costs).toEqual([
       expect.objectContaining({
         id: 'xai-usage:Chat grok-4.6:2026-08-27T00:00:00Z',

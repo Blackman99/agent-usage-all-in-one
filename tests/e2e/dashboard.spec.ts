@@ -528,6 +528,9 @@ test('renders Grok shared weekly quota and alpha telemetry without inventing a f
   ).toBeVisible();
   await provider.getByRole('tab', { name: 'xAI API' }).click();
   await expect(provider.getByText('1,742')).toBeVisible();
+  await expect(provider).toContainText(/Scope:\s*Account-wide/);
+  await expect(provider).toContainText(/Precision:\s*Billing period/);
+  await expect(provider).toContainText(/Aggregation:\s*Delta/);
   await expect(provider.getByText('$2.50')).toBeVisible();
   await expect(provider.getByText('$45.00')).toBeVisible();
   await expect(provider.getByText('Weekly limit')).toHaveCount(0);
@@ -990,6 +993,15 @@ const grokBillingDomains = [
       cacheRead: 300,
       cacheWrite: 0
     },
+    tokenEvidence: tokenEvidenceFixture(
+      { total: 1742 },
+      {
+        totalDerivations: ['categorized'],
+        timePrecisions: ['billing-period'],
+        usageScopes: ['account-wide'],
+        aggregationTemporalities: ['delta']
+      }
+    ),
     tokenAuthority: 'official-account',
     costs: [
       {
@@ -1024,7 +1036,7 @@ const grokBillingDomains = [
         cacheWrite: 0
       },
       ['official-account'],
-      '2026-08-28T00:00:00.000Z',
+      '2026-08-01T00:00:00.000Z',
       [
         {
           kind: 'actual',
@@ -1037,7 +1049,16 @@ const grokBillingDomains = [
           authorities: ['official-account'],
           observedAt: '2026-08-28T00:00:00.000Z'
         }
-      ]
+      ],
+      tokenEvidenceFixture(
+        { total: 1742 },
+        {
+          totalDerivations: ['categorized'],
+          timePrecisions: ['billing-period'],
+          usageScopes: ['account-wide'],
+          aggregationTemporalities: ['delta']
+        }
+      )
     )
   }
 ];

@@ -31,8 +31,9 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 - **Source-reported Token total**: A total stated by the source itself. It is
   preserved as evidence and takes precedence over a locally derived total.
 - **Recorded Tokens**: The one non-overlapping Token total used by summaries.
-  It comes from the source-reported total, a legacy total, or the sum of
-  categories under the observation's declared Token semantics, in that order.
+  New observations use the source-reported total when present, otherwise the
+  sum of categories under the observation's declared Token semantics. Upgraded
+  database rows may retain a legacy total as historical evidence.
 - **Unclassified usage**: Recorded Tokens that cannot be assigned honestly to
   both a known model and known categories. `all-models`, `unknown`, and absent
   model identifiers are unclassified and never enter model rankings.
@@ -87,3 +88,6 @@ subscriptions and the xAI API. Their usage and costs must never be merged.
 13. Cumulative telemetry is rejected before persistence unless a Connector has
     an explicit non-overlapping reconciliation algorithm; it is never summed as
     though it were delta data.
+14. Production Connectors never write the legacy Token-total input. The SQLite
+    compatibility column and `legacy-total` derivation remain read-only migration
+    evidence so a V1 database can upgrade without losing or duplicating usage.

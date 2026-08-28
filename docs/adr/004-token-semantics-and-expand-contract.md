@@ -54,5 +54,6 @@ Token totals cannot be reconstructed by summing every exposed field. Consumers
 use `recordedTokens` for totals and category fields for breakdown evidence.
 Model rankings omit unattributed usage and must disclose classification
 coverage. Day and billing-period observations may appear in wider time views
-without being presented as event-level data. Once all Connectors have migrated,
-the legacy `totalTokens` input can be removed in a later contract-shrink ADR.
+without being presented as event-level data. ADR 005 removes the legacy
+`totalTokens` Connector input after all production sources migrated, while
+retaining V1 database compatibility evidence.

@@ -30,14 +30,9 @@ export function normalizeTokenObservation(
     observation.sourceReportedTotalTokens,
     'sourceReportedTotalTokens'
   );
-  const legacyTotalTokens = nullableTokenCount(observation.totalTokens, 'totalTokens');
   const totalDerivation =
-    sourceReportedTotalTokens !== null
-      ? ('source-reported' as const)
-      : legacyTotalTokens !== null
-        ? ('legacy-total' as const)
-        : ('categorized' as const);
-  const recordedTokens = sourceReportedTotalTokens ?? legacyTotalTokens ?? categorizedTokens;
+    sourceReportedTotalTokens !== null ? ('source-reported' as const) : ('categorized' as const);
+  const recordedTokens = sourceReportedTotalTokens ?? categorizedTokens;
   const inferredModelAttribution = inferModelAttribution(observation.model);
   const modelAttribution =
     inferredModelAttribution === 'unclassified'

@@ -104,7 +104,11 @@ describe('token normalization', () => {
 
   it('does not let an explicit attribution turn an aggregate placeholder into a model', () => {
     const normalized = normalizeTokenObservation(
-      observation({ model: 'all-models', modelAttribution: 'known', totalTokens: 25 })
+      observation({
+        model: 'all-models',
+        modelAttribution: 'known',
+        sourceReportedTotalTokens: 25
+      })
     );
 
     expect(normalized.modelAttribution).toBe('unclassified');
@@ -113,23 +117,14 @@ describe('token normalization', () => {
 
   it('treats provider unknown-model placeholders as unclassified', () => {
     const normalized = normalizeTokenObservation(
-      observation({ model: 'unknown-model', modelAttribution: 'known', totalTokens: 25 })
+      observation({
+        model: 'unknown-model',
+        modelAttribution: 'known',
+        sourceReportedTotalTokens: 25
+      })
     );
 
     expect(normalized.modelAttribution).toBe('unclassified');
-  });
-
-  it('interprets the old total field without claiming source-total or time precision evidence', () => {
-    const normalized = normalizeTokenObservation(
-      observation({ totalTokens: 125, timePrecision: undefined })
-    );
-
-    expect(normalized).toMatchObject({
-      recordedTokens: 125,
-      sourceReportedTotalTokens: null,
-      totalDerivation: 'legacy-total',
-      timePrecision: 'unknown'
-    });
   });
 });
 
