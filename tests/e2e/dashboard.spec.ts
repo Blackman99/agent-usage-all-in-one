@@ -1246,6 +1246,7 @@ test('presents model detail as a compact visual summary instead of long visible 
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -1260,6 +1261,10 @@ test('presents model detail as a compact visual summary instead of long visible 
 
   const detail = page.getByRole('dialog', { name: 'Model detail: fable-model' });
   const visual = detail.getByTestId('model-detail-visual');
+  const detailBox = await detail.boundingBox();
+  const visualBox = await visual.boundingBox();
+  expect(detailBox?.width).toBeGreaterThanOrEqual(1100);
+  expect(visualBox?.height).toBeGreaterThanOrEqual(380);
   await expect(visual).toHaveAttribute('data-chart-engine', 'echarts');
   await expect(visual).toHaveAttribute('aria-label', /Token breakdown/);
   await expect(visual.locator('canvas')).toBeVisible();
@@ -1296,6 +1301,12 @@ test('presents model detail as a compact visual summary instead of long visible 
   await expect(detail.getByText('Audit details')).toHaveCount(0);
   await expect(detail.getByRole('table', { name: 'Provider evidence' })).toHaveCount(0);
   await expect(detail.getByRole('table', { name: 'Price line items' })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await detail.boundingBox())?.width).toBe(390);
+  await expect
+    .poll(() => detail.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBeLessThanOrEqual(0);
 });
 
 test('opens the model detail shell promptly with a large evidence history', async ({ page }) => {

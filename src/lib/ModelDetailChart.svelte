@@ -474,7 +474,7 @@
 <style>
   .model-detail-visual {
     width: 100%;
-    height: 280px;
+    height: clamp(400px, 46vh, 520px);
     min-width: 0;
   }
 

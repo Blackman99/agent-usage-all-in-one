@@ -3607,8 +3607,8 @@
   }
 
   .model-detail-drawer {
-    width: min(920px, 100%);
-    max-height: min(780px, calc(100vh - 48px));
+    width: min(1280px, 100%);
+    max-height: calc(100vh - 48px);
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 20px;
