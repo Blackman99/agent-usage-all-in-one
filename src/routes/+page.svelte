@@ -61,6 +61,7 @@
   let selectedModelId: string | null = null;
   let modelDetailTrigger: HTMLButtonElement | null = null;
   let modelDetailPanel: HTMLElement | null = null;
+  let modelAuditOpen = false;
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
   let diagnostics: DoctorReport | null = null;
@@ -700,38 +701,48 @@
   }
 
   function uniquePriceSnapshots(priceEvidence: HistoryModelPriceEvidence[]) {
-    return priceEvidence
-      .map((evidence) => evidence.priceSnapshot)
-      .filter(
-        (
-          snapshot,
-          index,
-          snapshots
-        ): snapshot is NonNullable<HistoryModelPriceEvidence['priceSnapshot']> =>
-          snapshot !== null &&
-          snapshots.findIndex((candidate) => candidate?.id === snapshot.id) === index
-      );
+    const seen = Object.create(null) as Record<string, boolean>;
+    return priceEvidence.flatMap((evidence) => {
+      const snapshot = evidence.priceSnapshot;
+      if (!snapshot || seen[snapshot.id]) return [];
+      seen[snapshot.id] = true;
+      return [snapshot];
+    });
   }
 
   function modelTrendEvidence(
     model: UsageOverview['workbench']['modelRanking']['entries'][number]
   ) {
-    return model.trend.map((bucket) => {
-      const observations = model.observations.filter(
-        (observation) =>
-          observation.observedAt >= bucket.start && observation.observedAt < bucket.end
-      );
-      const precisions = [...new Set(observations.map((observation) => observation.timePrecision))];
+    const recordedTokens = model.trend.map(() => 0);
+    const timePrecisions = model.trend.map(() => [] as HistoryModelObservation['timePrecision'][]);
+    for (const observation of model.observations) {
+      let low = 0;
+      let high = model.trend.length - 1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const bucket = model.trend[middle];
+        if (observation.observedAt < bucket.start) {
+          high = middle - 1;
+        } else if (observation.observedAt >= bucket.end) {
+          low = middle + 1;
+        } else {
+          recordedTokens[middle] += observation.recordedTokens;
+          if (!timePrecisions[middle].includes(observation.timePrecision)) {
+            timePrecisions[middle].push(observation.timePrecision);
+          }
+          break;
+        }
+      }
+    }
+    return model.trend.map((bucket, index) => {
       const retailAvailable =
         bucket.retailEquivalent.status !== 'unavailable' && bucket.retailEquivalent.amount !== null;
       const selectedCost = retailAvailable
         ? bucket.retailEquivalent
         : (bucket.reportedEstimate ?? bucket.retailEquivalent);
       return {
-        recordedTokens: bucket.gap
-          ? null
-          : observations.reduce((total, observation) => total + observation.recordedTokens, 0),
-        timePrecision: precisions.map(timePrecisionLabel).join(' + ') || t('unknown'),
+        recordedTokens: bucket.gap ? null : recordedTokens[index],
+        timePrecision: timePrecisions[index].map(timePrecisionLabel).join(' + ') || t('unknown'),
         costAmount: selectedCost.amount,
         costCurrency: selectedCost.comparisonCurrency,
         costPurpose: retailAvailable ? t('apiRetailEquivalent') : t('providerReportedEstimate'),
@@ -1203,6 +1214,7 @@
   }
 
   async function openModelDetail(id: string, trigger: HTMLButtonElement): Promise<void> {
+    modelAuditOpen = false;
     selectedModelId = id;
     modelDetailTrigger = trigger;
     await tick();
@@ -1210,6 +1222,7 @@
   }
 
   async function closeModelDetail(): Promise<void> {
+    modelAuditOpen = false;
     selectedModelId = null;
     await tick();
     modelDetailTrigger?.focus();
@@ -2290,141 +2303,145 @@
             </div>
           </section>
 
-          <details class="model-audit-details">
+          <details class="model-audit-details" bind:open={modelAuditOpen}>
             <summary>{t('auditDetails')}</summary>
-            <div class="model-audit-scroll">
-              <section aria-labelledby="model-observation-audit-heading">
-                <h3 id="model-observation-audit-heading">{t('providerEvidence')}</h3>
-                <table aria-label={t('providerEvidence')}>
-                  <thead>
-                    <tr>
-                      <th>{t('source')}</th>
-                      <th>{t('scope')}</th>
-                      <th>{t('tokens')}</th>
-                      <th>{t('semantics')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each model.observations as observation (observation.id)}
-                      <tr>
-                        <td>
-                          <strong>{authorityLabel(observation.authority)}</strong>
-                          <small>
-                            {formatReset(observation.observedAt)} ·
-                            {timePrecisionLabel(observation.timePrecision)}
-                          </small>
-                          <code>{observation.id}</code>
-                        </td>
-                        <td>
-                          {usageScopeLabel(observation.usageScope)} ·
-                          {aggregationTemporalityLabel(observation.aggregationTemporality)}
-                        </td>
-                        <td>
-                          <span
-                            >{t('recordedTotal')}: {formatNumber(observation.recordedTokens)}</span
-                          >
-                          <span
-                            >{t('classified')}: {formatNumber(observation.classifiedTokens)}</span
-                          >
-                          <span
-                            >{t('unclassified')}: {formatNumber(
-                              observation.unclassifiedTokens
-                            )}</span
-                          >
-                          <span>
-                            {t('sourceReportedTotal')}:
-                            {observation.sourceReportedTotalTokens === null
-                              ? t('notAvailable')
-                              : formatNumber(observation.sourceReportedTotalTokens)}
-                          </span>
-                        </td>
-                        <td>
-                          <span>{totalDerivationLabel(observation.totalDerivation)}</span>
-                          <small>{tokenSemanticsSummary(observation.tokenSemantics)}</small>
-                        </td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
-              </section>
-
-              <section aria-labelledby="model-price-audit-heading">
-                <h3 id="model-price-audit-heading">{t('priceLineItems')}</h3>
-                {#if model.priceEvidence.length === 0}
-                  <p>{t('noPriceEvidence')}</p>
-                {:else}
-                  <table aria-label={t('priceLineItems')}>
+            {#if modelAuditOpen}
+              <div class="model-audit-scroll">
+                <section aria-labelledby="model-observation-audit-heading">
+                  <h3 id="model-observation-audit-heading">{t('providerEvidence')}</h3>
+                  <table aria-label={t('providerEvidence')}>
                     <thead>
                       <tr>
-                        <th>{t('cost')}</th>
-                        <th>{t('priceLineItems')}</th>
-                        <th>{t('priceSnapshot')}</th>
+                        <th>{t('source')}</th>
+                        <th>{t('scope')}</th>
+                        <th>{t('tokens')}</th>
+                        <th>{t('semantics')}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {#each model.priceEvidence as price (price.id)}
+                      {#each model.observations as observation (observation.id)}
                         <tr>
                           <td>
-                            <strong>{costKindLabel(price.kind)}</strong>
-                            <span>
-                              {price.amount === null
-                                ? t('notAvailable')
-                                : formatMoney(price.amount, price.currency)}
-                            </span>
+                            <strong>{authorityLabel(observation.authority)}</strong>
                             <small>
-                              {authorityLabel(price.authority)} · {formatReset(price.observedAt)} ·
-                              {t('calculatedAt')}
-                              {formatReset(price.calculatedAt)}
+                              {formatReset(observation.observedAt)} ·
+                              {timePrecisionLabel(observation.timePrecision)}
                             </small>
-                            <code>{price.id}</code>
+                            <code>{observation.id}</code>
                           </td>
                           <td>
-                            {#each price.lineItems as line (`${price.id}:${line.tokenKind}`)}
-                              <span>
-                                {tokenKindLabel(line.tokenKind)} · {formatNumber(line.tokens)} ·
-                                {formatMoney(line.amount, price.currency)}
-                                <small>
-                                  {t('ratePerMillion')}
-                                  {formatMoney(line.ratePerMillion, price.currency)}
-                                </small>
-                              </span>
-                            {/each}
+                            {usageScopeLabel(observation.usageScope)} ·
+                            {aggregationTemporalityLabel(observation.aggregationTemporality)}
                           </td>
                           <td>
-                            {#if price.priceSnapshot}
-                              <strong>
-                                {price.priceSnapshot.version} · {price.priceSnapshot.source}
-                              </strong>
-                              <small>
-                                {price.priceSnapshot.canonicalModel ?? t('unknown')} ·
-                                {price.priceSnapshot.currency} ·
-                                {price.priceSnapshot.contextTier ?? t('unknown')}
-                              </small>
-                              <small>
-                                {t('priceEffective')}
-                                {formatReset(price.priceSnapshot.effectiveAt)}
-                                – {formatReset(price.priceSnapshot.effectiveUntil)}
-                              </small>
-                              <small>
-                                {Object.entries(price.priceSnapshot.ratesPerMillion)
-                                  .map(([kind, rate]) =>
-                                    rate === null
-                                      ? `${tokenKindLabel(kind)}: ${t('notAvailable')}`
-                                      : `${tokenKindLabel(kind)}: ${formatMoney(rate, price.priceSnapshot?.currency ?? price.currency)}`
-                                  )
-                                  .join(' · ')}
-                              </small>
-                            {:else}
-                              {t('notAvailable')}
-                            {/if}
+                            <span
+                              >{t('recordedTotal')}: {formatNumber(
+                                observation.recordedTokens
+                              )}</span
+                            >
+                            <span
+                              >{t('classified')}: {formatNumber(observation.classifiedTokens)}</span
+                            >
+                            <span
+                              >{t('unclassified')}: {formatNumber(
+                                observation.unclassifiedTokens
+                              )}</span
+                            >
+                            <span>
+                              {t('sourceReportedTotal')}:
+                              {observation.sourceReportedTotalTokens === null
+                                ? t('notAvailable')
+                                : formatNumber(observation.sourceReportedTotalTokens)}
+                            </span>
+                          </td>
+                          <td>
+                            <span>{totalDerivationLabel(observation.totalDerivation)}</span>
+                            <small>{tokenSemanticsSummary(observation.tokenSemantics)}</small>
                           </td>
                         </tr>
                       {/each}
                     </tbody>
                   </table>
-                {/if}
-              </section>
-            </div>
+                </section>
+
+                <section aria-labelledby="model-price-audit-heading">
+                  <h3 id="model-price-audit-heading">{t('priceLineItems')}</h3>
+                  {#if model.priceEvidence.length === 0}
+                    <p>{t('noPriceEvidence')}</p>
+                  {:else}
+                    <table aria-label={t('priceLineItems')}>
+                      <thead>
+                        <tr>
+                          <th>{t('cost')}</th>
+                          <th>{t('priceLineItems')}</th>
+                          <th>{t('priceSnapshot')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each model.priceEvidence as price (price.id)}
+                          <tr>
+                            <td>
+                              <strong>{costKindLabel(price.kind)}</strong>
+                              <span>
+                                {price.amount === null
+                                  ? t('notAvailable')
+                                  : formatMoney(price.amount, price.currency)}
+                              </span>
+                              <small>
+                                {authorityLabel(price.authority)} · {formatReset(price.observedAt)} ·
+                                {t('calculatedAt')}
+                                {formatReset(price.calculatedAt)}
+                              </small>
+                              <code>{price.id}</code>
+                            </td>
+                            <td>
+                              {#each price.lineItems as line (`${price.id}:${line.tokenKind}`)}
+                                <span>
+                                  {tokenKindLabel(line.tokenKind)} · {formatNumber(line.tokens)} ·
+                                  {formatMoney(line.amount, price.currency)}
+                                  <small>
+                                    {t('ratePerMillion')}
+                                    {formatMoney(line.ratePerMillion, price.currency)}
+                                  </small>
+                                </span>
+                              {/each}
+                            </td>
+                            <td>
+                              {#if price.priceSnapshot}
+                                <strong>
+                                  {price.priceSnapshot.version} · {price.priceSnapshot.source}
+                                </strong>
+                                <small>
+                                  {price.priceSnapshot.canonicalModel ?? t('unknown')} ·
+                                  {price.priceSnapshot.currency} ·
+                                  {price.priceSnapshot.contextTier ?? t('unknown')}
+                                </small>
+                                <small>
+                                  {t('priceEffective')}
+                                  {formatReset(price.priceSnapshot.effectiveAt)}
+                                  – {formatReset(price.priceSnapshot.effectiveUntil)}
+                                </small>
+                                <small>
+                                  {Object.entries(price.priceSnapshot.ratesPerMillion)
+                                    .map(([kind, rate]) =>
+                                      rate === null
+                                        ? `${tokenKindLabel(kind)}: ${t('notAvailable')}`
+                                        : `${tokenKindLabel(kind)}: ${formatMoney(rate, price.priceSnapshot?.currency ?? price.currency)}`
+                                    )
+                                    .join(' · ')}
+                                </small>
+                              {:else}
+                                {t('notAvailable')}
+                              {/if}
+                            </td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  {/if}
+                </section>
+              </div>
+            {/if}
           </details>
         </div>
       </div>

@@ -1309,6 +1309,62 @@ test('presents model detail as a compact visual summary instead of long visible 
   );
 });
 
+test('opens the model detail shell before rendering a large audit history', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const fixture = historyOverviewFixture('30d', 2900, 'USD') as {
+    workbench: {
+      modelRanking: {
+        entries: Array<{
+          model: string;
+          observations: Array<{ id: string; observedAt: string; [key: string]: unknown }>;
+          priceEvidence: Array<{ id: string; [key: string]: unknown }>;
+          tokenEvidence: { observationCount: number };
+        }>;
+      };
+    };
+  };
+  const model = fixture.workbench.modelRanking.entries.find(
+    (entry) => entry.model === 'fable-model'
+  );
+  if (!model?.observations[0] || !model.priceEvidence[0]) {
+    throw new Error('Expected the performance fixture to include model audit evidence');
+  }
+  const observation = model.observations[0];
+  const price = model.priceEvidence[0];
+  model.observations = Array.from({ length: 12_000 }, (_, index) => ({
+    ...observation,
+    id: `large-observation-${index}`,
+    observedAt: '2026-08-01T00:30:00.000Z'
+  }));
+  model.priceEvidence = Array.from({ length: 4_000 }, (_, index) => ({
+    ...price,
+    id: `large-price-${index}`,
+    usageObservationId: `large-observation-${index}`
+  }));
+  model.tokenEvidence.observationCount = model.observations.length;
+
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(fixture) });
+  });
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const fableRow = page.getByTestId('model-ranking-row').filter({ hasText: 'fable-model' });
+
+  const clickToFrameMs = await fableRow.evaluate(
+    (button) =>
+      new Promise<number>((resolve) => {
+        requestAnimationFrame(() => {
+          const startedAt = performance.now();
+          (button as HTMLButtonElement).click();
+          requestAnimationFrame(() => resolve(performance.now() - startedAt));
+        });
+      })
+  );
+
+  expect(clickToFrameMs).toBeLessThan(500);
+  await expect(page.getByRole('dialog', { name: 'Model detail: fable-model' })).toBeVisible();
+});
+
 test('follows system theme and keeps the usage dashboard responsive with local official artwork', async ({
   page
 }) => {

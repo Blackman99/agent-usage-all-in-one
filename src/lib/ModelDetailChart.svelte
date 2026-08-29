@@ -98,6 +98,9 @@
   let chart: ECharts | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let resizeFrame = 0;
+  let shellFrame = 0;
+  let chartFrame = 0;
+  let chartReady = false;
   let compact = false;
   let theme: ChartTheme = {
     text: '#10131a',
@@ -366,21 +369,29 @@
 
   onMount(() => {
     if (!chartEl) return;
-    syncTheme();
-    compact = chartEl.clientWidth < 660;
-    chart = init(chartEl, undefined, { renderer: 'canvas', useDirtyRect: true });
-    chart.getDom().setAttribute('aria-hidden', 'true');
-    render(option);
-    resizeObserver = new ResizeObserver(([entry]) => {
-      const nextCompact = entry.contentRect.width < 660;
-      if (nextCompact !== compact) compact = nextCompact;
-      cancelAnimationFrame(resizeFrame);
-      resizeFrame = requestAnimationFrame(() => chart?.resize());
+    shellFrame = requestAnimationFrame(() => {
+      chartFrame = requestAnimationFrame(() => {
+        if (!chartEl) return;
+        syncTheme();
+        compact = chartEl.clientWidth < 660;
+        chart = init(chartEl, undefined, { renderer: 'canvas', useDirtyRect: true });
+        chart.getDom().setAttribute('aria-hidden', 'true');
+        render(option);
+        resizeObserver = new ResizeObserver(([entry]) => {
+          const nextCompact = entry.contentRect.width < 660;
+          if (nextCompact !== compact) compact = nextCompact;
+          cancelAnimationFrame(resizeFrame);
+          resizeFrame = requestAnimationFrame(() => chart?.resize());
+        });
+        resizeObserver.observe(chartEl);
+        chartReady = true;
+      });
     });
-    resizeObserver.observe(chartEl);
     window.addEventListener(THEME_EVENT, syncTheme);
     return () => {
       window.removeEventListener(THEME_EVENT, syncTheme);
+      cancelAnimationFrame(shellFrame);
+      cancelAnimationFrame(chartFrame);
       cancelAnimationFrame(resizeFrame);
       resizeObserver?.disconnect();
       chart?.dispose();
@@ -394,6 +405,8 @@
   bind:this={chartEl}
   data-testid="model-detail-visual"
   data-chart-engine="echarts"
+  class:chart-pending={!chartReady}
+  aria-busy={!chartReady}
   aria-label={`${t('tokenBreakdown')} · ${t('modelTrend')}`}
 ></div>
 
@@ -465,6 +478,27 @@
     min-width: 0;
   }
 
+  .chart-pending {
+    background: linear-gradient(
+      100deg,
+      transparent 20%,
+      color-mix(in srgb, var(--border) 42%, transparent) 42%,
+      transparent 64%
+    );
+    background-size: 220% 100%;
+    animation: chart-loading 1.1s ease-in-out infinite;
+    border-radius: 12px;
+  }
+
+  @keyframes chart-loading {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: -100% 0;
+    }
+  }
+
   .model-detail-data {
     position: absolute;
     width: 1px;
@@ -480,6 +514,12 @@
   @media (max-width: 680px) {
     .model-detail-visual {
       height: 500px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chart-pending {
+      animation: none;
     }
   }
 </style>
