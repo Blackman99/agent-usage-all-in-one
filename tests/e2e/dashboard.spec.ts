@@ -2736,6 +2736,14 @@ test('compares provider quota reset windows on an interactive homepage timeline'
   await page.goto(freshLaunch.stdout.trim());
   const timeline = page.getByTestId('quota-timeline');
   await expect(timeline).toBeVisible();
+  expect(
+    await timeline.evaluate((element) => {
+      const providers = element.parentElement?.querySelector('.providers');
+      return Boolean(
+        providers && providers.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    })
+  ).toBe(true);
   await expect(timeline).toHaveAttribute('data-chart-engine', 'echarts');
   await expect(timeline).toHaveAttribute('data-lane-count', '4');
   await expect(timeline.getByRole('heading', { name: 'Quota timeline' })).toBeVisible();

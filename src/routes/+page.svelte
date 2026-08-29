@@ -1187,12 +1187,6 @@
           {#if processing?.modules.usage.state === 'running'}
             <p class="module-progress" role="status">{t('updatingAgentUsage')}</p>
           {/if}
-          <QuotaTimelineChart
-            providers={quotaTimelineProviders(overview, connectors)}
-            {locale}
-            {timeZone}
-            now={Date.parse(overview.generatedAt)}
-          />
           <section class="providers" aria-label={t('providersLabel')}>
             {#each displayProviders(overview, connectors) as provider (provider.id)}
               {@const logo = providerLogoSources(provider.id)}
@@ -1394,6 +1388,12 @@
               </article>
             {/each}
           </section>
+          <QuotaTimelineChart
+            providers={quotaTimelineProviders(overview, connectors)}
+            {locale}
+            {timeZone}
+            now={Date.parse(overview.generatedAt)}
+          />
         </div>
       {:else}
         <div
