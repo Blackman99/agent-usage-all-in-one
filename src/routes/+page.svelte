@@ -1543,7 +1543,7 @@
                     <div>
                       <dt>{t('input')}</dt>
                       <dd>
-                        {workbench.tokenBreakdown.status === 'available'
+                        {workbench.tokenBreakdown.status !== 'unavailable'
                           ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.input)
                           : t('notAvailable')}
                       </dd>
@@ -1551,7 +1551,7 @@
                     <div>
                       <dt>{t('output')}</dt>
                       <dd>
-                        {workbench.tokenBreakdown.status === 'available'
+                        {workbench.tokenBreakdown.status !== 'unavailable'
                           ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.output)
                           : t('notAvailable')}
                       </dd>
@@ -1559,7 +1559,7 @@
                     <div>
                       <dt>{t('reasoning')}</dt>
                       <dd>
-                        {workbench.tokenBreakdown.status === 'available'
+                        {workbench.tokenBreakdown.status !== 'unavailable'
                           ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.reasoning)
                           : t('notAvailable')}
                       </dd>
@@ -1567,7 +1567,7 @@
                     <div>
                       <dt>{t('cacheRead')}</dt>
                       <dd>
-                        {workbench.tokenBreakdown.status === 'available'
+                        {workbench.tokenBreakdown.status !== 'unavailable'
                           ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheRead)
                           : t('notAvailable')}
                       </dd>
@@ -1575,7 +1575,7 @@
                     <div>
                       <dt>{t('cacheWrite')}</dt>
                       <dd>
-                        {workbench.tokenBreakdown.status === 'available'
+                        {workbench.tokenBreakdown.status !== 'unavailable'
                           ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheWrite)
                           : t('notAvailable')}
                       </dd>

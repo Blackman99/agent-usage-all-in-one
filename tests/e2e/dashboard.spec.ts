@@ -983,6 +983,87 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
 });
 
+test('shows known token categories when classification coverage is partial', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const overview = historyOverviewFixture('30d', 120, 'USD') as {
+    workbench: {
+      tokenBreakdown: {
+        status: 'available' | 'partial' | 'unavailable';
+        tokenTotals: {
+          total: number;
+          input: number;
+          output: number;
+          reasoning: number;
+          cacheRead: number;
+          cacheWrite: number;
+        };
+        classificationCoverage: number | null;
+        authorities: string[];
+        lastObservedAt: string | null;
+      };
+    };
+  };
+  overview.workbench.tokenBreakdown = {
+    status: 'partial',
+    tokenTotals: {
+      total: 120,
+      input: 50,
+      output: 20,
+      reasoning: 10,
+      cacheRead: 15,
+      cacheWrite: 5
+    },
+    classificationCoverage: 100 / 120,
+    authorities: ['local-observation'],
+    lastObservedAt: '2026-08-29T03:47:00.000Z'
+  };
+
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(overview) });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const totals = page.getByTestId('usage-totals');
+
+  await expect(totals.getByText('Input', { exact: true }).locator('..').locator('dd')).toHaveText(
+    '50'
+  );
+  await expect(totals.getByText('Output', { exact: true }).locator('..').locator('dd')).toHaveText(
+    '20'
+  );
+  await expect(
+    totals.getByText('Reasoning', { exact: true }).locator('..').locator('dd')
+  ).toHaveText('10');
+  await expect(
+    totals.getByText('Cache read', { exact: true }).locator('..').locator('dd')
+  ).toHaveText('15');
+  await expect(
+    totals.getByText('Cache write', { exact: true }).locator('..').locator('dd')
+  ).toHaveText('5');
+  await expect(totals).toContainText('83.3%');
+
+  overview.workbench.tokenBreakdown = {
+    status: 'unavailable',
+    tokenTotals: {
+      total: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0
+    },
+    classificationCoverage: null,
+    authorities: [],
+    lastObservedAt: null
+  };
+  await page.reload();
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  await expect(
+    page.getByTestId('usage-totals').getByText('Input', { exact: true }).locator('..').locator('dd')
+  ).toHaveText('Unavailable');
+});
+
 test('supports hover, time-axis zoom, drag panning, and reset on the cost trend', async ({
   page
 }) => {

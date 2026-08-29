@@ -125,6 +125,8 @@ be merged.
    fields and source totals are evidence for that total, never additive totals.
 9. Recorded Tokens equal classified plus unclassified Tokens; a source total
    larger than its categorized fields leaves an explicit unclassified remainder.
+   Partial classification keeps every known category visible; the unclassified
+   remainder never makes those known values unavailable.
 10. `all-models` and unknown-model observations contribute to overall and time
     summaries but never to per-model rankings.
 11. Migration preserves observation identity, authority, and observed time and
