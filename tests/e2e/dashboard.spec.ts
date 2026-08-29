@@ -2492,6 +2492,45 @@ const grokBillingDomains = [
   }
 ];
 
+test('keeps settings controls readable in the light theme', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  if (freshLaunch.exitCode !== 0)
+    throw new Error(freshLaunch.stderr || 'Unable to start test daemon');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByRole('heading', { name: 'Agent Usage' })).toBeVisible();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  const controlColors = await settings.evaluate((dialog) => {
+    const bodyStyle = getComputedStyle(document.body);
+    const section = dialog.querySelector<HTMLElement>('.settings-content > section');
+    if (!section) throw new Error('Missing settings section');
+    const sectionStyle = getComputedStyle(section);
+    const read = (selector: string) => {
+      const element = dialog.querySelector<HTMLElement>(selector);
+      if (!element) throw new Error(`Missing settings control: ${selector}`);
+      const style = getComputedStyle(element);
+      return { color: style.color, border: style.borderTopColor };
+    };
+    return {
+      monitoring: read('.monitoring-controls label'),
+      connection: read('.connection-actions button:not(.primary-action)'),
+      privacy: read('.privacy-actions button'),
+      text: bodyStyle.color,
+      border: sectionStyle.borderTopColor
+    };
+  });
+
+  expect(controlColors.monitoring.color).toBe(controlColors.text);
+  expect(controlColors.connection.color).toBe(controlColors.text);
+  expect(controlColors.privacy.color).toBe(controlColors.text);
+  expect(controlColors.monitoring.border).toBe(controlColors.border);
+  expect(controlColors.connection.border).toBe(controlColors.border);
+  expect(controlColors.privacy.border).toBe(controlColors.border);
+});
+
 async function runPackagedCli(arguments_: string[]): Promise<{
   exitCode: number | null;
   stdout: string;

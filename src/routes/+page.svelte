@@ -4054,6 +4054,31 @@
     color: var(--text);
   }
 
+  .settings-drawer .monitoring-controls label,
+  .settings-drawer .privacy-actions button,
+  .settings-drawer .privacy-actions label,
+  .settings-drawer .connection-actions button {
+    border-color: var(--border);
+    background: var(--button);
+    color: var(--text);
+  }
+
+  .settings-drawer .connection-actions button.primary-action {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+  }
+
+  .settings-drawer .privacy-actions button.danger-action {
+    border-color: var(--danger-border);
+    color: var(--danger-text);
+  }
+
+  .settings-drawer .settings-close {
+    border-color: var(--border);
+    color: var(--text-strong);
+  }
+
   .model-detail-header,
   .settings-header {
     border-color: var(--border);
