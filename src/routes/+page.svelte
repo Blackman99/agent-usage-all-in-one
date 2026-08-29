@@ -667,10 +667,6 @@
     return t(keys[coverage]);
   }
 
-  function confidenceLabel(confidence: 'medium' | 'high'): string {
-    return t(confidence === 'high' ? 'confidenceHigh' : 'confidenceMedium');
-  }
-
   function activeBillingDomain(
     provider: ProviderOverview,
     selected: string | undefined
@@ -1364,29 +1360,6 @@
                       </div>
                     {/each}
                   </div>
-                  {#if (domain.forecasts?.length ?? 0) > 0}
-                    <div class="forecast-list">
-                      {#each domain.forecasts as forecast (forecast.bucketId)}
-                        <p>
-                          <strong>{forecast.label}</strong>
-                          <span
-                            >{forecast.willLastUntilReset
-                              ? t('lastsUntilReset')
-                              : t('exhaustsBeforeReset')}</span
-                          >
-                          <small>
-                            {confidenceLabel(forecast.confidence)} · {forecast.evidence.samples}
-                            {t('samples')} ·
-                            {t('predictedExhaustion')}
-                            {formatReset(forecast.predictedExhaustionAt)}
-                            · {authorityLabel('estimate')} · {formatReset(
-                              forecast.evidence.windowEnd
-                            )}
-                          </small>
-                        </p>
-                      {/each}
-                    </div>
-                  {/if}
                 {/each}
               </article>
             {/each}
@@ -3466,41 +3439,13 @@
   }
 
   .section-label {
-    margin-top: 26px;
+    margin-top: auto;
     padding-top: 20px;
     border-top: 1px solid rgba(122, 136, 164, 0.13);
   }
 
   .quota-row + .quota-row {
     margin-top: 20px;
-  }
-
-  .forecast-list {
-    display: grid;
-    gap: 7px;
-    margin-top: 14px;
-  }
-
-  .forecast-list p {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 10px;
-    margin: 0;
-    padding: 10px 12px;
-    border: 1px solid rgba(122, 136, 164, 0.13);
-    border-radius: 11px;
-    background: var(--surface-subtle);
-    color: #aeb6c4;
-    font-size: 0.7rem;
-  }
-
-  .forecast-list span {
-    text-align: right;
-  }
-
-  .forecast-list small {
-    grid-column: 1 / -1;
-    color: #7f899a;
   }
 
   .quota-copy,

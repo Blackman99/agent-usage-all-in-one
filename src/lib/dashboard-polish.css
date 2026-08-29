@@ -73,11 +73,14 @@
 }
 
 .shell .providers {
-  align-items: start;
+  align-items: stretch;
   gap: 18px;
 }
 
 .shell .provider-card {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
   padding: 22px;
   border-radius: 22px;
   box-shadow: var(--polish-shadow-surface);
@@ -140,7 +143,7 @@
 }
 
 .shell .section-label {
-  margin-top: 22px;
+  margin-top: auto;
   margin-bottom: 16px;
   padding-top: 18px;
   font-size: 0.68rem;
@@ -169,22 +172,6 @@
 .shell .progress {
   height: 7px;
   margin-block: 9px 7px;
-}
-
-.shell .forecast-list {
-  gap: 8px;
-  margin-top: 18px;
-}
-
-.shell .forecast-list p {
-  padding: 11px 12px;
-  border-radius: 12px;
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
-
-.shell .forecast-list small {
-  line-height: 1.45;
 }
 
 .shell .token-money-workbench {

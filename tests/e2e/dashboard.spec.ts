@@ -1435,7 +1435,7 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   });
   expect(shellLayout).toEqual({
     headerPosition: 'sticky',
-    providerAlignment: 'start'
+    providerAlignment: 'stretch'
   });
 
   const providerSurface = await page
@@ -2529,6 +2529,108 @@ test('keeps settings controls readable in the light theme', async ({ page }) => 
   expect(controlColors.monitoring.border).toBe(controlColors.border);
   expect(controlColors.connection.border).toBe(controlColors.border);
   expect(controlColors.privacy.border).toBe(controlColors.border);
+});
+
+test('keeps provider cards and their final quota rows aligned without forecasts', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/connectors', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: '[]' });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    const tokenTotals = {
+      total: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0
+    };
+    const specs = [
+      ['codex', 'Codex', 'subscription', ['5 hour', 'Week', 'Spark · Week']],
+      [
+        'claude-code',
+        'Claude Code',
+        'subscription',
+        ['5 hour', 'Week · All models', 'Week · Fable only']
+      ],
+      ['opencode-go', 'OpenCode Go', 'go-subscription', ['5 hour', 'Week', 'Month']],
+      ['grok', 'Grok', 'grok-build-subscription', ['Weekly limit']]
+    ] as const;
+    const providers = specs.map(([id, displayName, domainId, labels]) => {
+      const quotaBuckets = labels.map((label, index) => ({
+        id: `${id}:${index}`,
+        billingDomainId: domainId,
+        label,
+        usedPercent: 25 + index * 20,
+        resetsAt: '2026-09-01T00:00:00.000Z',
+        authority: 'official-client'
+      }));
+      const forecasts = [
+        {
+          bucketId: quotaBuckets.at(-1)?.id,
+          label: labels.at(-1),
+          willLastUntilReset: false,
+          confidence: 'high',
+          predictedExhaustionAt: '2026-08-30T00:00:00.000Z',
+          evidence: { samples: 12, windowEnd: '2026-08-29T00:00:00.000Z' }
+        }
+      ];
+      const domain = {
+        id: domainId,
+        displayName,
+        quotaBuckets,
+        tokenTotals,
+        tokenAuthority: null,
+        costs: [],
+        balances: [],
+        invoices: [],
+        forecasts,
+        forecastCoverage: 'complete'
+      };
+      return {
+        id,
+        displayName,
+        summaryBillingDomainId: domainId,
+        freshness: { status: 'fresh', lastSuccessAt: '2026-08-29T00:00:00.000Z' },
+        health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+        coverage: {
+          quota: 'complete',
+          tokens: 'unavailable',
+          actualCost: 'unavailable',
+          history: 'unavailable'
+        },
+        quotaBuckets,
+        tokenTotals,
+        tokenAuthority: null,
+        billingDomains: [domain],
+        forecasts,
+        forecastCoverage: 'complete'
+      };
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ generatedAt: '2026-08-29T00:00:00.000Z', providers })
+    });
+  });
+
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  await page.goto(freshLaunch.stdout.trim());
+  const cards = page.locator('.provider-card');
+  await expect(cards).toHaveCount(4);
+  await expect(page.locator('.forecast-list')).toHaveCount(0);
+  const geometry = await cards.evaluateAll((elements) =>
+    elements.map((element) => {
+      const rows = element.querySelectorAll<HTMLElement>('.quota-row');
+      return {
+        height: Math.round(element.getBoundingClientRect().height),
+        quotaBottom: Math.round(rows[rows.length - 1].getBoundingClientRect().bottom)
+      };
+    })
+  );
+  expect(new Set(geometry.map(({ height }) => height)).size).toBe(1);
+  expect(new Set(geometry.map(({ quotaBottom }) => quotaBottom)).size).toBe(1);
 });
 
 async function runPackagedCli(arguments_: string[]): Promise<{
