@@ -483,9 +483,11 @@ interface ConnectorDiagnosticRow {
 export class SqliteUsageRepository implements UsageRepository {
   readonly #database: DatabaseSyncType;
   readonly #databasePath: string;
+  readonly #hideDemoProvider: boolean;
 
-  constructor(databasePath: string) {
+  constructor(databasePath: string, options: { hideDemoProvider?: boolean } = {}) {
     this.#databasePath = databasePath;
+    this.#hideDemoProvider = options.hideDemoProvider ?? false;
     mkdirSync(dirname(databasePath), { recursive: true });
     this.#database = new DatabaseSync(databasePath);
     this.#database.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -1014,7 +1016,12 @@ export class SqliteUsageRepository implements UsageRepository {
       )
       .all() as unknown as ProviderRow[];
 
-    const overviews = providers.map((provider) => this.#getProviderOverview(provider, now, query));
+    const visibleProviders = this.#hideDemoProvider
+      ? providers.filter((provider) => provider.id !== 'demo')
+      : providers;
+    const overviews = visibleProviders.map((provider) =>
+      this.#getProviderOverview(provider, now, query)
+    );
     const riskSummary = buildRiskSummary(overviews);
     return {
       generatedAt: now.toISOString(),

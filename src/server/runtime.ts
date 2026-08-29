@@ -40,8 +40,10 @@ import { SqliteUsageRepository } from './sqlite-usage-repository.js';
 
 export async function runDaemon(home: string): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
-  const repository = new SqliteUsageRepository(join(home, 'usage.sqlite'));
   const demoEnabled = process.env.AGENT_USAGE_DEMO === '1';
+  const repository = new SqliteUsageRepository(join(home, 'usage.sqlite'), {
+    hideDemoProvider: !demoEnabled
+  });
   const keychainService = process.env.AGENT_USAGE_KEYCHAIN_SERVICE;
   const launchAgentLabel = process.env.AGENT_USAGE_LAUNCH_AGENT_LABEL;
   const nodeImport = process.env.AGENT_USAGE_NODE_IMPORT;
@@ -119,12 +121,18 @@ export async function runDaemon(home: string): Promise<void> {
     application,
     staticDirectory: locateStaticDirectory()
   });
-  if (!demoEnabled) await repository.deleteDemoProviderDataAsync();
   await writeDaemonState(home, {
     pid: process.pid,
     origin: server.origin,
     apiToken: server.apiToken
   });
+  if (!demoEnabled) {
+    void repository.deleteDemoProviderDataAsync().catch(() => {
+      process.stderr.write(
+        'Agent Usage: stale demo data remains hidden and will be cleaned on a later startup.\n'
+      );
+    });
+  }
   process.stderr.write(`Agent Usage: web service ready at ${server.origin}\n`);
   process.stderr.write('Agent Usage: updating cached usage in the background…\n');
   void application.startBackgroundProcessing().then(() => {

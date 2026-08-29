@@ -210,7 +210,9 @@ describe('privacy, export, and retention', () => {
   it('deletes only the requested provider and its connector state', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-provider-cleanup-'));
     workspaces.push(workspace);
-    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'), {
+      hideDemoProvider: true
+    });
     repository.saveSnapshot(snapshot());
     repository.saveSnapshot({
       ...snapshot(),
@@ -229,11 +231,10 @@ describe('privacy, export, and retention', () => {
       });
     }
 
-    await repository.deleteDemoProviderDataAsync();
-
     expect(repository.getOverview(new Date('2026-08-28T02:00:00.000Z')).providers).toEqual([
       expect.objectContaining({ id: 'privacy', displayName: 'Privacy Agent' })
     ]);
+    await repository.deleteDemoProviderDataAsync();
     expect(repository.getConnectorStatuses().map((status) => status.id)).toEqual(['codex']);
     repository.close();
   });
