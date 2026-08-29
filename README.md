@@ -13,6 +13,8 @@ OpenCode, and Grok. One command opens a dashboard for native quota windows,
 reset times, tokens, model rankings, equivalent API cost, history, and diagnostics.
 It offers advice but never switches agents automatically.
 
+![Agent Usage dashboard showcase](static/brand/agent-usage-showcase.jpg)
+
 ## Dashboard
 
 The dashboard has two primary tabs:

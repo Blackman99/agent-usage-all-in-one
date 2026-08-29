@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const banner = readFileSync(`${repositoryRoot}/static/brand/agent-usage-banner.svg`, 'utf8');
+const showcase = readFileSync(`${repositoryRoot}/static/brand/agent-usage-showcase.jpg`);
+const englishReadme = readFileSync(`${repositoryRoot}/README.md`, 'utf8');
+const chineseReadme = readFileSync(`${repositoryRoot}/README.zh-CN.md`, 'utf8');
 
 describe('brand assets', () => {
   it('keeps the README banner self-contained with byte-identical audited Provider marks', () => {
@@ -20,5 +23,12 @@ describe('brand assets', () => {
 
     expect(banner).not.toContain('href="../brands/');
     expect(banner).toContain('id="future-providers"');
+  });
+
+  it('ships the stitched dashboard showcase from both READMEs', () => {
+    expect(showcase.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(showcase.byteLength).toBeGreaterThan(100_000);
+    expect(englishReadme).toContain('(static/brand/agent-usage-showcase.jpg)');
+    expect(chineseReadme).toContain('(static/brand/agent-usage-showcase.jpg)');
   });
 });
