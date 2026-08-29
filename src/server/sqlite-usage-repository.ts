@@ -70,16 +70,23 @@ const DELETE_DERIVED_RETAIL_COSTS_SQL = `
         AND usage.id = cost_records.usage_observation_id
     )
 `;
+const DELETE_DEMO_PROVIDER_DATA_SQL = `
+  DELETE FROM connector_diagnostics WHERE provider_id = 'demo';
+  DELETE FROM connector_runtime WHERE id = 'demo';
+  DELETE FROM connector_settings WHERE id = 'demo';
+  DELETE FROM providers WHERE id = 'demo';
+`;
 const { DatabaseSync } = createRequire(import.meta.url)(
   'node:sqlite'
 ) as typeof import('node:sqlite');
 
 interface DatabaseWorkerRequest {
   databasePath: string;
-  operation: 'indexes' | 'delete-derived-costs' | 'retention';
+  operation: 'indexes' | 'delete-demo-data' | 'delete-derived-costs' | 'retention';
   indexesSql?: string;
   aggregateSql?: string;
   deleteDerivedCostsSql?: string;
+  deleteDemoDataSql?: string;
   cutoff?: string;
   now?: string;
 }
@@ -97,6 +104,16 @@ async function runDatabaseWorker<T>(workerData: DatabaseWorkerRequest): Promise<
           if (workerData.operation === 'indexes') {
             database.exec(workerData.indexesSql);
             parentPort.postMessage({ ok: true, data: null });
+          } else if (workerData.operation === 'delete-demo-data') {
+            database.exec('BEGIN IMMEDIATE');
+            try {
+              database.exec(workerData.deleteDemoDataSql);
+              database.exec('COMMIT');
+              parentPort.postMessage({ ok: true, data: null });
+            } catch (error) {
+              database.exec('ROLLBACK');
+              throw error;
+            }
           } else if (workerData.operation === 'delete-derived-costs') {
             database.prepare(workerData.deleteDerivedCostsSql).run();
             parentPort.postMessage({ ok: true, data: null });
@@ -1295,20 +1312,12 @@ export class SqliteUsageRepository implements UsageRepository {
     }
   }
 
-  deleteProviderData(providerId: string): void {
-    this.#database.exec('BEGIN IMMEDIATE');
-    try {
-      this.#database
-        .prepare('DELETE FROM connector_diagnostics WHERE provider_id = ?')
-        .run(providerId);
-      this.#database.prepare('DELETE FROM connector_runtime WHERE id = ?').run(providerId);
-      this.#database.prepare('DELETE FROM connector_settings WHERE id = ?').run(providerId);
-      this.#database.prepare('DELETE FROM providers WHERE id = ?').run(providerId);
-      this.#database.exec('COMMIT');
-    } catch (error) {
-      this.#database.exec('ROLLBACK');
-      throw error;
-    }
+  async deleteDemoProviderDataAsync(): Promise<void> {
+    await runDatabaseWorker<void>({
+      databasePath: this.#databasePath,
+      operation: 'delete-demo-data',
+      deleteDemoDataSql: DELETE_DEMO_PROVIDER_DATA_SQL
+    });
   }
 
   deleteDerivedRetailCosts(): void {

@@ -42,7 +42,6 @@ export async function runDaemon(home: string): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const repository = new SqliteUsageRepository(join(home, 'usage.sqlite'));
   const demoEnabled = process.env.AGENT_USAGE_DEMO === '1';
-  if (!demoEnabled) repository.deleteProviderData('demo');
   const keychainService = process.env.AGENT_USAGE_KEYCHAIN_SERVICE;
   const launchAgentLabel = process.env.AGENT_USAGE_LAUNCH_AGENT_LABEL;
   const nodeImport = process.env.AGENT_USAGE_NODE_IMPORT;
@@ -120,6 +119,7 @@ export async function runDaemon(home: string): Promise<void> {
     application,
     staticDirectory: locateStaticDirectory()
   });
+  if (!demoEnabled) await repository.deleteDemoProviderDataAsync();
   await writeDaemonState(home, {
     pid: process.pid,
     origin: server.origin,

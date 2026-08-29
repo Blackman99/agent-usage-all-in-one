@@ -229,7 +229,7 @@ describe('privacy, export, and retention', () => {
       });
     }
 
-    repository.deleteProviderData('demo');
+    await repository.deleteDemoProviderDataAsync();
 
     expect(repository.getOverview(new Date('2026-08-28T02:00:00.000Z')).providers).toEqual([
       expect.objectContaining({ id: 'privacy', displayName: 'Privacy Agent' })
