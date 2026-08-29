@@ -317,7 +317,7 @@ const WEEKDAY_PEAK_RANGES = [
   { startHour: 6, endHour: 10 }
 ];
 
-export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
+const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
   version: '2026-08-28-grok-4.6-build',
   entries: [
     ...ANTHROPIC_PRICING_CATALOG.entries,
@@ -453,6 +453,14 @@ export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
   ]
 };
 
+export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
+  version: '2026-08-29-opencode-local-history',
+  entries: [
+    ...DIRECT_OFFICIAL_PRICING_CATALOG.entries,
+    ...openCodeLocalHistoryEntries(DIRECT_OFFICIAL_PRICING_CATALOG.entries)
+  ]
+};
+
 type OpenAiPricePeriod = [
   effectiveFrom: string,
   effectiveUntil: string | null,
@@ -568,6 +576,47 @@ function xaiEntry(options: {
     },
     source: XAI_PRICING_SOURCE
   };
+}
+
+function openCodeLocalHistoryEntries(
+  entries: RetailPriceCatalogEntry[]
+): RetailPriceCatalogEntry[] {
+  return entries.flatMap((entry) => {
+    const modelPrefix = openCodeLocalModelPrefix(entry);
+    if (!modelPrefix) return [];
+    const localModel = (model: string) => (model.includes('/') ? model : `${modelPrefix}/${model}`);
+    const canonicalModel = localModel(entry.canonicalModel);
+    return [
+      {
+        ...entry,
+        id: `opencode-local-${entry.id}`,
+        providerId: 'opencode',
+        billingDomainId: 'local-history',
+        canonicalModel,
+        aliases: [
+          ...new Set(
+            [entry.canonicalModel, ...entry.aliases]
+              .map(localModel)
+              .filter((model) => model !== canonicalModel)
+          )
+        ]
+      }
+    ];
+  });
+}
+
+function openCodeLocalModelPrefix(entry: RetailPriceCatalogEntry): string | null {
+  if (entry.providerId === 'claude-code' && entry.billingDomainId === 'subscription') {
+    return 'anthropic';
+  }
+  if (entry.providerId === 'codex' && entry.billingDomainId === 'subscription') {
+    return 'openai';
+  }
+  if (entry.providerId === 'grok' && entry.billingDomainId === 'xai-api') return 'xai';
+  if (entry.providerId === 'opencode-go' && entry.billingDomainId === 'go-subscription') {
+    return 'opencode-go';
+  }
+  return null;
 }
 
 export function deriveRetailEquivalentCosts(

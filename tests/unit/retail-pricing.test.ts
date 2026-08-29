@@ -528,6 +528,56 @@ describe('API retail-equivalent pricing', () => {
       }
     });
   });
+
+  it.each([
+    ['xai/grok-4.6', 0.325],
+    ['openai/gpt-5.6-sol', 0.804],
+    ['anthropic/claude-opus-5', 1.005],
+    ['opencode-go/glm-5.2', 0.2306]
+  ])(
+    'prices OpenCode local-history model %s with its eligible official retail source',
+    (model, amount) => {
+      const result = deriveRetailEquivalentCosts(
+        snapshot(
+          observation({ id: `opencode:${model}`, model, billingDomainId: 'local-history' }),
+          {
+            providerId: 'opencode',
+            domainId: 'local-history',
+            domainName: 'Local history'
+          }
+        ),
+        OFFICIAL_PRICING_CATALOG
+      );
+
+      expect(result.decisions[0]).toMatchObject({ status: 'priced', reason: null });
+      expect(result.costs[0]).toMatchObject({
+        amount,
+        billingDomainId: 'local-history',
+        model,
+        priceSnapshot: { canonicalModel: model }
+      });
+    }
+  );
+
+  it('does not price a direct OpenCode model with an unrelated Go subscription price', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'opencode:deepseek-direct',
+          model: 'deepseek/deepseek-v4-pro',
+          billingDomainId: 'local-history'
+        }),
+        { providerId: 'opencode', domainId: 'local-history', domainName: 'Local history' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.costs).toEqual([]);
+    expect(result.decisions[0]).toMatchObject({
+      status: 'unavailable',
+      reason: 'model-unrecognized'
+    });
+  });
 });
 
 function observation(overrides: Partial<UsageObservation> = {}): UsageObservation {

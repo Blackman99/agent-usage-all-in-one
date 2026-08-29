@@ -103,4 +103,40 @@ describe('Provider share chart', () => {
     ]);
     expect(option.series[0].data).toHaveLength(3);
   });
+
+  it('includes OpenCode in the cost donut when local-history has retail-equivalent evidence', () => {
+    const pricedProviders: ProviderShareSource[] = providers.map((provider) =>
+      provider.providerId === 'opencode'
+        ? {
+            ...provider,
+            retailEquivalent: {
+              amount: 5,
+              authorities: ['estimate'],
+              observedAt: '2026-08-28T10:25:00.000Z'
+            },
+            retailShare: 1 / 6
+          }
+        : provider
+    );
+    const entries = buildProviderShareEntries(
+      pricedProviders,
+      'retail-equivalent',
+      () => '#7788ff',
+      (value) => `$${value}`,
+      (share) => `${share * 100}%`,
+      (provider) => provider.retailEquivalent.authorities.join(',')
+    );
+
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'OpenCode',
+          billingDomainDisplayName: 'Local history',
+          value: 5,
+          share: 1 / 6,
+          formattedEvidence: 'estimate'
+        })
+      ])
+    );
+  });
 });

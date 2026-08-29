@@ -53,9 +53,9 @@ describe('OpenCode Go application path', () => {
             observedAtMs: Date.parse('2026-08-28T00:00:00.000Z')
           },
           {
-            id: '2026-08-28:anthropic/claude-sonnet-4',
+            id: '2026-08-28:anthropic/claude-opus-5',
             providerId: 'anthropic',
-            model: 'anthropic/claude-sonnet-4',
+            model: 'anthropic/claude-opus-5',
             cost: null,
             inputTokens: 300,
             outputTokens: 100,
@@ -113,7 +113,7 @@ describe('OpenCode Go application path', () => {
       });
       expect(refresh.status).toBe(204);
     }
-    const response = await fetch(`${server.origin}/api/overview`, {
+    const response = await fetch(`${server.origin}/api/overview?currency=USD`, {
       headers: { authorization: 'Bearer test-token' }
     });
     const overview = (await response.json()) as UsageOverview;
@@ -133,20 +133,44 @@ describe('OpenCode Go application path', () => {
       displayName: 'OpenCode',
       coverage: { tokens: 'partial', history: 'partial' },
       tokenTotals: { total: 1700, input: 1000, output: 350, reasoning: 50, cacheRead: 300 },
-      billingDomains: [
-        {
-          id: 'local-history',
-          costs: [
-            expect.objectContaining({
-              kind: 'reported-estimate',
-              amount: 0.42,
-              model: 'opencode-go/deepseek-v4-flash'
-            })
-          ]
-        }
-      ]
+      billingDomains: [{ id: 'local-history' }]
     });
+    expect(local.billingDomains[0].costs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'reported-estimate',
+          amount: 0.42,
+          model: 'opencode-go/deepseek-v4-flash'
+        }),
+        expect.objectContaining({
+          kind: 'retail-equivalent',
+          amount: 0.00405,
+          model: 'anthropic/claude-opus-5'
+        })
+      ])
+    );
     expect(overview.workbench.recordedTokens).toBe(1700);
+    expect(
+      overview.workbench.modelRanking.entries.map((entry) => `${entry.providerId}:${entry.model}`)
+    ).toEqual(
+      expect.arrayContaining([
+        'opencode:opencode-go/deepseek-v4-flash',
+        'opencode:anthropic/claude-opus-5'
+      ])
+    );
+    expect(
+      overview.workbench.providerSummary.find((summary) => summary.providerId === 'opencode')
+    ).toMatchObject({
+      recordedTokens: 1700,
+      tokenShare: 1,
+      retailEquivalent: {
+        status: 'available',
+        amount: 0.0044034,
+        pricingCoverage: 1,
+        authorities: ['estimate']
+      },
+      retailShare: 1
+    });
     repository.close();
   });
 
