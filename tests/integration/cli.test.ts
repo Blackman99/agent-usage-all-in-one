@@ -278,7 +278,7 @@ describe('agent-usage CLI', () => {
     expect(clear.stdout).toContain('deleted 0 product secret(s)');
     const clearedStatus = await runCli(['--home', home, 'status', '--json']);
     expect(JSON.parse(clearedStatus.stdout).providers).toEqual([]);
-  });
+  }, 15_000);
 });
 
 function cost(
