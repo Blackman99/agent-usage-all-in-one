@@ -179,9 +179,11 @@ be merged.
     disclosed unclassified Tokens reconcile to the workbench recorded Token
     total for the selected window. Sibling-domain rows are separately marked and
     excluded from that reconciliation.
-29. Model details retain observation-level Token evidence and immutable price
-    snapshots so displayed totals, line items, authority, precision, time, and
-    trend can be audited without joining model names across sources.
+29. Model details present aggregate Token, cost, authority, precision, time, and
+    trend summaries without exposing observation or pricing audit tables. The
+    underlying observation-level Token evidence and immutable price snapshots
+    remain retained in the local domain and export paths without joining model
+    names across sources.
 30. A Provider with independent billing domains declares one
     `summaryBillingDomainId`. Provider headlines and workbench scalar metrics
     aggregate only that domain. Sibling-domain Token and cost evidence remains

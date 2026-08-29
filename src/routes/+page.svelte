@@ -61,7 +61,6 @@
   let selectedModelId: string | null = null;
   let modelDetailTrigger: HTMLButtonElement | null = null;
   let modelDetailPanel: HTMLElement | null = null;
-  let modelAuditOpen = false;
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
   let diagnostics: DoctorReport | null = null;
@@ -642,28 +641,6 @@
         : t('unknown');
   }
 
-  function aggregationTemporalityLabel(
-    temporality: ProviderOverview['tokenEvidence']['aggregationTemporalities'][number]
-  ): string {
-    return temporality === 'delta'
-      ? t('temporalityDelta')
-      : temporality === 'cumulative'
-        ? t('temporalityCumulative')
-        : t('temporalityUnknown');
-  }
-
-  function tokenSemanticsSummary(
-    semantics: BillingHistory['models'][number]['observations'][number]['tokenSemantics']
-  ): string {
-    const reasoning =
-      semantics.reasoning === 'included-in-output' ? t('includedInOutput') : t('separateCategory');
-    const cacheRead =
-      semantics.cacheRead === 'included-in-input' ? t('includedInInput') : t('separateCategory');
-    const cacheWrite =
-      semantics.cacheWrite === 'included-in-input' ? t('includedInInput') : t('separateCategory');
-    return `${t('reasoning')}: ${reasoning} · ${t('cacheRead')}: ${cacheRead} · ${t('cacheWrite')}: ${cacheWrite}`;
-  }
-
   function nonOverlappingComposition(
     observations: HistoryModelObservation[],
     fallback: TokenTotals
@@ -750,27 +727,6 @@
         costObservedAt: selectedCost.observedAt
       };
     });
-  }
-
-  function tokenKindLabel(kind: string): string {
-    const keys: Record<string, MessageKey> = {
-      input: 'input',
-      output: 'output',
-      reasoning: 'reasoning',
-      'cache-read': 'cacheRead',
-      'cache-write': 'cacheWrite'
-    };
-    return t(keys[kind] ?? 'unknown');
-  }
-
-  function costKindLabel(kind: string): string {
-    const keys: Record<string, MessageKey> = {
-      actual: 'costActual',
-      subscription: 'costSubscription',
-      'reported-estimate': 'providerReportedEstimate',
-      'retail-equivalent': 'apiRetailEquivalent'
-    };
-    return t(keys[kind] ?? 'unknown');
   }
 
   function totalDerivationLabel(derivation: string): string {
@@ -1214,7 +1170,6 @@
   }
 
   async function openModelDetail(id: string, trigger: HTMLButtonElement): Promise<void> {
-    modelAuditOpen = false;
     selectedModelId = id;
     modelDetailTrigger = trigger;
     await tick();
@@ -1222,7 +1177,6 @@
   }
 
   async function closeModelDetail(): Promise<void> {
-    modelAuditOpen = false;
     selectedModelId = null;
     await tick();
     modelDetailTrigger?.focus();
@@ -2302,147 +2256,6 @@
               {/if}
             </div>
           </section>
-
-          <details class="model-audit-details" bind:open={modelAuditOpen}>
-            <summary>{t('auditDetails')}</summary>
-            {#if modelAuditOpen}
-              <div class="model-audit-scroll">
-                <section aria-labelledby="model-observation-audit-heading">
-                  <h3 id="model-observation-audit-heading">{t('providerEvidence')}</h3>
-                  <table aria-label={t('providerEvidence')}>
-                    <thead>
-                      <tr>
-                        <th>{t('source')}</th>
-                        <th>{t('scope')}</th>
-                        <th>{t('tokens')}</th>
-                        <th>{t('semantics')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {#each model.observations as observation (observation.id)}
-                        <tr>
-                          <td>
-                            <strong>{authorityLabel(observation.authority)}</strong>
-                            <small>
-                              {formatReset(observation.observedAt)} ·
-                              {timePrecisionLabel(observation.timePrecision)}
-                            </small>
-                            <code>{observation.id}</code>
-                          </td>
-                          <td>
-                            {usageScopeLabel(observation.usageScope)} ·
-                            {aggregationTemporalityLabel(observation.aggregationTemporality)}
-                          </td>
-                          <td>
-                            <span
-                              >{t('recordedTotal')}: {formatNumber(
-                                observation.recordedTokens
-                              )}</span
-                            >
-                            <span
-                              >{t('classified')}: {formatNumber(observation.classifiedTokens)}</span
-                            >
-                            <span
-                              >{t('unclassified')}: {formatNumber(
-                                observation.unclassifiedTokens
-                              )}</span
-                            >
-                            <span>
-                              {t('sourceReportedTotal')}:
-                              {observation.sourceReportedTotalTokens === null
-                                ? t('notAvailable')
-                                : formatNumber(observation.sourceReportedTotalTokens)}
-                            </span>
-                          </td>
-                          <td>
-                            <span>{totalDerivationLabel(observation.totalDerivation)}</span>
-                            <small>{tokenSemanticsSummary(observation.tokenSemantics)}</small>
-                          </td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                </section>
-
-                <section aria-labelledby="model-price-audit-heading">
-                  <h3 id="model-price-audit-heading">{t('priceLineItems')}</h3>
-                  {#if model.priceEvidence.length === 0}
-                    <p>{t('noPriceEvidence')}</p>
-                  {:else}
-                    <table aria-label={t('priceLineItems')}>
-                      <thead>
-                        <tr>
-                          <th>{t('cost')}</th>
-                          <th>{t('priceLineItems')}</th>
-                          <th>{t('priceSnapshot')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {#each model.priceEvidence as price (price.id)}
-                          <tr>
-                            <td>
-                              <strong>{costKindLabel(price.kind)}</strong>
-                              <span>
-                                {price.amount === null
-                                  ? t('notAvailable')
-                                  : formatMoney(price.amount, price.currency)}
-                              </span>
-                              <small>
-                                {authorityLabel(price.authority)} · {formatReset(price.observedAt)} ·
-                                {t('calculatedAt')}
-                                {formatReset(price.calculatedAt)}
-                              </small>
-                              <code>{price.id}</code>
-                            </td>
-                            <td>
-                              {#each price.lineItems as line (`${price.id}:${line.tokenKind}`)}
-                                <span>
-                                  {tokenKindLabel(line.tokenKind)} · {formatNumber(line.tokens)} ·
-                                  {formatMoney(line.amount, price.currency)}
-                                  <small>
-                                    {t('ratePerMillion')}
-                                    {formatMoney(line.ratePerMillion, price.currency)}
-                                  </small>
-                                </span>
-                              {/each}
-                            </td>
-                            <td>
-                              {#if price.priceSnapshot}
-                                <strong>
-                                  {price.priceSnapshot.version} · {price.priceSnapshot.source}
-                                </strong>
-                                <small>
-                                  {price.priceSnapshot.canonicalModel ?? t('unknown')} ·
-                                  {price.priceSnapshot.currency} ·
-                                  {price.priceSnapshot.contextTier ?? t('unknown')}
-                                </small>
-                                <small>
-                                  {t('priceEffective')}
-                                  {formatReset(price.priceSnapshot.effectiveAt)}
-                                  – {formatReset(price.priceSnapshot.effectiveUntil)}
-                                </small>
-                                <small>
-                                  {Object.entries(price.priceSnapshot.ratesPerMillion)
-                                    .map(([kind, rate]) =>
-                                      rate === null
-                                        ? `${tokenKindLabel(kind)}: ${t('notAvailable')}`
-                                        : `${tokenKindLabel(kind)}: ${formatMoney(rate, price.priceSnapshot?.currency ?? price.currency)}`
-                                    )
-                                    .join(' · ')}
-                                </small>
-                              {:else}
-                                {t('notAvailable')}
-                              {/if}
-                            </td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  {/if}
-                </section>
-              </div>
-            {/if}
-          </details>
         </div>
       </div>
     </div>
@@ -3942,71 +3755,6 @@
 
   .model-evidence-summary .model-price-source {
     grid-column: auto;
-  }
-
-  .model-audit-details {
-    overflow: hidden;
-    border: 1px solid var(--border-soft);
-    border-radius: 12px;
-    background: var(--surface-subtle);
-  }
-
-  .model-audit-details > summary {
-    padding: 11px 14px;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.72rem;
-    font-weight: 650;
-  }
-
-  .model-audit-details[open] > summary {
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .model-audit-scroll {
-    display: grid;
-    gap: 18px;
-    max-height: 300px;
-    padding: 14px;
-    overflow: auto;
-  }
-
-  .model-audit-scroll section {
-    min-width: 720px;
-  }
-
-  .model-audit-scroll table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.64rem;
-  }
-
-  .model-audit-scroll th,
-  .model-audit-scroll td {
-    padding: 8px 9px;
-    border-bottom: 1px solid var(--border-soft);
-    color: var(--text);
-    text-align: left;
-    vertical-align: top;
-  }
-
-  .model-audit-scroll th {
-    color: var(--muted);
-    font-weight: 600;
-  }
-
-  .model-audit-scroll td > span,
-  .model-audit-scroll td > small,
-  .model-audit-scroll td > code {
-    display: block;
-    margin-top: 3px;
-  }
-
-  .model-audit-scroll small,
-  .model-audit-scroll code {
-    color: var(--muted);
-    font-size: 0.58rem;
-    white-space: normal;
   }
 
   .settings-drawer {

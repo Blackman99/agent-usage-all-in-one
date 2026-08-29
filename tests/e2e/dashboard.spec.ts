@@ -1235,8 +1235,6 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(detail).toBeFocused();
   await expect(page.locator('.shell')).toHaveAttribute('inert', '');
   await page.keyboard.press('Shift+Tab');
-  await expect(detail.getByText('Audit details')).toBeFocused();
-  await page.keyboard.press('Tab');
   await expect(detail.getByRole('button', { name: 'Close model detail' })).toBeFocused();
   await expect(detail).toContainText('Claude Code · Subscription');
   await page.keyboard.press('Escape');
@@ -1295,21 +1293,12 @@ test('presents model detail as a compact visual summary instead of long visible 
   );
   await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Event');
   await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Estimate');
-  const auditDetails = detail.locator('.model-audit-details');
-  await expect(auditDetails).not.toHaveAttribute('open');
-  await auditDetails.getByText('Audit details').click();
-  await expect(auditDetails.getByRole('table', { name: 'Provider evidence' })).toContainText(
-    'Recorded total: 450'
-  );
-  await expect(auditDetails.getByRole('table', { name: 'Provider evidence' })).toContainText(
-    'Unclassified: 50'
-  );
-  await expect(auditDetails.getByRole('table', { name: 'Price line items' })).toContainText(
-    '2026-08-01 · Official fixture pricing'
-  );
+  await expect(detail.getByText('Audit details')).toHaveCount(0);
+  await expect(detail.getByRole('table', { name: 'Provider evidence' })).toHaveCount(0);
+  await expect(detail.getByRole('table', { name: 'Price line items' })).toHaveCount(0);
 });
 
-test('opens the model detail shell before rendering a large audit history', async ({ page }) => {
+test('opens the model detail shell promptly with a large evidence history', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   const fixture = historyOverviewFixture('30d', 2900, 'USD') as {
     workbench: {
