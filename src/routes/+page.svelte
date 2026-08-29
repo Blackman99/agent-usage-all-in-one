@@ -29,6 +29,7 @@
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
   import ProviderShareChart from '$lib/ProviderShareChart.svelte';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
+  import '$lib/dashboard-polish.css';
 
   let locale: Locale = 'en';
   let metaDescription: string;
@@ -108,6 +109,11 @@
 
   function t(key: MessageKey): string {
     return translate(locale, key);
+  }
+
+  function breakdownShareLabel(dimension: 'model' | 'day'): string {
+    if (selectedTrendMetric === 'tokens') return t('tokenShare');
+    return t(dimension === 'model' ? 'costShare' : 'retailShare');
   }
 
   function toggleLocale(): void {
@@ -1655,13 +1661,7 @@
                 <div class="breakdown-header" aria-hidden="true">
                   <span>{breakdownDimension === 'model' ? t('model') : t('day')}</span>
                   <span>{t('cost')}</span>
-                  <span
-                    >{selectedTrendMetric === 'tokens'
-                      ? t('tokenShare')
-                      : breakdownDimension === 'model'
-                        ? t('costShare')
-                        : t('retailShare')}</span
-                  >
+                  <span>{breakdownShareLabel(breakdownDimension)}</span>
                   <span>{t('tokens')}</span>
                 </div>
                 {#if breakdownDimension === 'model'}
@@ -1723,14 +1723,17 @@
                               </small>
                             </span>
                           </span>
-                          <span class="ranking-value">
+                          <span class="ranking-value" data-label={t('cost')}>
                             <strong>
                               {modelCost.amount === null
                                 ? t('notAvailable')
                                 : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
                             </strong>
                           </span>
-                          <span class="ranking-value ranking-share-value">
+                          <span
+                            class="ranking-value ranking-share-value"
+                            data-label={breakdownShareLabel('model')}
+                          >
                             <strong>
                               {model.includedInHeadline === false
                                 ? t('headlineShareNotApplicable')
@@ -1741,7 +1744,7 @@
                                 class="model-share-track"
                                 data-testid="model-share-meter"
                                 role="meter"
-                                aria-label={`${model.model} ${selectedTrendMetric === 'tokens' ? t('tokenShare') : t('costShare')}`}
+                                aria-label={`${model.model} ${breakdownShareLabel('model')}`}
                                 aria-valuemin="0"
                                 aria-valuemax="100"
                                 aria-valuenow={Math.round(modelShare * 1000) / 10}
@@ -1751,7 +1754,7 @@
                               </span>
                             {/if}
                           </span>
-                          <span class="ranking-value">
+                          <span class="ranking-value" data-label={t('tokens')}>
                             <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
                               >{formatCompactNumber(model.tokenTotals.total)}</strong
                             >
@@ -1802,15 +1805,15 @@
                             )}
                           </small>
                         </span>
-                        <span>
+                        <span class="day-value" data-label={t('cost')}>
                           {formatMoney(day.retailEquivalent.amount, workbench.comparisonCurrency)}
                         </span>
-                        <span
+                        <span class="day-value" data-label={breakdownShareLabel('day')}
                           >{formatPercent(
                             selectedTrendMetric === 'tokens' ? day.tokenShare : day.retailShare
                           )}</span
                         >
-                        <span>
+                        <span class="day-value" data-label={t('tokens')}>
                           {day.recordedTokens === null
                             ? t('notAvailable')
                             : formatCompactNumber(day.recordedTokens)}

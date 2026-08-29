@@ -1424,6 +1424,20 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   };
   await expect.poll(controlCenterSpread).toBeLessThanOrEqual(4);
 
+  const shellLayout = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('.product-header');
+    const providers = document.querySelector<HTMLElement>('.providers');
+    if (!header || !providers) throw new Error('Dashboard shell is unavailable');
+    return {
+      headerPosition: getComputedStyle(header).position,
+      providerAlignment: getComputedStyle(providers).alignItems
+    };
+  });
+  expect(shellLayout).toEqual({
+    headerPosition: 'sticky',
+    providerAlignment: 'start'
+  });
+
   const providerSurface = await page
     .locator('.provider-card')
     .first()
@@ -1452,6 +1466,20 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   expect(summaryBox).not.toBeNull();
   expect(analysisBox).not.toBeNull();
   expect(summaryBox!.y + summaryBox!.height).toBeLessThanOrEqual(analysisBox!.y);
+  const visualHierarchy = await page.evaluate(() => {
+    const headline = document.querySelector<HTMLElement>('.usage-headline > strong');
+    const summary = document.querySelector<HTMLElement>('.usage-summary-board');
+    if (!headline || !summary) throw new Error('Usage summary is unavailable');
+    const headlineStyle = getComputedStyle(headline);
+    return {
+      headlineWhiteSpace: headlineStyle.whiteSpace,
+      headlineOverflowWrap: headlineStyle.overflowWrap,
+      summaryShadow: getComputedStyle(summary).boxShadow
+    };
+  });
+  expect(visualHierarchy.headlineWhiteSpace).toBe('nowrap');
+  expect(visualHierarchy.headlineOverflowWrap).toBe('normal');
+  expect(visualHierarchy.summaryShadow).not.toBe('none');
   const providerShareChart = page.getByTestId('provider-share-chart');
   await expect(providerShareChart).toHaveAttribute('data-chart-engine', 'echarts');
   await expect(providerShareChart.locator('canvas')).toHaveCount(1);
@@ -1526,6 +1554,41 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   await expect(modelCostsTab).toBeFocused();
   await expect(modelCostsTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('table', { name: /Trend data · 7d/ })).toBeAttached();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+    .toBeLessThanOrEqual(0);
+  const narrowTokenLayout = await page.evaluate(() => {
+    const headline = document.querySelector<HTMLElement>('.usage-headline > strong');
+    const values = [
+      ...document.querySelectorAll<HTMLElement>(
+        '.model-ranking .ranking-value strong, .model-ranking .day-value'
+      )
+    ];
+    if (!headline || values.length === 0) throw new Error('Token details are unavailable');
+    return {
+      headlineOverflow: headline.scrollWidth - headline.clientWidth,
+      values: values.map((value) => {
+        const style = getComputedStyle(value);
+        return {
+          overflowWrap: style.overflowWrap,
+          whiteSpace: style.whiteSpace
+        };
+      })
+    };
+  });
+  expect(narrowTokenLayout.headlineOverflow).toBeLessThanOrEqual(0);
+  expect(narrowTokenLayout.values).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ overflowWrap: 'anywhere', whiteSpace: 'normal' })
+    ])
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator('.model-ranking')
+        .evaluate((element) => element.scrollWidth - element.clientWidth)
+    )
+    .toBeLessThanOrEqual(0);
   await modelCostsTab.press('ArrowLeft');
   await expect(agentUsageTab).toBeFocused();
   await expect(agentUsageTab).toHaveAttribute('aria-selected', 'true');
