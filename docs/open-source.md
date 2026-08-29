@@ -1,7 +1,7 @@
 # Open-source and attribution guide
 
 Agent Usage is released under the MIT License. Source code, tests, documentation,
-and the original Agent Usage logo/banner are covered by that license unless a
+and the original Agent Usage logo/dashboard showcase are covered by that license unless a
 file or notice states otherwise.
 
 ## Adapted source

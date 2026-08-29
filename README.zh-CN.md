@@ -1,4 +1,4 @@
-![Agent Usage 横幅](static/brand/agent-usage-banner.svg)
+![Agent Usage 仪表盘功能展示](static/brand/agent-usage-showcase.jpg)
 
 # Agent Usage
 
@@ -11,8 +11,6 @@
 Agent Usage 是一个 macOS 优先、完全在本地运行的用量中心。一次启动即可统一查看
 Codex、Claude Code、OpenCode 与 Grok 的原生额度窗口、刷新时间、Token、模型排行、
 API 对等费用、历史与诊断。它只提供建议，不会自动切换 Agent。
-
-![Agent Usage 仪表盘功能展示](static/brand/agent-usage-showcase.jpg)
 
 ## 核心页面
 

@@ -19,10 +19,10 @@ All marks identify their external Providers only. They are not the Agent Usage
 product mark and must not imply sponsorship or endorsement. Assets must preserve
 their aspect ratio and must not be traced, recolored, decorated, or incorporated
 into the Agent Usage orbit-and-meter logo. Compatibility surfaces such as Provider
-cards and the README banner may display the exact audited bytes only when each mark
-remains visually separated and names its Provider. The self-contained README banner
-uses byte-identical `data:` copies guarded against drift by `brand-assets.test.ts`.
-Review the linked trademark guidance before shipping a replacement.
+cards and the dashboard shown in the README showcase may display the audited assets
+only when each mark remains visually separated and names its Provider. The showcase
+is a captured product surface; it must not substitute traced, recolored, or invented
+Provider marks. Review the linked trademark guidance before shipping a replacement.
 
 The official SpaceXAI download endpoint returned HTTP 403 during the audited
 retrieval. The exact archive was therefore obtained from the public mirror attached

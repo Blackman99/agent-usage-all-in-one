@@ -1,4 +1,4 @@
-![Agent Usage banner](static/brand/agent-usage-banner.svg)
+![Agent Usage dashboard showcase](static/brand/agent-usage-showcase.jpg)
 
 # Agent Usage
 
@@ -12,8 +12,6 @@ Agent Usage is a macOS-first, fully local usage center for Codex, Claude Code,
 OpenCode, and Grok. One command opens a dashboard for native quota windows,
 reset times, tokens, model rankings, equivalent API cost, history, and diagnostics.
 It offers advice but never switches agents automatically.
-
-![Agent Usage dashboard showcase](static/brand/agent-usage-showcase.jpg)
 
 ## Dashboard
 
