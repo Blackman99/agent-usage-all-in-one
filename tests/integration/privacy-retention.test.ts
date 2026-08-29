@@ -206,6 +206,37 @@ describe('privacy, export, and retention', () => {
     });
     restartedRepository.close();
   });
+
+  it('deletes only the requested provider and its connector state', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-provider-cleanup-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(snapshot());
+    repository.saveSnapshot({
+      ...snapshot(),
+      provider: { id: 'demo', displayName: 'Demo Agent' }
+    });
+    for (const id of ['demo', 'codex']) {
+      repository.saveConnectorStatus({
+        id,
+        state: 'connected',
+        installed: true,
+        binaryPath: null,
+        officialCredentialPresent: true,
+        errorCode: null,
+        lastDiscoveredAt: '2026-08-28T02:00:00.000Z',
+        secretReference: null
+      });
+    }
+
+    repository.deleteProviderData('demo');
+
+    expect(repository.getOverview(new Date('2026-08-28T02:00:00.000Z')).providers).toEqual([
+      expect.objectContaining({ id: 'privacy', displayName: 'Privacy Agent' })
+    ]);
+    expect(repository.getConnectorStatuses().map((status) => status.id)).toEqual(['codex']);
+    repository.close();
+  });
 });
 
 async function fixture(): Promise<{

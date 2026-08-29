@@ -100,7 +100,67 @@ describe('one-command development mode', () => {
     expect(output).not.toContain('Agent Usage dev:');
     await expect(access(join(home, 'daemon.json'))).rejects.toThrow();
   }, 10_000);
+
+  it('removes persisted demo data when development restarts without demo mode', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agent-usage-dev-demo-cleanup-'));
+    workspaces.push(home);
+    const demoChild = spawn(process.execPath, ['scripts/dev.mjs', '--no-open'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AGENT_USAGE_DEMO: '1',
+        AGENT_USAGE_DEV_HOME: home,
+        AGENT_USAGE_DEV_PORT: '0',
+        NO_COLOR: '1'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    children.push(demoChild);
+
+    const demoLaunchUrl = await waitForLaunchUrl(demoChild);
+    const demoSession = await authenticatedSession(demoLaunchUrl);
+    await waitForProcessing(demoSession.origin, demoSession.cookie, 'usage');
+    await expect(providerIds(demoSession.origin, demoSession.cookie)).resolves.toContain('demo');
+    await stopChild(demoChild);
+    children.splice(children.indexOf(demoChild), 1);
+
+    const cleanEnvironment = { ...process.env };
+    delete cleanEnvironment.AGENT_USAGE_DEMO;
+    const normalChild = spawn(process.execPath, ['scripts/dev.mjs', '--no-open'], {
+      cwd: process.cwd(),
+      env: {
+        ...cleanEnvironment,
+        AGENT_USAGE_DEV_HOME: home,
+        AGENT_USAGE_DEV_PORT: '0',
+        NO_COLOR: '1'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    children.push(normalChild);
+
+    const normalLaunchUrl = await waitForLaunchUrl(normalChild);
+    const normalSession = await authenticatedSession(normalLaunchUrl);
+    await waitForProcessing(normalSession.origin, normalSession.cookie, 'usage');
+    await expect(providerIds(normalSession.origin, normalSession.cookie)).resolves.not.toContain(
+      'demo'
+    );
+  }, 30_000);
 });
+
+async function authenticatedSession(
+  launchUrl: string
+): Promise<{ origin: string; cookie: string }> {
+  const launch = await fetch(launchUrl, { redirect: 'manual' });
+  const cookie = launch.headers.getSetCookie()[0]?.split(';')[0];
+  if (!cookie) throw new Error('Development launch did not set a session cookie');
+  return { origin: new URL(launchUrl).origin, cookie };
+}
+
+async function providerIds(origin: string, cookie: string): Promise<string[]> {
+  const response = await fetch(`${origin}/api/overview`, { headers: { cookie } });
+  const overview = (await response.json()) as { providers: Array<{ id: string }> };
+  return overview.providers.map((provider) => provider.id);
+}
 
 async function waitForLaunchUrl(child: ChildProcess): Promise<string> {
   return await new Promise((resolve, reject) => {

@@ -41,6 +41,8 @@ import { SqliteUsageRepository } from './sqlite-usage-repository.js';
 export async function runDaemon(home: string): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const repository = new SqliteUsageRepository(join(home, 'usage.sqlite'));
+  const demoEnabled = process.env.AGENT_USAGE_DEMO === '1';
+  if (!demoEnabled) repository.deleteProviderData('demo');
   const keychainService = process.env.AGENT_USAGE_KEYCHAIN_SERVICE;
   const launchAgentLabel = process.env.AGENT_USAGE_LAUNCH_AGENT_LABEL;
   const nodeImport = process.env.AGENT_USAGE_NODE_IMPORT;
@@ -51,7 +53,7 @@ export async function runDaemon(home: string): Promise<void> {
   const application = new UsageApplication({
     repository,
     connectors: [
-      ...(process.env.AGENT_USAGE_DEMO === '1' ? [createDemoConnector()] : []),
+      ...(demoEnabled ? [createDemoConnector()] : []),
       new CodexConnector(
         new StdioCodexAccountClient(),
         undefined,
@@ -91,7 +93,7 @@ export async function runDaemon(home: string): Promise<void> {
         ...(keychainService ? { AGENT_USAGE_KEYCHAIN_SERVICE: keychainService } : {}),
         ...(launchAgentLabel ? { AGENT_USAGE_LAUNCH_AGENT_LABEL: launchAgentLabel } : {}),
         ...(nodeImport ? { AGENT_USAGE_NODE_IMPORT: nodeImport } : {}),
-        ...(process.env.AGENT_USAGE_DEMO === '1' ? { AGENT_USAGE_DEMO: '1' } : {})
+        ...(demoEnabled ? { AGENT_USAGE_DEMO: '1' } : {})
       }
     }),
     connectorPolicies: Object.fromEntries(

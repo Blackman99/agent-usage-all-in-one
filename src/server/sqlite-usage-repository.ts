@@ -1295,6 +1295,22 @@ export class SqliteUsageRepository implements UsageRepository {
     }
   }
 
+  deleteProviderData(providerId: string): void {
+    this.#database.exec('BEGIN IMMEDIATE');
+    try {
+      this.#database
+        .prepare('DELETE FROM connector_diagnostics WHERE provider_id = ?')
+        .run(providerId);
+      this.#database.prepare('DELETE FROM connector_runtime WHERE id = ?').run(providerId);
+      this.#database.prepare('DELETE FROM connector_settings WHERE id = ?').run(providerId);
+      this.#database.prepare('DELETE FROM providers WHERE id = ?').run(providerId);
+      this.#database.exec('COMMIT');
+    } catch (error) {
+      this.#database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   deleteDerivedRetailCosts(): void {
     this.#database.prepare(DELETE_DERIVED_RETAIL_COSTS_SQL).run();
   }
