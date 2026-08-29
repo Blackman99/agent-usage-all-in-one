@@ -3157,9 +3157,9 @@ function buildWorkbenchModelRanking(
         )
     );
   return {
-    byTokens: byTokens.slice(0, 5).map((entry) => entry.id),
-    byCost: byCost.slice(0, 5).map((entry) => entry.id),
-    byRetailEquivalent: byRetailEquivalent.slice(0, 5).map((entry) => entry.id),
+    byTokens: byTokens.map((entry) => entry.id),
+    byCost: byCost.map((entry) => entry.id),
+    byRetailEquivalent: byRetailEquivalent.map((entry) => entry.id),
     entries: byTokens,
     unclassified
   };

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-08-28
+Accepted — 2026-08-28. The Top 5 display limit is superseded by ADR 013.
 
 ## Context
 

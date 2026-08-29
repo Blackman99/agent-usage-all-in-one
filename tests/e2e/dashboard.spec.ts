@@ -1098,7 +1098,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
     'true'
   );
   const rows = ranking.getByTestId('model-ranking-row');
-  await expect(rows).toHaveCount(5);
+  await expect(rows).toHaveCount(6);
   await expect(rows.first()).toContainText('fable-model');
   await expect(rows.first()).toContainText('Claude Code · Subscription');
   await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/claude.svg');
@@ -1114,6 +1114,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(rows.first()).toContainText('Codex · Subscription');
   await expect(rows.first()).toContainText('Unavailable');
   await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/openai.svg');
+  await expect(rows.filter({ hasText: 'model-five' })).toHaveCount(1);
   await expect(ranking.getByText('Unclassified usage')).toBeVisible();
   await expect(ranking.getByText('1,000 Tokens')).toBeVisible();
 
@@ -1131,6 +1132,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(grokRow).toContainText('Provider-reported estimate');
   await expect(grokRow).toContainText('$3.00');
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'model-five' })).toHaveCount(1);
 
   await ranking.getByRole('button', { name: 'Day', exact: true }).click();
   await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(2);
@@ -2129,11 +2131,18 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
     }
   );
   return {
-    byTokens: entries.slice(0, 5).map((entry) => entry.id),
-    byCost: [entries[1], entries[3], entries[2], entries[0], entries[4]].map((entry) => entry.id),
-    byRetailEquivalent: [entries[1], entries[3], entries[2], entries[0], entries[4]].map(
+    byTokens: entries.map((entry) => entry.id),
+    byCost: [entries[1], entries[3], entries[2], entries[0], entries[4], entries[5]].map(
       (entry) => entry.id
     ),
+    byRetailEquivalent: [
+      entries[1],
+      entries[3],
+      entries[2],
+      entries[0],
+      entries[4],
+      entries[5]
+    ].map((entry) => entry.id),
     entries,
     unclassified: [
       {

@@ -17,7 +17,22 @@ afterEach(async () => {
 });
 
 describe('model ranking read model', () => {
-  it('ranks isolated known models without letting unclassified usage occupy the top five', async () => {
+  it('keeps the same complete model set when sorting by Tokens or cost', async () => {
+    const repository = await fixture();
+    const ranking = repository.getOverview(NOW, {
+      window: '24h',
+      timeZone: 'UTC',
+      comparisonCurrency: 'USD'
+    }).workbench.modelRanking;
+    const allModels = ranking.entries.map((entry) => entry.id).sort();
+
+    expect([...ranking.byTokens].sort()).toEqual(allModels);
+    expect([...ranking.byCost].sort()).toEqual(allModels);
+    expect([...ranking.byRetailEquivalent].sort()).toEqual(allModels);
+    repository.close();
+  });
+
+  it('ranks every isolated known model without mixing in unclassified usage', async () => {
     const repository = await fixture();
     const workbench = repository.getOverview(NOW, {
       window: '24h',
@@ -30,14 +45,16 @@ describe('model ranking read model', () => {
       'claude-code::subscription::fable-model',
       'opencode-go::subscription::open-model',
       'grok::xai-api::shared-model',
-      'codex::subscription::model-four'
+      'codex::subscription::model-four',
+      'codex::subscription::model-five'
     ]);
     expect(workbench.modelRanking.byRetailEquivalent).toEqual([
       'claude-code::subscription::fable-model',
       'grok::xai-api::shared-model',
       'opencode-go::subscription::open-model',
       'codex::subscription::shared-model',
-      'codex::subscription::model-four'
+      'codex::subscription::model-four',
+      'codex::subscription::model-five'
     ]);
     const shared = workbench.modelRanking.entries.filter((entry) => entry.model === 'shared-model');
     expect(shared).toHaveLength(2);
