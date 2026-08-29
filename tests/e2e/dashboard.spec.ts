@@ -1386,6 +1386,16 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
     'Source: Estimate'
   );
+  await page.mouse.move(0, 0);
+  await expect(providerShareChart.locator('.provider-share-tooltip')).toBeHidden();
+  await providerShareChart.hover({
+    position: { x: providerChartBox!.width / 2, y: providerChartBox!.height - 10 }
+  });
+  await expect(providerShareChart.locator('.provider-share-tooltip')).toHaveText(
+    /History Agent.*100%.*Source: Estimate/
+  );
+  await page.mouse.move(0, 0);
+  await expect(providerShareChart.locator('.provider-share-tooltip')).toBeHidden();
   await expect(page.getByTestId('model-share-meter').first()).toHaveAttribute('role', 'meter');
   for (const selector of [
     '.usage-summary-board',

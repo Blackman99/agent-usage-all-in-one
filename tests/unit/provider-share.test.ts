@@ -104,6 +104,31 @@ describe('Provider share chart', () => {
     expect(option.series[0].data).toHaveLength(3);
   });
 
+  it('shows the matching Provider tooltip when hovering a built-in legend item', () => {
+    const entries = buildProviderShareEntries(
+      providers,
+      'tokens',
+      () => '#7788ff',
+      (value) => `${value} Tokens`,
+      (share) => `${share * 100}%`,
+      (provider) => `${provider.authorities.join(',')}:${provider.lastObservedAt}`
+    );
+    const option = buildProviderShareChartOption(entries, {
+      text: '#ffffff',
+      muted: '#999999',
+      surface: '#111111',
+      border: '#333333'
+    });
+    const legend = option.legend as typeof option.legend & {
+      tooltip?: { show?: boolean; formatter?: (parameters: { name: string }) => string };
+    };
+
+    expect(legend.tooltip).toMatchObject({ show: true });
+    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('250 Tokens');
+    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('25%');
+    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('official-client');
+  });
+
   it('includes OpenCode in the cost donut when local-history has retail-equivalent evidence', () => {
     const pricedProviders: ProviderShareSource[] = providers.map((provider) =>
       provider.providerId === 'opencode'

@@ -117,7 +117,12 @@ export function buildProviderShareChartOption(
       pageIconInactiveColor: theme.border,
       pageTextStyle: { color: theme.muted, fontSize: 10 },
       textStyle: { color: theme.muted, fontSize: 11 },
-      formatter: (name: string) => (name.length > 18 ? `${name.slice(0, 17)}…` : name)
+      formatter: (name: string) => (name.length > 18 ? `${name.slice(0, 17)}…` : name),
+      tooltip: {
+        show: true,
+        formatter: (parameters: unknown) =>
+          formatTooltip(legendTooltipEntry(parameters, entries), theme, emptyLabel)
+      }
     },
     tooltip: {
       show: true,
@@ -131,16 +136,7 @@ export function buildProviderShareChartOption(
       padding: [10, 12],
       textStyle: { color: theme.text, fontSize: 11 },
       extraCssText: 'border-radius: 10px; box-shadow: 0 14px 34px rgba(0,0,0,.22);',
-      formatter: (parameters: unknown) => {
-        const data = tooltipEntry(parameters);
-        if (!data) return emptyLabel;
-        return [
-          `<strong>${escapeHtml(data.name)}</strong>`,
-          `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.billingDomainDisplayName)}</span>`,
-          `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`,
-          `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.formattedEvidence)}</span>`
-        ].join('<br>');
-      }
+      formatter: (parameters: unknown) => formatTooltip(tooltipEntry(parameters), theme, emptyLabel)
     },
     series: [
       {
@@ -179,6 +175,29 @@ function tooltipEntry(parameters: unknown): ProviderShareEntry | null {
   const data = parameters.data;
   if (!data || typeof data !== 'object') return null;
   return data as ProviderShareEntry;
+}
+
+function legendTooltipEntry(
+  parameters: unknown,
+  entries: ProviderShareEntry[]
+): ProviderShareEntry | null {
+  if (!parameters || typeof parameters !== 'object' || !('name' in parameters)) return null;
+  const name = parameters.name;
+  return typeof name === 'string' ? (entries.find((entry) => entry.name === name) ?? null) : null;
+}
+
+function formatTooltip(
+  data: ProviderShareEntry | null,
+  theme: ProviderShareTheme,
+  emptyLabel: string
+): string {
+  if (!data) return emptyLabel;
+  return [
+    `<strong>${escapeHtml(data.name)}</strong>`,
+    `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.billingDomainDisplayName)}</span>`,
+    `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`,
+    `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.formattedEvidence)}</span>`
+  ].join('<br>');
 }
 
 function escapeHtml(value: string): string {
