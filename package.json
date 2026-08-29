@@ -1,6 +1,6 @@
 {
   "name": "agent-usage-all-in-one",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Local-first quota, token, and equivalent API cost dashboard for coding agents.",
   "license": "MIT",
   "author": "Agent Usage contributors",
