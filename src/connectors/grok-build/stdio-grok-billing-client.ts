@@ -36,6 +36,8 @@ export interface StdioGrokBillingClientOptions {
   timeoutMs?: number;
   spawnProcess?: (command: string, arguments_: string[]) => GrokBillingProcess;
   readUnifiedLog?: () => Promise<string>;
+  refreshBillingLog?: () => Promise<void>;
+  clock?: () => Date;
 }
 
 export class GrokBillingAdapterError extends Error {
@@ -67,6 +69,8 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
   readonly #timeoutMs: number;
   readonly #spawnProcess: NonNullable<StdioGrokBillingClientOptions['spawnProcess']>;
   readonly #readUnifiedLog: NonNullable<StdioGrokBillingClientOptions['readUnifiedLog']>;
+  readonly #refreshBillingLog: NonNullable<StdioGrokBillingClientOptions['refreshBillingLog']>;
+  readonly #clock: () => Date;
 
   constructor(options: StdioGrokBillingClientOptions = {}) {
     this.#command = options.command ?? 'grok';
@@ -83,6 +87,12 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
         readLogTail(
           join(process.env.GROK_HOME ?? join(homedir(), '.grok'), 'logs', 'unified.jsonl')
         ));
+    this.#refreshBillingLog =
+      options.refreshBillingLog ??
+      (options.readUnifiedLog
+        ? async () => undefined
+        : () => refreshBillingLogViaDashboard(this.#command, this.#timeoutMs));
+    this.#clock = options.clock ?? (() => new Date());
   }
 
   async readBilling(): Promise<GrokBuildBilling> {
@@ -90,7 +100,7 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
     try {
       process = this.#spawnProcess(this.#command, ['agent', '--no-leader', 'stdio']);
     } catch (error) {
-      const fallback = await this.#readLogFallback();
+      const fallback = await this.#readFreshLogFallback();
       if (fallback) return fallback;
       throw unavailableError(error);
     }
@@ -127,7 +137,7 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
       }
       return billing.data;
     } catch (error) {
-      const fallback = await this.#readLogFallback();
+      const fallback = await this.#readFreshLogFallback();
       if (fallback) return fallback;
       if (error instanceof GrokBillingAdapterError) throw error;
       if (error instanceof JsonRpcError && error.code === -32601) {
@@ -159,6 +169,65 @@ export class StdioGrokBillingClient implements GrokBuildBillingClient {
       return null;
     }
   }
+
+  async #readFreshLogFallback(): Promise<GrokBuildBilling | null> {
+    const cached = await this.#readLogFallback();
+    if (cached && billingIsFresh(cached, this.#clock())) return cached;
+    try {
+      await this.#refreshBillingLog();
+    } catch {
+      return cached;
+    }
+    return (await this.#readLogFallback()) ?? cached;
+  }
+}
+
+const GROK_BILLING_FRESHNESS_MS = 5 * 60 * 1_000;
+
+function billingIsFresh(billing: GrokBuildBilling, now: Date): boolean {
+  if (!billing.sourceObservedAt) return false;
+  const observedAt = Date.parse(billing.sourceObservedAt);
+  if (!Number.isFinite(observedAt)) return false;
+  return now.getTime() - observedAt <= GROK_BILLING_FRESHNESS_MS;
+}
+
+async function refreshBillingLogViaDashboard(command: string, timeoutMs: number): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  const refreshTimeoutMs = Math.min(timeoutMs, 6_000);
+  const expectScript = [
+    `set timeout ${Math.max(1, Math.ceil(refreshTimeoutMs / 1_000))}`,
+    'log_user 0',
+    'set command $env(AGENT_USAGE_GROK_REFRESH_COMMAND)',
+    'spawn -noecho $command dashboard',
+    `after ${Math.min(2_000, Math.max(250, refreshTimeoutMs - 1_000))}`,
+    'send "\\021\\021"',
+    'expect eof'
+  ].join('\n');
+  await new Promise<void>((resolve) => {
+    const dashboard = spawn('/usr/bin/expect', ['-c', expectScript], {
+      env: {
+        ...process.env,
+        AGENT_USAGE_GROK_REFRESH_COMMAND: command,
+        TERM: process.env.TERM ?? 'xterm-256color'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    dashboard.stdout.resume();
+    dashboard.stderr.resume();
+    let settled = false;
+    const stopTimer = setTimeout(() => {
+      dashboard.kill('SIGTERM');
+      finish();
+    }, refreshTimeoutMs);
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(stopTimer);
+      resolve();
+    };
+    dashboard.once('error', finish);
+    dashboard.once('exit', finish);
+  });
 }
 
 function parseLatestBillingLog(text: string): GrokBuildBilling | null {

@@ -116,6 +116,48 @@ describe('Grok Build official billing adapter', () => {
       sourceObservedAt: '2026-08-28T02:37:06.249Z'
     });
   });
+
+  it('refreshes a stale official billing log before returning Grok quota', async () => {
+    const process = new FakeGrokBillingProcess(undefined, -32601);
+    let log = billingLog('2026-08-28T16:38:28.680Z', 95);
+    let refreshes = 0;
+    const client = new StdioGrokBillingClient({
+      spawnProcess: () => process,
+      readUnifiedLog: async () => log,
+      refreshBillingLog: async () => {
+        refreshes += 1;
+        log = billingLog('2026-08-29T02:00:00.000Z', 97);
+      },
+      clock: () => new Date('2026-08-29T02:01:00.000Z'),
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).resolves.toMatchObject({
+      config: { creditUsagePercent: 97 },
+      sourceObservedAt: '2026-08-29T02:00:00.000Z'
+    });
+    expect(refreshes).toBe(1);
+  });
+
+  it('does not launch a dashboard refresh while the official billing log is fresh', async () => {
+    const process = new FakeGrokBillingProcess(undefined, -32601);
+    let refreshes = 0;
+    const client = new StdioGrokBillingClient({
+      spawnProcess: () => process,
+      readUnifiedLog: async () => billingLog('2026-08-29T02:00:00.000Z', 97),
+      refreshBillingLog: async () => {
+        refreshes += 1;
+      },
+      clock: () => new Date('2026-08-29T02:01:00.000Z'),
+      timeoutMs: 1_000
+    });
+
+    await expect(client.readBilling()).resolves.toMatchObject({
+      config: { creditUsagePercent: 97 },
+      sourceObservedAt: '2026-08-29T02:00:00.000Z'
+    });
+    expect(refreshes).toBe(0);
+  });
 });
 
 describe('GrokBuildConnector', () => {
@@ -398,6 +440,17 @@ const grokBillingLogFixture = [
     ctx: { ...billingFixture, onDemandEnabled: null }
   })
 ].join('\n');
+
+function billingLog(observedAt: string, usedPercent: number): string {
+  return JSON.stringify({
+    ts: observedAt,
+    msg: 'billing: fetched credits config',
+    ctx: {
+      ...billingFixture,
+      config: { ...billingFixture.config, creditUsagePercent: usedPercent }
+    }
+  });
+}
 
 const grokOtlpFixture = {
   resourceMetrics: [
