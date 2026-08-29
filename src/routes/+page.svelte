@@ -7,12 +7,15 @@
     DataAuthority,
     BillingHistory,
     DoctorReport,
+    HistoryModelObservation,
+    HistoryModelPriceEvidence,
     HistoryWindow,
     MonitoringSettings,
     ProcessingStatus,
     ProviderOverview,
     QuotaBucket,
     RetentionStatus,
+    TokenTotals,
     UsageOverview
   } from '$core/types.js';
   import type {
@@ -27,6 +30,7 @@
     isAutomaticallyManagedCategory
   } from '$lib/automatic-recovery.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
+  import ModelDetailChart from '$lib/ModelDetailChart.svelte';
   import ProviderShareChart from '$lib/ProviderShareChart.svelte';
   import QuotaTimelineChart from '$lib/QuotaTimelineChart.svelte';
   import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
@@ -565,7 +569,7 @@
     );
   }
 
-  function formatReset(value: string | null): string {
+  function formatReset(value: string | null | undefined): string {
     if (!value) return '—';
     return new Intl.DateTimeFormat(locale, {
       hour: '2-digit',
@@ -657,6 +661,115 @@
     const cacheWrite =
       semantics.cacheWrite === 'included-in-input' ? t('includedInInput') : t('separateCategory');
     return `${t('reasoning')}: ${reasoning} · ${t('cacheRead')}: ${cacheRead} · ${t('cacheWrite')}: ${cacheWrite}`;
+  }
+
+  function nonOverlappingComposition(
+    observations: HistoryModelObservation[],
+    fallback: TokenTotals
+  ): TokenTotals {
+    if (observations.length === 0) {
+      return {
+        ...fallback,
+        total: fallback.input + fallback.output + fallback.cacheRead + fallback.cacheWrite
+      };
+    }
+    const totals: TokenTotals = {
+      total: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0
+    };
+    for (const observation of observations) {
+      totals.input += observation.tokenTotals.input;
+      totals.output += observation.tokenTotals.output;
+      if (observation.tokenSemantics.reasoning === 'separate') {
+        totals.reasoning += observation.tokenTotals.reasoning;
+      }
+      if (observation.tokenSemantics.cacheRead === 'separate') {
+        totals.cacheRead += observation.tokenTotals.cacheRead;
+      }
+      if (observation.tokenSemantics.cacheWrite === 'separate') {
+        totals.cacheWrite += observation.tokenTotals.cacheWrite;
+      }
+    }
+    totals.total =
+      totals.input + totals.output + totals.reasoning + totals.cacheRead + totals.cacheWrite;
+    return totals;
+  }
+
+  function uniquePriceSnapshots(priceEvidence: HistoryModelPriceEvidence[]) {
+    return priceEvidence
+      .map((evidence) => evidence.priceSnapshot)
+      .filter(
+        (
+          snapshot,
+          index,
+          snapshots
+        ): snapshot is NonNullable<HistoryModelPriceEvidence['priceSnapshot']> =>
+          snapshot !== null &&
+          snapshots.findIndex((candidate) => candidate?.id === snapshot.id) === index
+      );
+  }
+
+  function modelTrendEvidence(
+    model: UsageOverview['workbench']['modelRanking']['entries'][number]
+  ) {
+    return model.trend.map((bucket) => {
+      const observations = model.observations.filter(
+        (observation) =>
+          observation.observedAt >= bucket.start && observation.observedAt < bucket.end
+      );
+      const precisions = [...new Set(observations.map((observation) => observation.timePrecision))];
+      const retailAvailable =
+        bucket.retailEquivalent.status !== 'unavailable' && bucket.retailEquivalent.amount !== null;
+      const selectedCost = retailAvailable
+        ? bucket.retailEquivalent
+        : (bucket.reportedEstimate ?? bucket.retailEquivalent);
+      return {
+        recordedTokens: bucket.gap
+          ? null
+          : observations.reduce((total, observation) => total + observation.recordedTokens, 0),
+        timePrecision: precisions.map(timePrecisionLabel).join(' + ') || t('unknown'),
+        costAmount: selectedCost.amount,
+        costCurrency: selectedCost.comparisonCurrency,
+        costPurpose: retailAvailable ? t('apiRetailEquivalent') : t('providerReportedEstimate'),
+        costAuthorities: selectedCost.authorities,
+        costObservedAt: selectedCost.observedAt
+      };
+    });
+  }
+
+  function tokenKindLabel(kind: string): string {
+    const keys: Record<string, MessageKey> = {
+      input: 'input',
+      output: 'output',
+      reasoning: 'reasoning',
+      'cache-read': 'cacheRead',
+      'cache-write': 'cacheWrite'
+    };
+    return t(keys[kind] ?? 'unknown');
+  }
+
+  function costKindLabel(kind: string): string {
+    const keys: Record<string, MessageKey> = {
+      actual: 'costActual',
+      subscription: 'costSubscription',
+      'reported-estimate': 'providerReportedEstimate',
+      'retail-equivalent': 'apiRetailEquivalent'
+    };
+    return t(keys[kind] ?? 'unknown');
+  }
+
+  function totalDerivationLabel(derivation: string): string {
+    const keys: Record<string, MessageKey> = {
+      'source-reported': 'derivationSourceReported',
+      'reconciled-remainder': 'derivationReconciledRemainder',
+      categorized: 'derivationCategorized',
+      'legacy-total': 'derivationLegacyTotal'
+    };
+    return t(keys[derivation] ?? 'unknown');
   }
 
   function coverageDimensionLabel(coverage: CoverageDimension): string {
@@ -1100,17 +1213,6 @@
     selectedModelId = null;
     await tick();
     modelDetailTrigger?.focus();
-  }
-
-  function tokenKindLabel(kind: string): string {
-    const keys: Record<string, MessageKey> = {
-      input: 'input',
-      output: 'output',
-      reasoning: 'reasoning',
-      'cache-read': 'cacheRead',
-      'cache-write': 'cacheWrite'
-    };
-    return t(keys[kind] ?? 'unknown');
   }
 </script>
 
@@ -2060,6 +2162,17 @@
 
   {#if selectedModelEntry}
     {@const model = selectedModelEntry}
+    {@const modelCost =
+      model.retailEquivalent.status !== 'unavailable'
+        ? model.retailEquivalent
+        : model.reportedEstimate}
+    {@const modelCostLabel =
+      model.retailEquivalent.status !== 'unavailable'
+        ? t('apiRetailEquivalent')
+        : t('providerReportedEstimate')}
+    {@const priceSnapshots = uniquePriceSnapshots(model.priceEvidence)}
+    {@const compositionTotals = nonOverlappingComposition(model.observations, model.tokenTotals)}
+    {@const trendEvidence = modelTrendEvidence(model)}
     <div class="model-detail-backdrop" role="presentation">
       <div
         class="model-detail-drawer"
@@ -2072,184 +2185,247 @@
         <div class="model-detail-header">
           <div>
             <p class="eyebrow">{model.providerDisplayName} · {model.billingDomainDisplayName}</p>
+            <h2>{model.model}</h2>
             {#if model.includedInHeadline === false}
               <p>{t('separateFromHeadline')}</p>
             {/if}
-            <h2>{t('modelDetail')}: {model.model}</h2>
           </div>
           <button aria-label={t('closeModelDetail')} on:click={closeModelDetail}>×</button>
         </div>
 
         <div class="model-detail-content">
-          <div class="model-detail-summary">
-            <span>{t('recordedTotal')} <b>{formatNumber(model.tokenTotals.total)}</b></span>
-            <span
-              >{t('sourceReportedTotal')}
+          <div class="model-detail-summary" data-testid="model-detail-summary">
+            <span>
+              <small>{t('recordedTotal')}</small>
+              <b>{formatNumber(model.tokenEvidence.recordedTokens)}</b>
+              <em>{displayAuthorities(model.authorities)} · {formatReset(model.lastObservedAt)}</em>
+            </span>
+            <span>
+              <small>{modelCostLabel}</small>
               <b>
-                {model.tokenEvidence.sourceReportedObservationCount === 0
-                  ? t('notAvailable')
-                  : formatNumber(model.tokenEvidence.sourceReportedTokens)}
-                {#if model.tokenEvidence.sourceReportedObservationCount > 0 && model.tokenEvidence.sourceReportedObservationCount < model.tokenEvidence.observationCount}
-                  · {t('coveragePartial')}
-                {/if}
-              </b></span
-            >
-            <span
-              >{t('totalDerivation')}
-              <b>{model.tokenEvidence.totalDerivations.join(' + ') || t('unknown')}</b></span
-            >
-            <span
-              >{t('pricingCoverage')}
-              <b>{formatPercent(model.retailEquivalent.pricingCoverage)}</b></span
-            >
+                {modelCost.status !== 'unavailable'
+                  ? formatMoney(modelCost.amount, modelCost.comparisonCurrency)
+                  : t('notAvailable')}
+              </b>
+              <em
+                >{displayAuthorities(modelCost.authorities)} · {formatReset(
+                  modelCost.observedAt
+                )}</em
+              >
+            </span>
+            <span>
+              <small>{t('pricingCoverage')}</small>
+              <b>{formatPercent(model.retailEquivalent.pricingCoverage)}</b>
+              <em>
+                {displayAuthorities(model.retailEquivalent.authorities)} ·
+                {formatReset(model.retailEquivalent.observedAt)}
+              </em>
+            </span>
+            <span>
+              <small>{t('observations')}</small>
+              <b>{formatNumber(model.tokenEvidence.observationCount)}</b>
+              <em>{displayAuthorities(model.authorities)} · {formatReset(model.lastObservedAt)}</em>
+            </span>
           </div>
-          <p class="model-detail-evidence">
-            {t('source')}: {displayAuthorities(model.authorities)} ·
-            {formatReset(model.lastObservedAt)}
-          </p>
 
-          <dl class="model-token-breakdown">
-            <div>
-              <dt>{t('input')}</dt>
-              <dd>{formatNumber(model.tokenTotals.input)}</dd>
-            </div>
-            <div>
-              <dt>{t('output')}</dt>
-              <dd>{formatNumber(model.tokenTotals.output)}</dd>
-            </div>
-            <div>
-              <dt>{t('reasoning')}</dt>
-              <dd>{formatNumber(model.tokenTotals.reasoning)}</dd>
-            </div>
-            <div>
-              <dt>{t('cacheRead')}</dt>
-              <dd>{formatNumber(model.tokenTotals.cacheRead)}</dd>
-            </div>
-            <div>
-              <dt>{t('cacheWrite')}</dt>
-              <dd>{formatNumber(model.tokenTotals.cacheWrite)}</dd>
-            </div>
-          </dl>
+          <section class="model-activity" aria-labelledby="model-activity-heading">
+            <h3 id="model-activity-heading">{t('activityOverview')}</h3>
+            <ModelDetailChart
+              {compositionTotals}
+              unclassifiedTokens={model.tokenEvidence.unclassifiedTokens}
+              trend={model.trend}
+              {trendEvidence}
+              {locale}
+              {formatNumber}
+              {formatMoney}
+              {displayAuthorities}
+              formatObservedAt={formatReset}
+              aggregateAuthorities={model.authorities}
+              aggregateObservedAt={model.lastObservedAt}
+            />
+          </section>
 
-          <section aria-labelledby="model-observations-heading">
-            <h3 id="model-observations-heading">{t('providerEvidence')}</h3>
-            <div class="model-observations">
-              {#each model.observations as observation (observation.id)}
-                <article>
+          <section
+            class="model-evidence-summary"
+            data-testid="model-evidence-summary"
+            aria-labelledby="model-evidence-heading"
+          >
+            <h3 id="model-evidence-heading">{t('evidenceSummary')}</h3>
+            <div>
+              <span>
+                <small>{t('providerEvidence')}</small>
+                <strong>
+                  {displayAuthorities(model.authorities)} ·
+                  {model.tokenEvidence.timePrecisions.map(timePrecisionLabel).join(' + ') ||
+                    t('unknown')}
+                </strong>
+              </span>
+              <span>
+                <small>{t('scope')}</small>
+                <strong>
+                  {model.tokenEvidence.usageScopes.map(usageScopeLabel).join(' + ') || t('unknown')}
+                </strong>
+              </span>
+              <span>
+                <small>{t('totalDerivation')}</small>
+                <strong>
+                  {model.tokenEvidence.totalDerivations.map(totalDerivationLabel).join(' + ') ||
+                    t('unknown')}
+                </strong>
+              </span>
+              <span>
+                <small>{t('latestData')}</small>
+                <strong>{formatReset(model.lastObservedAt)}</strong>
+              </span>
+              {#if priceSnapshots.length > 0}
+                <span class="model-price-source">
+                  <small>{t('priceSnapshot')}</small>
                   <strong>
-                    {authorityLabel(observation.authority)} ·
-                    {timePrecisionLabel(observation.timePrecision)}
+                    {priceSnapshots
+                      .map((snapshot) => `${snapshot.version} · ${snapshot.source}`)
+                      .join(' + ')}
                   </strong>
-                  <span>{formatReset(observation.observedAt)}</span>
-                  <small>{t('scope')} {usageScopeLabel(observation.usageScope)}</small>
-                  <small>
-                    {t('aggregationTemporality')}
-                    {aggregationTemporalityLabel(observation.aggregationTemporality)}
-                  </small>
-                  <small>{t('recordedTotal')} {formatNumber(observation.recordedTokens)}</small>
-                  <small>{t('classified')} {formatNumber(observation.classifiedTokens)}</small>
-                  <small>{t('unclassified')} {formatNumber(observation.unclassifiedTokens)}</small>
-                  <small>
-                    {t('sourceReportedTotal')}
-                    {observation.sourceReportedTotalTokens === null
-                      ? t('notAvailable')
-                      : formatNumber(observation.sourceReportedTotalTokens)}
-                  </small>
-                  <small
-                    >{t('semantics')} · {tokenSemanticsSummary(observation.tokenSemantics)}</small
-                  >
-                </article>
-              {/each}
+                </span>
+              {/if}
             </div>
           </section>
 
-          <section aria-labelledby="model-pricing-heading">
-            <h3 id="model-pricing-heading">{t('priceLineItems')}</h3>
-            {#if model.priceEvidence.length === 0}
-              <p class="model-evidence-empty">{t('noPriceEvidence')}</p>
-            {:else}
-              {#each model.priceEvidence as price (price.id)}
-                <article class="model-price-evidence">
-                  <div>
-                    <strong>{formatMoney(price.amount, price.currency)}</strong>
-                    <span
-                      >{price.kind === 'reported-estimate'
-                        ? t('providerReportedEstimate')
-                        : t('apiRetailEquivalent')} · {authorityLabel(price.authority)} · {formatReset(
-                        price.observedAt ?? null
-                      )}</span
-                    >
-                  </div>
-                  {#each price.lineItems as line (`${price.id}:${line.tokenKind}`)}
-                    <p>
-                      {tokenKindLabel(line.tokenKind)} · {formatNumber(line.tokens)} ·
-                      {formatMoney(line.amount, price.currency)}
-                      <small>{formatMoney(line.ratePerMillion, price.currency)} / 1M</small>
-                    </p>
-                  {/each}
-                  {#if price.priceSnapshot}
-                    <small>
-                      {price.priceSnapshot.version} · {price.priceSnapshot.source} ·
-                      {t('priceEffective')}
-                      {formatReset(price.priceSnapshot.effectiveAt)}
-                    </small>
-                  {/if}
-                  {#if price.calculatedAt}
-                    <small>{t('calculatedAt')}: {formatReset(price.calculatedAt)}</small>
-                  {/if}
-                </article>
-              {/each}
-            {/if}
-          </section>
+          <details class="model-audit-details">
+            <summary>{t('auditDetails')}</summary>
+            <div class="model-audit-scroll">
+              <section aria-labelledby="model-observation-audit-heading">
+                <h3 id="model-observation-audit-heading">{t('providerEvidence')}</h3>
+                <table aria-label={t('providerEvidence')}>
+                  <thead>
+                    <tr>
+                      <th>{t('source')}</th>
+                      <th>{t('scope')}</th>
+                      <th>{t('tokens')}</th>
+                      <th>{t('semantics')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each model.observations as observation (observation.id)}
+                      <tr>
+                        <td>
+                          <strong>{authorityLabel(observation.authority)}</strong>
+                          <small>
+                            {formatReset(observation.observedAt)} ·
+                            {timePrecisionLabel(observation.timePrecision)}
+                          </small>
+                          <code>{observation.id}</code>
+                        </td>
+                        <td>
+                          {usageScopeLabel(observation.usageScope)} ·
+                          {aggregationTemporalityLabel(observation.aggregationTemporality)}
+                        </td>
+                        <td>
+                          <span
+                            >{t('recordedTotal')}: {formatNumber(observation.recordedTokens)}</span
+                          >
+                          <span
+                            >{t('classified')}: {formatNumber(observation.classifiedTokens)}</span
+                          >
+                          <span
+                            >{t('unclassified')}: {formatNumber(
+                              observation.unclassifiedTokens
+                            )}</span
+                          >
+                          <span>
+                            {t('sourceReportedTotal')}:
+                            {observation.sourceReportedTotalTokens === null
+                              ? t('notAvailable')
+                              : formatNumber(observation.sourceReportedTotalTokens)}
+                          </span>
+                        </td>
+                        <td>
+                          <span>{totalDerivationLabel(observation.totalDerivation)}</span>
+                          <small>{tokenSemanticsSummary(observation.tokenSemantics)}</small>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </section>
 
-          <section aria-labelledby="model-trend-heading">
-            <h3 id="model-trend-heading">{t('modelTrend')}</h3>
-            <table class="model-trend-table" aria-label={t('modelTrend')}>
-              <thead>
-                <tr
-                  ><th>{t('interval')}</th><th>{t('tokens')}</th><th>{t('cost')}</th><th
-                    >{t('providerEvidence')}</th
-                  ></tr
-                >
-              </thead>
-              <tbody>
-                {#each model.trend as bucket (bucket.start)}
-                  {@const bucketCost =
-                    bucket.retailEquivalent.status === 'available'
-                      ? bucket.retailEquivalent
-                      : (bucket.reportedEstimate ?? bucket.retailEquivalent)}
-                  {@const bucketCostIsReported =
-                    bucket.retailEquivalent.status !== 'available' &&
-                    bucket.reportedEstimate?.status === 'available'}
-                  <tr>
-                    <td>{bucket.label}</td>
-                    {#if bucket.gap}
-                      <td colspan="3">{t('gap')}</td>
-                    {:else}
-                      <td>{formatNumber(bucket.tokenTotals.total)}</td>
-                      <td>
-                        {bucketCost.status === 'available'
-                          ? formatMoney(bucketCost.amount, bucketCost.comparisonCurrency)
-                          : t('notAvailable')}
-                      </td>
-                      <td>
-                        {displayAuthorities(bucket.authorities)} ·
-                        {formatReset(bucket.lastObservedAt ?? null)}
-                        {#if bucketCost.status === 'available'}
-                          <br />{bucketCostIsReported
-                            ? t('providerReportedEstimate')
-                            : t('apiRetailEquivalent')} · {displayAuthorities(
-                            bucketCost.authorities
-                          )} ·
-                          {formatReset(bucketCost.observedAt ?? null)}
-                        {/if}
-                      </td>
-                    {/if}
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </section>
+              <section aria-labelledby="model-price-audit-heading">
+                <h3 id="model-price-audit-heading">{t('priceLineItems')}</h3>
+                {#if model.priceEvidence.length === 0}
+                  <p>{t('noPriceEvidence')}</p>
+                {:else}
+                  <table aria-label={t('priceLineItems')}>
+                    <thead>
+                      <tr>
+                        <th>{t('cost')}</th>
+                        <th>{t('priceLineItems')}</th>
+                        <th>{t('priceSnapshot')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each model.priceEvidence as price (price.id)}
+                        <tr>
+                          <td>
+                            <strong>{costKindLabel(price.kind)}</strong>
+                            <span>
+                              {price.amount === null
+                                ? t('notAvailable')
+                                : formatMoney(price.amount, price.currency)}
+                            </span>
+                            <small>
+                              {authorityLabel(price.authority)} · {formatReset(price.observedAt)} ·
+                              {t('calculatedAt')}
+                              {formatReset(price.calculatedAt)}
+                            </small>
+                            <code>{price.id}</code>
+                          </td>
+                          <td>
+                            {#each price.lineItems as line (`${price.id}:${line.tokenKind}`)}
+                              <span>
+                                {tokenKindLabel(line.tokenKind)} · {formatNumber(line.tokens)} ·
+                                {formatMoney(line.amount, price.currency)}
+                                <small>
+                                  {t('ratePerMillion')}
+                                  {formatMoney(line.ratePerMillion, price.currency)}
+                                </small>
+                              </span>
+                            {/each}
+                          </td>
+                          <td>
+                            {#if price.priceSnapshot}
+                              <strong>
+                                {price.priceSnapshot.version} · {price.priceSnapshot.source}
+                              </strong>
+                              <small>
+                                {price.priceSnapshot.canonicalModel ?? t('unknown')} ·
+                                {price.priceSnapshot.currency} ·
+                                {price.priceSnapshot.contextTier ?? t('unknown')}
+                              </small>
+                              <small>
+                                {t('priceEffective')}
+                                {formatReset(price.priceSnapshot.effectiveAt)}
+                                – {formatReset(price.priceSnapshot.effectiveUntil)}
+                              </small>
+                              <small>
+                                {Object.entries(price.priceSnapshot.ratesPerMillion)
+                                  .map(([kind, rate]) =>
+                                    rate === null
+                                      ? `${tokenKindLabel(kind)}: ${t('notAvailable')}`
+                                      : `${tokenKindLabel(kind)}: ${formatMoney(rate, price.priceSnapshot?.currency ?? price.currency)}`
+                                  )
+                                  .join(' · ')}
+                              </small>
+                            {:else}
+                              {t('notAvailable')}
+                            {/if}
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                {/if}
+              </section>
+            </div>
+          </details>
         </div>
       </div>
     </div>
@@ -3593,19 +3769,22 @@
     z-index: 50;
     inset: 0;
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
     background: var(--backdrop);
     backdrop-filter: blur(8px);
   }
 
   .model-detail-drawer {
-    width: min(620px, 100%);
-    height: 100%;
+    width: min(920px, 100%);
+    max-height: min(780px, calc(100vh - 48px));
     overflow-y: auto;
-    border-left: 1px solid rgba(122, 136, 164, 0.22);
+    border: 1px solid var(--border);
+    border-radius: 20px;
     outline: none;
     background: var(--surface);
-    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.16);
+    box-shadow: 0 28px 80px rgba(0, 0, 0, 0.24);
   }
 
   .model-detail-header {
@@ -3616,9 +3795,9 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
-    padding: 26px 28px 20px;
-    border-bottom: 1px solid rgba(122, 136, 164, 0.16);
-    background: rgba(11, 14, 20, 0.95);
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid var(--border-soft);
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
     backdrop-filter: blur(18px);
   }
 
@@ -3630,147 +3809,187 @@
   .model-detail-header h2 {
     margin-top: 5px;
     overflow-wrap: anywhere;
-    font-size: 1.08rem;
+    color: var(--text-strong);
+    font-size: 1.2rem;
   }
 
   .model-detail-header button {
     width: 36px;
     height: 36px;
-    border: 1px solid rgba(122, 136, 164, 0.2);
+    border: 1px solid var(--border);
     border-radius: 9px;
-    background: transparent;
-    color: #d8dde7;
+    background: var(--button);
+    color: var(--text-strong);
     cursor: pointer;
     font-size: 1.15rem;
   }
 
   .model-detail-content {
     display: grid;
-    gap: 22px;
-    padding: 22px 28px 48px;
+    gap: 16px;
+    padding: 20px 24px 24px;
   }
 
   .model-detail-content section h3 {
     margin: 0 0 10px;
-    color: #dfe4ed;
+    color: var(--text-strong);
     font-size: 0.8rem;
   }
 
-  .model-detail-summary,
-  .model-token-breakdown {
+  .model-detail-summary {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .model-detail-summary span,
-  .model-token-breakdown div,
-  .model-observations article,
-  .model-price-evidence {
-    padding: 11px;
-    border: 1px solid rgba(122, 136, 164, 0.13);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.018);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .model-detail-summary span {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    color: #8e98a8;
-    font-size: 0.68rem;
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    padding: 13px 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: var(--surface-inset);
+  }
+
+  .model-detail-summary small {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 0.66rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .model-detail-summary b {
-    color: #e0e5ed;
+    overflow: hidden;
+    color: var(--text-strong);
+    font-size: 0.95rem;
     font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .model-detail-evidence {
-    margin: -14px 0 0;
-    color: #8e98a8;
-    font-size: 0.7rem;
+  .model-detail-summary em {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 0.56rem;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .model-token-breakdown {
-    margin: 0;
+  .model-activity {
+    position: relative;
+    min-width: 0;
+    padding: 14px 16px 4px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--surface-subtle);
   }
 
-  .model-observations {
+  .model-evidence-summary > div {
     display: grid;
-    gap: 7px;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1px;
+    overflow: hidden;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: var(--border-soft);
   }
 
-  .model-observations article {
+  .model-evidence-summary span {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 5px 10px;
-    color: #dce2eb;
-    font-size: 0.7rem;
+    gap: 5px;
+    min-width: 0;
+    padding: 11px 12px;
+    background: var(--surface-inset);
   }
 
-  .model-observations span,
-  .model-observations small,
-  .model-price-evidence span,
-  .model-price-evidence small {
-    color: #8791a1;
+  .model-evidence-summary small,
+  .model-evidence-summary strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .model-evidence-summary small {
+    color: var(--muted);
+    font-size: 0.62rem;
+  }
+
+  .model-evidence-summary strong {
+    color: var(--text);
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+
+  .model-evidence-summary .model-price-source {
+    grid-column: auto;
+  }
+
+  .model-audit-details {
+    overflow: hidden;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: var(--surface-subtle);
+  }
+
+  .model-audit-details > summary {
+    padding: 11px 14px;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
+
+  .model-audit-details[open] > summary {
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .model-audit-scroll {
+    display: grid;
+    gap: 18px;
+    max-height: 300px;
+    padding: 14px;
+    overflow: auto;
+  }
+
+  .model-audit-scroll section {
+    min-width: 720px;
+  }
+
+  .model-audit-scroll table {
+    width: 100%;
+    border-collapse: collapse;
     font-size: 0.64rem;
   }
 
-  .model-price-evidence + .model-price-evidence {
-    margin-top: 7px;
-  }
-
-  .model-price-evidence > div {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 9px;
-  }
-
-  .model-price-evidence p {
-    display: flex;
-    gap: 6px;
-    margin: 5px 0;
-    color: #d6dce6;
-    font-size: 0.68rem;
-  }
-
-  .model-price-evidence p small {
-    margin-left: auto;
-  }
-
-  .model-price-evidence > small {
-    display: block;
-    margin-top: 6px;
-  }
-
-  .model-evidence-empty {
-    margin: 0;
-    padding: 12px;
-    border: 1px dashed rgba(122, 136, 164, 0.18);
-    border-radius: 10px;
-    color: #8791a1;
-    font-size: 0.7rem;
-  }
-
-  .model-trend-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.66rem;
-  }
-
-  .model-trend-table th,
-  .model-trend-table td {
-    padding: 7px 8px;
-    border-bottom: 1px solid rgba(122, 136, 164, 0.12);
-    color: #9aa4b3;
+  .model-audit-scroll th,
+  .model-audit-scroll td {
+    padding: 8px 9px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text);
     text-align: left;
+    vertical-align: top;
   }
 
-  .model-trend-table th {
-    color: #d2d8e2;
+  .model-audit-scroll th {
+    color: var(--muted);
     font-weight: 600;
+  }
+
+  .model-audit-scroll td > span,
+  .model-audit-scroll td > small,
+  .model-audit-scroll td > code {
+    display: block;
+    margin-top: 3px;
+  }
+
+  .model-audit-scroll small,
+  .model-audit-scroll code {
+    color: var(--muted);
+    font-size: 0.58rem;
+    white-space: normal;
   }
 
   .settings-drawer {
@@ -3920,10 +4139,7 @@
 
   .inline-connection,
   .settings-connections article,
-  .model-detail-summary span,
-  .model-token-breakdown div,
-  .model-observations article,
-  .model-price-evidence {
+  .model-detail-summary span {
     border-color: var(--border-soft);
     background: var(--surface-subtle);
   }
@@ -3979,14 +4195,6 @@
   .quota-copy span,
   .quota-meta,
   dt,
-  .model-detail-summary span,
-  .model-observations span,
-  .model-observations small,
-  .model-price-evidence span,
-  .model-price-evidence small,
-  .model-evidence-empty,
-  .model-trend-table th,
-  .model-trend-table td,
   .settings-header > div > p:last-child,
   .settings-section-heading p,
   .settings-connector-title span,
@@ -4009,9 +4217,6 @@
   .model-detail-header button,
   .model-detail-content section h3,
   .model-detail-summary b,
-  .model-observations article,
-  .model-price-evidence p,
-  .model-trend-table th,
   .settings-close {
     color: var(--text-strong);
   }
@@ -4268,6 +4473,26 @@
     .model-detail-content {
       padding-right: 18px;
       padding-left: 18px;
+    }
+
+    .model-detail-backdrop {
+      align-items: stretch;
+      padding: 0;
+    }
+
+    .model-detail-drawer {
+      max-height: 100vh;
+      border-width: 0;
+      border-radius: 0;
+    }
+
+    .model-detail-summary,
+    .model-evidence-summary > div {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .model-evidence-summary .model-price-source {
+      grid-column: span 2;
     }
 
     .quota-meta {

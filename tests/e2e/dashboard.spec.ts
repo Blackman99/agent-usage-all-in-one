@@ -1235,32 +1235,78 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(detail).toBeFocused();
   await expect(page.locator('.shell')).toHaveAttribute('inert', '');
   await page.keyboard.press('Shift+Tab');
-  await expect(detail.getByRole('button', { name: 'Close model detail' })).toBeFocused();
+  await expect(detail.getByText('Audit details')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(detail.getByRole('button', { name: 'Close model detail' })).toBeFocused();
   await expect(detail).toContainText('Claude Code · Subscription');
-  await expect(detail).toContainText('Recorded total 400');
-  await expect(detail).toContainText('Recorded total 450');
-  await expect(detail).toContainText('Classified 400');
-  await expect(detail).toContainText('Unclassified 50');
-  await expect(detail.locator('.model-detail-summary')).toContainText(
-    'Source-reported total Unavailable'
-  );
-  await expect(detail.locator('.model-observations article')).toContainText(
-    'Source-reported total 450'
-  );
-  await expect(detail).toContainText('Scope This Mac only');
-  await expect(detail).toContainText('Aggregation Delta');
-  await expect(detail).toContainText('Input · 320 · $3.20');
-  await expect(detail).toContainText('2026-08-01 · Official fixture pricing');
-  await expect(detail).toContainText('Local observation · Event');
-  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Gap');
-  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText(
-    'Local observation'
-  );
   await page.keyboard.press('Escape');
   await expect(detail).toBeHidden();
   await expect(fableRow).toBeFocused();
+});
+
+test('presents model detail as a compact visual summary instead of long visible lists', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('30d', 2900, 'USD'))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const fableRow = page.getByTestId('model-ranking-row').filter({ hasText: 'fable-model' });
+  await fableRow.click();
+
+  const detail = page.getByRole('dialog', { name: 'Model detail: fable-model' });
+  const visual = detail.getByTestId('model-detail-visual');
+  await expect(visual).toHaveAttribute('data-chart-engine', 'echarts');
+  await expect(visual).toHaveAttribute('aria-label', /Token breakdown/);
+  await expect(visual.locator('canvas')).toBeVisible();
+  await expect(detail).toContainText('Activity overview');
+  await expect(detail.getByTestId('model-detail-summary')).toContainText('Recorded total 450');
+  await expect(detail.getByTestId('model-detail-summary')).toContainText('API retail equivalent');
+  await expect(detail.getByTestId('model-detail-summary')).toContainText('$4.00');
+  await expect(detail.getByTestId('model-detail-summary')).toContainText('Observations 1');
+  await expect(detail.getByTestId('model-evidence-summary')).toContainText(
+    'Local observation · Event'
+  );
+  await expect(detail.getByTestId('model-evidence-summary')).toContainText('This Mac only');
+  await expect(detail.getByTestId('model-evidence-summary')).toContainText(
+    '2026-08-01 · Official fixture pricing'
+  );
+  await expect(
+    detail.getByTestId('model-evidence-summary').locator('.model-price-source strong')
+  ).toHaveText('2026-08-01 · Official fixture pricing');
+  await expect(detail.locator('.model-observations')).toHaveCount(0);
+  await expect(detail.locator('.model-trend-table')).toHaveCount(0);
+  const tokenBreakdown = detail.getByRole('table', { name: 'Token breakdown' });
+  await expect(tokenBreakdown.getByRole('row').filter({ hasText: 'Input' })).toContainText('320');
+  await expect(tokenBreakdown.getByRole('row').filter({ hasText: 'Output' })).toContainText('80');
+  await expect(tokenBreakdown.getByRole('row').filter({ hasText: 'Unclassified' })).toContainText(
+    '50'
+  );
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Gap');
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('$4.00');
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText(
+    'API retail equivalent'
+  );
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Event');
+  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Estimate');
+  const auditDetails = detail.locator('.model-audit-details');
+  await expect(auditDetails).not.toHaveAttribute('open');
+  await auditDetails.getByText('Audit details').click();
+  await expect(auditDetails.getByRole('table', { name: 'Provider evidence' })).toContainText(
+    'Recorded total: 450'
+  );
+  await expect(auditDetails.getByRole('table', { name: 'Provider evidence' })).toContainText(
+    'Unclassified: 50'
+  );
+  await expect(auditDetails.getByRole('table', { name: 'Price line items' })).toContainText(
+    '2026-08-01 · Official fixture pricing'
+  );
 });
 
 test('follows system theme and keeps the usage dashboard responsive with local official artwork', async ({
@@ -2161,6 +2207,12 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
         cacheWrite: 0
       };
       const tokenEvidence = tokenEvidenceFixture(tokenTotals, {
+        recordedTokens: model === 'fable-model' ? 450 : tokens,
+        sourceReportedTokens: model === 'fable-model' ? 450 : tokens,
+        sourceReportedObservationCount: 1,
+        classifiedTokens: tokens,
+        unclassifiedTokens: model === 'fable-model' ? 50 : 0,
+        classificationCoverage: model === 'fable-model' ? 400 / 450 : 1,
         totalDerivations: ['source-reported'],
         timePrecisions: ['event'],
         usageScopes: ['this-mac']
@@ -2293,7 +2345,17 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
             status: index === 0 && amount !== null ? 'available' : 'unavailable',
             amount: index === 0 ? convertedAmount : null,
             comparisonCurrency: currency,
-            pricingCoverage: index === 0 && amount !== null ? 1 : null
+            pricingCoverage: index === 0 && amount !== null ? 1 : null,
+            authorities: index === 0 && amount !== null ? ['estimate'] : [],
+            observedAt: index === 0 && amount !== null ? '2026-08-28T00:31:00.000Z' : null
+          },
+          reportedEstimate: {
+            status: 'unavailable',
+            amount: null,
+            comparisonCurrency: currency,
+            pricingCoverage: null,
+            authorities: [],
+            observedAt: null
           }
         }))
       };
