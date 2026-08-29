@@ -113,7 +113,11 @@ describe('agent-usage CLI', () => {
         );
       }
     };
-    const application = new UsageApplication({ repository, connectors: [connector, failedCodex] });
+    const application = new UsageApplication({
+      repository,
+      connectors: [connector, failedCodex],
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
     await application.refresh();
     const server = await startLocalServer({ application, apiToken: 'cli-token' });
     servers.push(server);

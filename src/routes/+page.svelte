@@ -27,8 +27,8 @@
     isAutomaticallyManagedCategory
   } from '$lib/automatic-recovery.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
+  import ProviderShareChart from '$lib/ProviderShareChart.svelte';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
-  import { trendSegmentColor } from '$lib/usage-trend.js';
 
   let locale: Locale = 'en';
   let metaDescription: string;
@@ -981,44 +981,6 @@
       : formatMoney(value, currency);
   }
 
-  function providerMetricShare(
-    provider: UsageOverview['workbench']['providerSummary'][number],
-    metric: 'tokens' | 'retail-equivalent'
-  ): number | null {
-    return metric === 'tokens' ? provider.tokenShare : provider.retailShare;
-  }
-
-  function providerShareGradient(
-    workbench: UsageOverview['workbench'],
-    metric: 'tokens' | 'retail-equivalent'
-  ): string {
-    let cursor = 0;
-    const segments = workbench.providerSummary.flatMap((provider) => {
-      const share = providerMetricShare(provider, metric);
-      if (provider.includedInHeadline === false || share === null || share <= 0) return [];
-      const start = cursor;
-      cursor = Math.min(100, cursor + share * 100);
-      return [
-        `${trendSegmentColor(provider.providerId, provider.billingDomainId)} ${start}% ${cursor}%`
-      ];
-    });
-    if (cursor < 100) segments.push(`rgba(122, 136, 164, 0.14) ${cursor}% 100%`);
-    return `conic-gradient(${segments.join(', ')})`;
-  }
-
-  function providerShareDescription(
-    workbench: UsageOverview['workbench'],
-    metric: 'tokens' | 'retail-equivalent'
-  ): string {
-    const shares = workbench.providerSummary.flatMap((provider) => {
-      const share = providerMetricShare(provider, metric);
-      return share === null || provider.includedInHeadline === false
-        ? []
-        : [`${provider.providerDisplayName} ${formatPercent(share)}`];
-    });
-    return `${t('providerShare')}: ${shares.length > 0 ? shares.join(', ') : t('notAvailable')}`;
-  }
-
   function modelMetricShare(
     model: UsageOverview['workbench']['modelRanking']['entries'][number],
     metric: 'tokens' | 'retail-equivalent'
@@ -1639,88 +1601,14 @@
                     <small>{t('providerShareSubtitle')}</small>
                   </div>
 
-                  <div class="provider-share-content">
-                    <div
-                      class="provider-share-chart"
-                      data-testid="provider-share-chart"
-                      role="img"
-                      aria-label={providerShareDescription(workbench, selectedTrendMetric)}
-                      style={`--provider-share-gradient: ${providerShareGradient(workbench, selectedTrendMetric)}`}
-                    >
-                      <span>
-                        <strong>{workbench.providerSummary.length}</strong>
-                        <small>{t('providersLabel')}</small>
-                      </span>
-                    </div>
-
-                    <ol class="provider-usage-list" data-testid="usage-provider-summary">
-                      {#each workbench.providerSummary as provider (`${provider.providerId}:${provider.billingDomainId}`)}
-                        {@const providerLogo = providerLogoSources(provider.providerId)}
-                        {@const providerAmount =
-                          selectedTrendMetric === 'tokens'
-                            ? provider.recordedTokens
-                            : provider.retailEquivalent.amount}
-                        {@const providerShare =
-                          selectedTrendMetric === 'tokens'
-                            ? provider.tokenShare
-                            : provider.retailShare}
-                        {@const providerAuthorities =
-                          selectedTrendMetric === 'tokens'
-                            ? provider.authorities
-                            : provider.retailEquivalent.authorities}
-                        {@const providerObservedAt =
-                          selectedTrendMetric === 'tokens'
-                            ? provider.lastObservedAt
-                            : provider.retailEquivalent.observedAt}
-                        <li>
-                          <span class="provider-usage-identity">
-                            {#if providerLogo}
-                              <picture
-                                class="usage-provider-logo"
-                                data-provider-logo={provider.providerId}
-                              >
-                                <source
-                                  media="(prefers-color-scheme: light)"
-                                  srcset={providerLogo.light}
-                                />
-                                <source
-                                  media="(prefers-color-scheme: dark)"
-                                  srcset={providerLogo.dark}
-                                />
-                                <img src={providerLogo.dark} alt="" />
-                              </picture>
-                            {:else}
-                              <i
-                                style={`background: ${trendSegmentColor(provider.providerId, provider.billingDomainId)}`}
-                              ></i>
-                            {/if}
-                            <span>
-                              <strong>{provider.providerDisplayName}</strong>
-                              <small>{provider.billingDomainDisplayName}</small>
-                              <small>
-                                {displayAuthorities(providerAuthorities)} ·
-                                {formatReset(providerObservedAt)}
-                              </small>
-                            </span>
-                          </span>
-                          <span class="provider-usage-value">
-                            <strong
-                              >{formatUsageMetric(
-                                providerAmount,
-                                workbench.comparisonCurrency,
-                                selectedTrendMetric
-                              )}</strong
-                            >
-                            <small>
-                              {provider.includedInHeadline === false
-                                ? t('separateFromHeadline')
-                                : formatPercent(providerShare)}
-                            </small>
-                          </span>
-                        </li>
-                      {/each}
-                    </ol>
-                  </div>
+                  <ProviderShareChart
+                    providers={workbench.providerSummary}
+                    metric={selectedTrendMetric}
+                    currency={workbench.comparisonCurrency}
+                    {locale}
+                    {formatUsageMetric}
+                    {formatPercent}
+                  />
                 </section>
 
                 {#key selectedWindow}
@@ -2828,142 +2716,6 @@
   .provider-share-heading small {
     color: var(--muted);
     font-size: 0.64rem;
-  }
-
-  .provider-share-content {
-    display: grid;
-    grid-template-columns: 116px minmax(0, 1fr);
-    gap: 18px;
-    align-items: center;
-  }
-
-  .provider-share-chart {
-    display: grid;
-    width: 116px;
-    aspect-ratio: 1;
-    padding: 16px;
-    border-radius: 50%;
-    background: var(--provider-share-gradient);
-    box-shadow: inset 0 0 0 1px rgba(122, 136, 164, 0.14);
-    place-items: center;
-  }
-
-  .provider-share-chart::before {
-    grid-area: 1 / 1;
-    width: 72px;
-    aspect-ratio: 1;
-    border: 1px solid var(--border-soft);
-    border-radius: 50%;
-    background: var(--surface-subtle);
-    content: '';
-  }
-
-  .provider-share-chart > span {
-    display: grid;
-    z-index: 1;
-    grid-area: 1 / 1;
-    gap: 1px;
-    text-align: center;
-  }
-
-  .provider-share-chart strong {
-    color: var(--text-strong);
-    font-size: 1.05rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .provider-share-chart small {
-    color: var(--muted);
-    font-size: 0.58rem;
-  }
-
-  .provider-usage-list {
-    display: grid;
-    gap: 4px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .provider-usage-list li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    min-height: 52px;
-    padding: 8px 10px;
-    border-radius: 12px;
-    transition: background 160ms ease;
-  }
-
-  .provider-usage-list li:hover {
-    background: color-mix(in srgb, var(--primary) 7%, transparent);
-  }
-
-  .provider-usage-identity,
-  .provider-usage-value {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-  }
-
-  .provider-usage-identity {
-    gap: 9px;
-  }
-
-  .provider-usage-identity > span,
-  .provider-usage-value {
-    display: grid;
-    gap: 3px;
-  }
-
-  .provider-usage-identity i {
-    width: 8px;
-    height: 8px;
-    flex: 0 0 auto;
-    border-radius: 50%;
-  }
-
-  .usage-provider-logo {
-    display: grid;
-    width: 20px;
-    height: 20px;
-    flex: 0 0 auto;
-    place-items: center;
-  }
-
-  .usage-provider-logo img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-
-  .usage-provider-logo[data-provider-logo='codex'] {
-    padding: 2px;
-    border-radius: 5px;
-    background: #fff;
-  }
-
-  .provider-usage-identity strong,
-  .provider-usage-value strong {
-    overflow: hidden;
-    color: #e6eaf1;
-    font-size: 0.76rem;
-    font-weight: 550;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .provider-usage-identity small,
-  .provider-usage-value small {
-    color: #7f8897;
-    font-size: 0.62rem;
-  }
-
-  .provider-usage-value {
-    justify-items: end;
-    text-align: right;
   }
 
   .usage-totals {
@@ -4224,8 +3976,6 @@
   .usage-toolbar p,
   .usage-headline > span,
   .usage-headline > small,
-  .provider-usage-identity small,
-  .provider-usage-value small,
   .ranking-identity small,
   .breakdown-header,
   .usage-totals dt,
@@ -4268,8 +4018,6 @@
 
   .usage-toolbar p strong,
   .usage-headline > strong,
-  .provider-usage-identity strong,
-  .provider-usage-value strong,
   .usage-totals h3,
   .usage-totals dd,
   .ranking-heading h3,

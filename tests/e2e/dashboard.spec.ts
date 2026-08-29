@@ -938,18 +938,14 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
       .filter({ hasText: 'Provider-reported estimate' })
       .locator('i')
   ).toHaveAttribute('style', /repeating-linear-gradient/);
-  await expect(workbench.getByTestId('usage-provider-summary')).toContainText('History Agent');
-  const unknownProvider = workbench
-    .getByTestId('usage-provider-summary')
-    .locator('li')
-    .filter({ hasText: 'Unknown Agent' });
-  await expect(unknownProvider).toContainText('Unavailable');
-  await expect(unknownProvider).not.toContainText('$0.00');
+  const providerShareData = workbench.getByRole('table', { name: 'Provider share' });
+  await expect(providerShareData).toContainText('History Agent');
+  await expect(providerShareData).not.toContainText('Unknown Agent');
   await workbench.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
   await expect(workbench.getByTestId('trend-mode')).toHaveText('Recorded tokens');
-  await expect(unknownProvider).toContainText('Unavailable');
-  await expect(unknownProvider).not.toContainText('0 Tokens');
+  await expect(providerShareData).toContainText('700 Tokens');
+  await expect(providerShareData).not.toContainText('Unknown Agent');
   await workbench.getByRole('button', { name: '24h' }).click();
   await expect(workbench.getByTestId('workbench-skeleton')).toBeVisible();
   await expect(workbench.getByRole('button', { name: '24h' })).toHaveAttribute(
@@ -1373,7 +1369,18 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   expect(summaryBox).not.toBeNull();
   expect(analysisBox).not.toBeNull();
   expect(summaryBox!.y + summaryBox!.height).toBeLessThanOrEqual(analysisBox!.y);
-  await expect(page.getByTestId('provider-share-chart')).toHaveAttribute('role', 'img');
+  const providerShareChart = page.getByTestId('provider-share-chart');
+  await expect(providerShareChart).toHaveAttribute('data-chart-engine', 'echarts');
+  await expect(providerShareChart.locator('canvas')).toHaveCount(1);
+  await expect(page.getByTestId('usage-provider-summary')).toHaveCount(0);
+  const providerChartBox = await providerShareChart.boundingBox();
+  expect(providerChartBox).not.toBeNull();
+  await providerShareChart.hover({
+    position: { x: providerChartBox!.width / 2, y: providerChartBox!.height * 0.12 }
+  });
+  await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
+    'History Agent'
+  );
   await expect(page.getByTestId('model-share-meter').first()).toHaveAttribute('role', 'meter');
   for (const selector of [
     '.usage-summary-board',
