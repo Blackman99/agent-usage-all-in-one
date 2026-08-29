@@ -1381,6 +1381,9 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
     'History Agent'
   );
+  await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
+    'Source: Estimate'
+  );
   await expect(page.getByTestId('model-share-meter').first()).toHaveAttribute('role', 'meter');
   for (const selector of [
     '.usage-summary-board',
@@ -1413,6 +1416,9 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(freshLaunch.stdout.trim());
   await expect(page.getByRole('main')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth))
+    .toBeLessThanOrEqual(0);
   await page.getByRole('button', { name: 'Refresh' }).click();
 
   const quota = page.getByRole('progressbar', { name: '5 hour' });

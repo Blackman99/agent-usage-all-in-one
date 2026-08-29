@@ -14,7 +14,7 @@
   import { init, use, type ComposeOption, type ECharts } from 'echarts/core';
   import { CanvasRenderer } from 'echarts/renderers';
 
-  import type { WorkbenchProviderSummary } from '$core/types.js';
+  import type { DataAuthority, WorkbenchProviderSummary } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
   import {
     buildProviderShareChartOption,
@@ -44,6 +44,8 @@
     metric: ProviderShareMetric
   ) => string;
   export let formatPercent: (value: number | null) => string;
+  export let displayAuthorities: (authorities: DataAuthority[] | undefined) => string;
+  export let formatReset: (value: string | null) => string;
 
   let chartEl: HTMLDivElement | null = null;
   let chartRoot: HTMLElement | null = null;
@@ -62,7 +64,16 @@
     metric,
     trendSegmentColor,
     (value) => formatUsageMetric(value, currency, metric),
-    formatPercent
+    formatPercent,
+    (provider, selectedMetric) => {
+      const authorities =
+        selectedMetric === 'tokens' ? provider.authorities : provider.retailEquivalent.authorities;
+      const observedAt =
+        selectedMetric === 'tokens'
+          ? provider.lastObservedAt
+          : provider.retailEquivalent.observedAt;
+      return `${t('source')}: ${displayAuthorities(authorities)} · ${formatReset(observedAt)}`;
+    }
   );
   $: chartOption = buildProviderShareChartOption(
     entries,
@@ -143,24 +154,28 @@
     data-testid="provider-share-chart"
     data-chart-engine="echarts"
   ></div>
-  <table class="provider-share-data" aria-label={t('providerShare')}>
-    <thead>
-      <tr>
-        <th>{t('providersLabel')}</th>
-        <th>{metric === 'tokens' ? t('tokens') : t('cost')}</th>
-        <th>{metric === 'tokens' ? t('tokenShare') : t('costShare')}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each entries as entry (entry.key)}
+  <div class="provider-share-data">
+    <table aria-label={t('providerShare')}>
+      <thead>
         <tr>
-          <td>{entry.name} · {entry.billingDomainDisplayName}</td>
-          <td>{entry.formattedValue}</td>
-          <td>{entry.formattedShare}</td>
+          <th>{t('providersLabel')}</th>
+          <th>{metric === 'tokens' ? t('tokens') : t('cost')}</th>
+          <th>{metric === 'tokens' ? t('tokenShare') : t('costShare')}</th>
+          <th>{t('providerEvidence')}</th>
         </tr>
-      {/each}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {#each entries as entry (entry.key)}
+          <tr>
+            <td>{entry.name} · {entry.billingDomainDisplayName}</td>
+            <td>{entry.formattedValue}</td>
+            <td>{entry.formattedShare}</td>
+            <td>{entry.formattedEvidence}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <style>

@@ -1,3 +1,5 @@
+import type { DataAuthority } from '$core/types.js';
+
 export type ProviderShareMetric = 'tokens' | 'retail-equivalent';
 
 export interface ProviderShareSource {
@@ -8,7 +10,13 @@ export interface ProviderShareSource {
   includedInHeadline: boolean;
   recordedTokens: number | null;
   tokenShare: number | null;
-  retailEquivalent: { amount: number | null };
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+  retailEquivalent: {
+    amount: number | null;
+    authorities: DataAuthority[];
+    observedAt: string | null;
+  };
   retailShare: number | null;
 }
 
@@ -21,6 +29,7 @@ export interface ProviderShareEntry {
   color: string;
   formattedValue: string;
   formattedShare: string;
+  formattedEvidence: string;
 }
 
 export interface ProviderShareTheme {
@@ -35,7 +44,8 @@ export function buildProviderShareEntries(
   metric: ProviderShareMetric,
   colorFor: (providerId: string, billingDomainId: string) => string,
   formatValue: (value: number) => string,
-  formatShare: (share: number) => string
+  formatShare: (share: number) => string,
+  formatEvidence: (provider: ProviderShareSource, metric: ProviderShareMetric) => string
 ): ProviderShareEntry[] {
   return providers.flatMap((provider) => {
     const value = metric === 'tokens' ? provider.recordedTokens : provider.retailEquivalent.amount;
@@ -58,7 +68,8 @@ export function buildProviderShareEntries(
         share,
         color: colorFor(provider.providerId, provider.billingDomainId),
         formattedValue: formatValue(value),
-        formattedShare: formatShare(share)
+        formattedShare: formatShare(share),
+        formattedEvidence: formatEvidence(provider, metric)
       }
     ];
   });
@@ -126,7 +137,8 @@ export function buildProviderShareChartOption(
         return [
           `<strong>${escapeHtml(data.name)}</strong>`,
           `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.billingDomainDisplayName)}</span>`,
-          `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`
+          `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`,
+          `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.formattedEvidence)}</span>`
         ].join('<br>');
       }
     },

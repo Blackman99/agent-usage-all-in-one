@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildProviderShareChartOption,
-  buildProviderShareEntries
+  buildProviderShareEntries,
+  type ProviderShareSource
 } from '../../src/lib/provider-share.js';
 
 describe('Provider share chart', () => {
-  const providers = [
+  const providers: ProviderShareSource[] = [
     {
       providerId: 'codex',
       providerDisplayName: 'Codex',
@@ -15,7 +16,13 @@ describe('Provider share chart', () => {
       includedInHeadline: true,
       recordedTokens: 750,
       tokenShare: 0.75,
-      retailEquivalent: { amount: 15 },
+      authorities: ['local-observation'],
+      lastObservedAt: '2026-08-28T10:00:00.000Z',
+      retailEquivalent: {
+        amount: 15,
+        authorities: ['estimate'],
+        observedAt: '2026-08-28T10:05:00.000Z'
+      },
       retailShare: 0.6
     },
     {
@@ -26,7 +33,13 @@ describe('Provider share chart', () => {
       includedInHeadline: true,
       recordedTokens: 250,
       tokenShare: 0.25,
-      retailEquivalent: { amount: 10 },
+      authorities: ['official-client'],
+      lastObservedAt: '2026-08-28T10:10:00.000Z',
+      retailEquivalent: {
+        amount: 10,
+        authorities: ['estimate'],
+        observedAt: '2026-08-28T10:15:00.000Z'
+      },
       retailShare: 0.4
     },
     {
@@ -37,7 +50,9 @@ describe('Provider share chart', () => {
       includedInHeadline: true,
       recordedTokens: 50,
       tokenShare: 0.05,
-      retailEquivalent: { amount: null },
+      authorities: ['local-observation'],
+      lastObservedAt: '2026-08-28T10:20:00.000Z',
+      retailEquivalent: { amount: null, authorities: [], observedAt: null },
       retailShare: null
     }
   ];
@@ -48,11 +63,19 @@ describe('Provider share chart', () => {
       'retail-equivalent',
       (providerId) => (providerId === 'codex' ? '#111111' : '#222222'),
       (value) => `$${value}`,
-      (share) => `${share * 100}%`
+      (share) => `${share * 100}%`,
+      (provider, metric) =>
+        `${metric}:${provider.retailEquivalent.authorities.join(',')}:${provider.retailEquivalent.observedAt}`
     );
 
     expect(entries).toEqual([
-      expect.objectContaining({ name: 'Codex', value: 15, share: 0.6, color: '#111111' }),
+      expect.objectContaining({
+        name: 'Codex',
+        value: 15,
+        share: 0.6,
+        color: '#111111',
+        formattedEvidence: 'retail-equivalent:estimate:2026-08-28T10:05:00.000Z'
+      }),
       expect.objectContaining({ name: 'Claude Code', value: 10, share: 0.4, color: '#222222' })
     ]);
   });
@@ -63,7 +86,8 @@ describe('Provider share chart', () => {
       'tokens',
       () => '#7788ff',
       (value) => `${value} Tokens`,
-      (share) => `${share * 100}%`
+      (share) => `${share * 100}%`,
+      (provider) => `${provider.authorities.join(',')}:${provider.lastObservedAt}`
     );
     const option = buildProviderShareChartOption(entries, {
       text: '#ffffff',

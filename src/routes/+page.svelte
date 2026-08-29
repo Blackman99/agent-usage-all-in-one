@@ -1608,6 +1608,8 @@
                     {locale}
                     {formatUsageMetric}
                     {formatPercent}
+                    {displayAuthorities}
+                    {formatReset}
                   />
                 </section>
 
