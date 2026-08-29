@@ -1455,6 +1455,21 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   expect(providerSurface.borderRadius).toBeGreaterThanOrEqual(22);
 
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbenchFrame = await page.getByTestId('token-money-workbench').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      padding: style.padding,
+      borderTopWidth: style.borderTopWidth,
+      backgroundColor: style.backgroundColor,
+      boxShadow: style.boxShadow
+    };
+  });
+  expect(workbenchFrame).toEqual({
+    padding: '0px',
+    borderTopWidth: '0px',
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    boxShadow: 'none'
+  });
   const summaryBoard = page.getByTestId('usage-summary-board');
   const analysisGrid = page.getByTestId('usage-analysis-grid');
   await expect(summaryBoard).toBeVisible();

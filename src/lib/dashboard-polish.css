@@ -174,7 +174,7 @@
   margin-block: 9px 7px;
 }
 
-.shell .token-money-workbench {
+.shell .token-money-workbench.token-money-workbench {
   padding: 0;
   border: 0;
   background: transparent;
