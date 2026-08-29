@@ -34,9 +34,9 @@ export interface OpenCodeGoConnectorOptions {
 }
 
 const LIMITS = {
-  rolling: { label: '5 hour', amount: 12 },
-  weekly: { label: 'Week', amount: 30 },
-  monthly: { label: 'Month', amount: 60 }
+  rolling: { label: '5 hour', amount: 12, windowDurationMinutes: 300 },
+  weekly: { label: 'Week', amount: 30, windowDurationMinutes: 10_080 },
+  monthly: { label: 'Month', amount: 60, windowDurationMinutes: 43_200 }
 } as const;
 
 export class OpenCodeGoConnector implements Connector {
@@ -90,6 +90,7 @@ function mapQuota(response: OpenCodeGoUsageResponse): QuotaBucket[] {
     billingDomainId: 'go-subscription',
     label: LIMITS[id].label,
     usedPercent: response.usage[id].percent,
+    windowDurationMinutes: LIMITS[id].windowDurationMinutes,
     resetsAt: response.usage[id].resetsAt,
     authority: 'official-account',
     scope: 'account-wide',

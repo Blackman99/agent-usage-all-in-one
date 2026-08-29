@@ -79,6 +79,7 @@ function mapQuota(quota: ParsedClaudeQuota): QuotaBucket {
     billingDomainId: 'subscription',
     label: quota.label,
     usedPercent: quota.usedPercent,
+    windowDurationMinutes: quota.windowDurationMinutes,
     resetsAt: quota.resetsAt,
     authority: 'official-client',
     scope: 'account-wide'

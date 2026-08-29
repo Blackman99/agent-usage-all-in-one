@@ -21,6 +21,7 @@ export interface QuotaBucket {
   billingDomainId: string;
   label: string;
   usedPercent: number | null;
+  windowDurationMinutes?: number | null;
   resetsAt: string | null;
   authority: DataAuthority;
   observedAt?: string;

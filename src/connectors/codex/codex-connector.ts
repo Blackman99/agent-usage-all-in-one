@@ -209,6 +209,7 @@ function mapQuotaBuckets(response: CodexRateLimitsResponse): QuotaBucket[] {
         billingDomainId: 'subscription',
         label: multipleLimits ? `${baseLabel} · ${windowLabel}` : windowLabel,
         usedPercent: window.usedPercent,
+        windowDurationMinutes: window.windowDurationMins,
         resetsAt: window.resetsAt === null ? null : new Date(window.resetsAt * 1000).toISOString(),
         authority: 'official-account'
       });

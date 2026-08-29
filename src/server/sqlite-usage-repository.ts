@@ -243,6 +243,7 @@ interface QuotaRow {
   billing_domain_id: string;
   label: string;
   used_percent: number | null;
+  window_duration_minutes: number | null;
   resets_at: string | null;
   authority: DataAuthority;
   observed_at: string;
@@ -542,13 +543,15 @@ export class SqliteUsageRepository implements UsageRepository {
 
       const quotaStatement = this.#database.prepare(
         `INSERT INTO quota_buckets (
-           provider_id, id, billing_domain_id, label, used_percent, resets_at, authority, observed_at,
+           provider_id, id, billing_domain_id, label, used_percent, window_duration_minutes,
+           resets_at, authority, observed_at,
            scope, status, limit_amount, limit_currency, fallback_status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            billing_domain_id = excluded.billing_domain_id,
            label = excluded.label,
            used_percent = excluded.used_percent,
+           window_duration_minutes = excluded.window_duration_minutes,
            resets_at = excluded.resets_at,
            authority = excluded.authority,
            observed_at = excluded.observed_at,
@@ -565,6 +568,7 @@ export class SqliteUsageRepository implements UsageRepository {
           bucket.billingDomainId,
           bucket.label,
           bucket.usedPercent,
+          bucket.windowDurationMinutes ?? null,
           bucket.resetsAt,
           bucket.authority,
           snapshot.observedAt,
@@ -1459,7 +1463,8 @@ export class SqliteUsageRepository implements UsageRepository {
   ): BillingDomainOverview {
     const quotaRows = this.#database
       .prepare(
-        `SELECT id, billing_domain_id, label, used_percent, resets_at, authority, observed_at,
+        `SELECT id, billing_domain_id, label, used_percent, window_duration_minutes, resets_at,
+                authority, observed_at,
                 scope, status, limit_amount, limit_currency, fallback_status
          FROM quota_buckets WHERE provider_id = ? AND billing_domain_id = ? ORDER BY id`
       )
@@ -1951,6 +1956,7 @@ export class SqliteUsageRepository implements UsageRepository {
         billing_domain_id TEXT NOT NULL,
         label TEXT NOT NULL,
         used_percent REAL,
+        window_duration_minutes INTEGER,
         resets_at TEXT,
         authority TEXT NOT NULL,
         observed_at TEXT NOT NULL,
@@ -2304,6 +2310,7 @@ export class SqliteUsageRepository implements UsageRepository {
     for (const [name, type] of [
       ['scope', 'TEXT'],
       ['status', 'TEXT'],
+      ['window_duration_minutes', 'INTEGER'],
       ['limit_amount', 'REAL'],
       ['limit_currency', 'TEXT'],
       ['fallback_status', 'TEXT']
@@ -2347,6 +2354,7 @@ function mapQuotaRow(row: QuotaRow): QuotaBucket {
     billingDomainId: row.billing_domain_id,
     label: row.label,
     usedPercent: row.used_percent,
+    windowDurationMinutes: row.window_duration_minutes,
     resetsAt: row.resets_at,
     authority: row.authority,
     observedAt: row.observed_at,

@@ -2633,6 +2633,146 @@ test('keeps provider cards and their final quota rows aligned without forecasts'
   expect(new Set(geometry.map(({ quotaBottom }) => quotaBottom)).size).toBe(1);
 });
 
+test('compares provider quota reset windows on an interactive homepage timeline', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/connectors', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: '[]' });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    const specifications = [
+      {
+        id: 'codex',
+        displayName: 'Codex',
+        domainId: 'subscription',
+        buckets: [
+          ['codex:primary', '5 hour', 20, 300, '2026-08-29T15:00:00.000Z'],
+          ['codex:secondary', 'Week', 40, 10_080, '2026-09-01T00:00:00.000Z'],
+          ['spark:secondary', 'GPT-5.3-Codex-Spark · Week', 70, 10_080, '2026-09-02T00:00:00.000Z']
+        ]
+      },
+      {
+        id: 'claude-code',
+        displayName: 'Claude Code',
+        domainId: 'subscription',
+        buckets: [
+          ['five-hour', '5 hour', 10, 300, '2026-08-29T14:00:00.000Z'],
+          ['week-all', 'Week · All models', 35, 10_080, '2026-09-01T00:00:00.000Z'],
+          ['week-fable', 'Week · Fable only', 80, 10_080, '2026-09-01T00:00:00.000Z']
+        ]
+      },
+      {
+        id: 'opencode-go',
+        displayName: 'OpenCode Go',
+        domainId: 'go-subscription',
+        buckets: [
+          ['rolling', '5 hour', 5, 300, '2026-08-29T13:00:00.000Z'],
+          ['weekly', 'Week', 50, 10_080, '2026-09-01T00:00:00.000Z'],
+          ['monthly', 'Month', 60, 43_200, '2026-09-20T00:00:00.000Z']
+        ]
+      },
+      {
+        id: 'grok',
+        displayName: 'Grok',
+        domainId: 'grok-build-subscription',
+        buckets: [['grok-build:weekly', 'Weekly limit', 65, 10_080, '2026-09-01T00:00:00.000Z']]
+      }
+    ] as const;
+    const providers = specifications.map((specification) => {
+      const quotaBuckets = specification.buckets.map(
+        ([id, label, usedPercent, windowDurationMinutes, resetsAt]) => ({
+          id,
+          billingDomainId: specification.domainId,
+          label,
+          usedPercent,
+          windowDurationMinutes,
+          resetsAt,
+          authority: 'official-account'
+        })
+      );
+      const domain = {
+        id: specification.domainId,
+        displayName: specification.domainId,
+        freshness: { status: 'fresh', lastSuccessAt: '2026-08-29T12:00:00.000Z' },
+        health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+        coverage: {
+          quota: 'complete',
+          tokens: 'unavailable',
+          actualCost: 'unavailable',
+          history: 'unavailable'
+        },
+        quotaBuckets,
+        tokenTotals: { total: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+        tokenAuthority: null,
+        costs: [],
+        balances: [],
+        invoices: [],
+        forecasts: [],
+        forecastCoverage: 'insufficient'
+      };
+      return {
+        id: specification.id,
+        displayName: specification.displayName,
+        summaryBillingDomainId: specification.domainId,
+        freshness: domain.freshness,
+        health: domain.health,
+        coverage: domain.coverage,
+        quotaBuckets,
+        tokenTotals: domain.tokenTotals,
+        tokenAuthority: null,
+        billingDomains: [domain],
+        forecasts: [],
+        forecastCoverage: 'insufficient'
+      };
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ generatedAt: '2026-08-29T12:00:00.000Z', providers })
+    });
+  });
+
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  await page.goto(freshLaunch.stdout.trim());
+  const timeline = page.getByTestId('quota-timeline');
+  await expect(timeline).toBeVisible();
+  await expect(timeline).toHaveAttribute('data-chart-engine', 'echarts');
+  await expect(timeline).toHaveAttribute('data-lane-count', '4');
+  await expect(timeline.getByRole('heading', { name: 'Quota timeline' })).toBeVisible();
+  await expect(timeline.getByRole('button', { name: 'Weekly' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(timeline.locator('canvas')).toBeVisible();
+  await expect(timeline.locator('.quota-timeline-data')).toContainText('Grok');
+
+  const canvas = timeline.locator('canvas');
+  const bounds = await canvas.boundingBox();
+  expect(bounds).not.toBeNull();
+  if (bounds) {
+    const laneCount = Number(await timeline.getAttribute('data-lane-count'));
+    const plotTop = 42;
+    const plotBottom = 14;
+    const firstLaneCenter = plotTop + (bounds.height - plotTop - plotBottom) / laneCount / 2;
+    await page.mouse.move(bounds.x + bounds.width * 0.42, bounds.y + firstLaneCenter);
+    await expect(page.locator('.quota-timeline-tooltip')).toBeVisible();
+  }
+
+  const originalRange = await timeline.locator('.quota-timeline-range').textContent();
+  await timeline.getByRole('button', { name: 'Previous period' }).click();
+  await expect(timeline.locator('.quota-timeline-range')).not.toHaveText(originalRange ?? '');
+  await timeline.getByRole('button', { name: 'Today' }).click();
+  await expect(timeline.locator('.quota-timeline-range')).toHaveText(originalRange ?? '');
+
+  await timeline.getByRole('button', { name: '5 hour' }).click();
+  await expect(timeline).toHaveAttribute('data-lane-count', '3');
+  await expect(timeline.getByRole('button', { name: '5 hour' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(timeline.locator('.quota-timeline-data')).not.toContainText('Grok');
+});
+
 async function runPackagedCli(arguments_: string[]): Promise<{
   exitCode: number | null;
   stdout: string;

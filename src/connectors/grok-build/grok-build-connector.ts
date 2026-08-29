@@ -140,12 +140,32 @@ function mapBillingQuota(billing: GrokBuildBilling): QuotaBucket[] {
       billingDomainId: 'grok-build-subscription',
       label: period.label,
       usedPercent,
+      windowDurationMinutes: nativeWindowDurationMinutes(
+        config.currentPeriod?.start ?? config.billingPeriodStart,
+        resetsAt,
+        period.id
+      ),
       resetsAt,
       authority: 'official-client',
       scope: 'account-wide',
       status: billing.subscriptionTier ?? null
     }
   ];
+}
+
+function nativeWindowDurationMinutes(
+  startsAt: string | undefined,
+  resetsAt: string | null,
+  period: string
+): number | null {
+  const start = startsAt ? Date.parse(startsAt) : Number.NaN;
+  const end = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return Math.round((end - start) / 60_000);
+  }
+  if (period === 'weekly') return 10_080;
+  if (period === 'monthly') return 43_200;
+  return null;
 }
 
 function nativePeriod(

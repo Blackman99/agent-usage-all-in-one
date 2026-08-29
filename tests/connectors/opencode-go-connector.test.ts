@@ -55,6 +55,7 @@ describe('OpenCodeGoConnector', () => {
           id: 'rolling',
           label: '5 hour',
           usedPercent: 25,
+          windowDurationMinutes: 300,
           resetsAt: '2026-08-28T05:00:00.000Z',
           status: 'ok',
           scope: 'account-wide',
@@ -62,8 +63,20 @@ describe('OpenCodeGoConnector', () => {
           fallbackStatus: 'unknown',
           authority: 'official-account'
         },
-        { id: 'weekly', label: 'Week', usedPercent: 40, limitAmount: 30 },
-        { id: 'monthly', label: 'Month', usedPercent: 50, limitAmount: 60 }
+        {
+          id: 'weekly',
+          label: 'Week',
+          usedPercent: 40,
+          windowDurationMinutes: 10_080,
+          limitAmount: 30
+        },
+        {
+          id: 'monthly',
+          label: 'Month',
+          usedPercent: 50,
+          windowDurationMinutes: 43_200,
+          limitAmount: 60
+        }
       ],
       usage: [],
       costs: []

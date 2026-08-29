@@ -493,6 +493,7 @@ describe('CodexConnector', () => {
           id: 'codex:primary',
           label: '5 hour',
           usedPercent: 42,
+          windowDurationMinutes: 300,
           resetsAt: '2026-08-28T05:00:00.000Z',
           authority: 'official-account'
         },
@@ -500,6 +501,7 @@ describe('CodexConnector', () => {
           id: 'codex:secondary',
           label: 'Week',
           usedPercent: 18,
+          windowDurationMinutes: 10_080,
           resetsAt: '2026-09-01T00:00:00.000Z',
           authority: 'official-account'
         }

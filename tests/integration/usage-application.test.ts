@@ -219,6 +219,7 @@ describe('UsageApplication', () => {
           billingDomainId: 'subscription',
           label: '5 hour',
           usedPercent: 42,
+          windowDurationMinutes: 300,
           resetsAt: '2026-08-28T05:00:00.000Z',
           authority: 'official-account'
         }
@@ -263,7 +264,7 @@ describe('UsageApplication', () => {
             quota: 'complete',
             tokens: 'complete'
           },
-          quotaBuckets: [{ id: 'five-hour', usedPercent: 42 }],
+          quotaBuckets: [{ id: 'five-hour', usedPercent: 42, windowDurationMinutes: 300 }],
           tokenTotals: {
             total: 125,
             input: 100,

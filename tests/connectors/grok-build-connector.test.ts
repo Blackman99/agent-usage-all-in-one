@@ -263,6 +263,7 @@ describe('GrokBuildConnector', () => {
         billingDomainId: 'grok-build-subscription',
         label: 'Weekly limit',
         usedPercent: 61.2,
+        windowDurationMinutes: 10_080,
         resetsAt: '2026-09-01T00:00:00.000Z',
         authority: 'official-client',
         scope: 'account-wide',

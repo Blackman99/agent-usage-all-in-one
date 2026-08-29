@@ -7,6 +7,7 @@ export interface ParsedClaudeQuota {
   id: string;
   label: string;
   usedPercent: number;
+  windowDurationMinutes: number | null;
   resetsAt: string | null;
 }
 
@@ -242,6 +243,7 @@ export function parseClaudeUsageScreen(text: string, now: Date): ParsedClaudeQuo
       id,
       label: displayLabel(heading),
       usedPercent: Number(match[1]),
+      windowDurationMinutes: windowDurationMinutes(heading),
       resetsAt: resetLine ? parseReset(resetLine, now) : null
     });
   }
@@ -275,6 +277,12 @@ function displayLabel(heading: string): string {
   }
   const weekly = heading.match(/^Weekly\s*[·—-]\s*(.+)$/i);
   return weekly ? `Week · ${weekly[1]}` : heading;
+}
+
+function windowDurationMinutes(heading: string): number | null {
+  if (/^(5[- ]hour limit|current session)$/i.test(heading)) return 300;
+  if (/^(Current week\s*\(.+\)|Weekly\s*[·—-]\s*.+)$/i.test(heading)) return 10_080;
+  return null;
 }
 
 function parseReset(line: string, now: Date): string | null {

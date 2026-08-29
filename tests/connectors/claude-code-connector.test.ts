@@ -40,24 +40,28 @@ describe('Claude Code quota adapter', () => {
         id: '5-hour-limit',
         label: '5 hour',
         usedPercent: 42,
+        windowDurationMinutes: 300,
         resetsAt: '2026-08-28T04:13:00.000Z'
       },
       {
         id: 'weekly-all-models',
         label: 'Week · All models',
         usedPercent: 24,
+        windowDurationMinutes: 10_080,
         resetsAt: '2026-08-31T09:59:00.000Z'
       },
       {
         id: 'weekly-fable-only',
         label: 'Week · Fable only',
         usedPercent: 17,
+        windowDurationMinutes: 10_080,
         resetsAt: '2026-08-31T09:59:00.000Z'
       },
       {
         id: 'weekly-future-model-only',
         label: 'Week · Future model only',
         usedPercent: 3,
+        windowDurationMinutes: 10_080,
         resetsAt: '2026-08-31T09:59:00.000Z'
       }
     ]);
@@ -71,18 +75,21 @@ describe('Claude Code quota adapter', () => {
         id: 'current-session',
         label: '5 hour',
         usedPercent: 25,
+        windowDurationMinutes: 300,
         resetsAt: '2026-08-28T06:50:00.000Z'
       },
       {
         id: 'current-week-all-models',
         label: 'Week · All models',
         usedPercent: 41,
+        windowDurationMinutes: 10_080,
         resetsAt: '2026-08-31T16:00:00.000Z'
       },
       {
         id: 'current-week-fable',
         label: 'Week · Fable only',
         usedPercent: 75,
+        windowDurationMinutes: 10_080,
         resetsAt: '2026-08-31T15:59:00.000Z'
       }
     ]);

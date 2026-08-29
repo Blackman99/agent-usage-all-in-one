@@ -28,6 +28,8 @@
   } from '$lib/automatic-recovery.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
   import ProviderShareChart from '$lib/ProviderShareChart.svelte';
+  import QuotaTimelineChart from '$lib/QuotaTimelineChart.svelte';
+  import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
   import '$lib/dashboard-polish.css';
 
@@ -879,6 +881,28 @@
       .map(({ bucket }) => bucket);
   }
 
+  function quotaTimelineProviders(
+    currentOverview: UsageOverview,
+    connectionStatuses: ConnectorStatus[]
+  ): QuotaTimelineProvider[] {
+    return displayProviders(currentOverview, connectionStatuses).flatMap((provider) => {
+      return provider.billingDomains.flatMap((domain) => {
+        const quotaBuckets = displayQuotaBuckets(domain.quotaBuckets);
+        if (quotaBuckets.length === 0) return [];
+        return [
+          {
+            providerId: provider.id,
+            providerDisplayName: provider.displayName,
+            billingDomainId: domain.id,
+            billingDomainDisplayName: domain.displayName,
+            observedAt: domain.freshness?.lastSuccessAt ?? provider.freshness.lastSuccessAt,
+            quotaBuckets
+          }
+        ];
+      });
+    });
+  }
+
   function emptyProvider(id: string, displayName: string): ProviderOverview {
     const tokenTotals = emptyTokenTotals();
     return {
@@ -1163,6 +1187,12 @@
           {#if processing?.modules.usage.state === 'running'}
             <p class="module-progress" role="status">{t('updatingAgentUsage')}</p>
           {/if}
+          <QuotaTimelineChart
+            providers={quotaTimelineProviders(overview, connectors)}
+            {locale}
+            {timeZone}
+            now={Date.parse(overview.generatedAt)}
+          />
           <section class="providers" aria-label={t('providersLabel')}>
             {#each displayProviders(overview, connectors) as provider (provider.id)}
               {@const logo = providerLogoSources(provider.id)}
