@@ -11,6 +11,10 @@ import type {
   LocalNotification,
   LocalNotifier,
   MonitoringSettings,
+  PlanBillingPeriod,
+  PlanCatalog,
+  PlanEligibleDomain,
+  PlanSettings,
   StartAtLoginManager,
   TelemetryIngestor,
   UsageOverview,
@@ -39,6 +43,23 @@ import {
   deriveRetailEquivalentCosts,
   type RetailPriceCatalog
 } from './retail-pricing.js';
+import {
+  SUBSCRIPTION_PLAN_CATALOG,
+  planCatalogEntriesForDomain,
+  planCatalogEntry
+} from './plan-pricing.js';
+
+export interface PlanSubscriptionInput {
+  providerId: string;
+  billingDomainId: string;
+  plan: {
+    planId: string | null;
+    amount?: number;
+    currency?: string;
+    billingPeriod?: PlanBillingPeriod;
+    anchorDate?: string | null;
+  } | null;
+}
 
 export interface UsageApplicationOptions {
   repository: UsageRepository;
@@ -53,11 +74,16 @@ export interface UsageApplicationOptions {
   notifier?: LocalNotifier;
   startAtLoginManager?: StartAtLoginManager;
   priceCatalog?: RetailPriceCatalog | null;
+  planCatalog?: PlanCatalog;
 }
 
 export interface RefreshOptions {
   userInitiated?: boolean;
   mode?: CollectionMode;
+}
+
+export interface BackgroundProcessingOptions {
+  userInitiated?: boolean;
 }
 
 export class UsageApplication {
@@ -73,10 +99,13 @@ export class UsageApplication {
   readonly #notifier?: LocalNotifier;
   readonly #startAtLoginManager?: StartAtLoginManager;
   readonly #priceCatalog: RetailPriceCatalog | null;
+  readonly #planCatalog: PlanCatalog;
   #refreshPromise: Promise<void> | null = null;
   #refreshMode: CollectionMode | null = null;
   #backgroundPromise: Promise<void> | null = null;
   #queuedHardRebuildPromise: Promise<void> | null = null;
+  #queuedUserProcessingPromise: Promise<void> | null = null;
+  #userInitiatedProcessing = false;
   #databaseWriteQueue: Promise<void> = Promise.resolve();
   #processingStatus: ProcessingStatus;
 
@@ -94,6 +123,7 @@ export class UsageApplication {
     this.#startAtLoginManager = options.startAtLoginManager;
     this.#priceCatalog =
       options.priceCatalog === undefined ? OFFICIAL_PRICING_CATALOG : options.priceCatalog;
+    this.#planCatalog = options.planCatalog ?? SUBSCRIPTION_PLAN_CATALOG;
     this.#processingStatus = createProcessingStatus(this.#clock().toISOString(), false);
   }
 
@@ -151,44 +181,59 @@ export class UsageApplication {
     return structuredClone(this.#processingStatus);
   }
 
-  startBackgroundProcessing(): Promise<void> {
-    return this.#startProcessing('incremental');
+  startBackgroundProcessing(options: BackgroundProcessingOptions = {}): Promise<void> {
+    return this.#startProcessing('incremental', options.userInitiated === true);
   }
 
   startHardRebuild(): Promise<void> {
-    return this.#startProcessing('hard-rebuild');
+    return this.#startProcessing('hard-rebuild', true);
   }
 
-  #startProcessing(mode: CollectionMode): Promise<void> {
+  #startProcessing(mode: CollectionMode, userInitiated: boolean): Promise<void> {
     if (this.#backgroundPromise) {
       if (mode === 'hard-rebuild' && !this.#processingStatus.hardRebuild) {
         this.#queuedHardRebuildPromise ??= this.#backgroundPromise
           .then(
-            () => this.#startProcessing('hard-rebuild'),
-            () => this.#startProcessing('hard-rebuild')
+            () => this.#startProcessing('hard-rebuild', true),
+            () => this.#startProcessing('hard-rebuild', true)
           )
           .finally(() => {
             this.#queuedHardRebuildPromise = null;
           });
         return this.#queuedHardRebuildPromise;
       }
+      // A person asking for fresh data must not inherit a scheduled run that
+      // skips every connector still inside its collection interval.
+      if (userInitiated && !this.#userInitiatedProcessing) {
+        this.#queuedUserProcessingPromise ??= this.#backgroundPromise
+          .then(
+            () => this.#startProcessing(mode, true),
+            () => this.#startProcessing(mode, true)
+          )
+          .finally(() => {
+            this.#queuedUserProcessingPromise = null;
+          });
+        return this.#queuedUserProcessingPromise;
+      }
       return this.#backgroundPromise;
     }
+    this.#userInitiatedProcessing = userInitiated || mode === 'hard-rebuild';
     this.#processingStatus = createProcessingStatus(
       this.#clock().toISOString(),
       mode === 'hard-rebuild'
     );
-    this.#backgroundPromise = this.#runProcessing(mode).finally(() => {
-      this.#backgroundPromise = null;
-    });
+    this.#backgroundPromise = this.#runProcessing(mode, this.#userInitiatedProcessing).finally(
+      () => {
+        this.#backgroundPromise = null;
+        this.#userInitiatedProcessing = false;
+      }
+    );
     return this.#backgroundPromise;
   }
 
-  async #runProcessing(mode: CollectionMode): Promise<void> {
+  async #runProcessing(mode: CollectionMode, userInitiated: boolean): Promise<void> {
     await this.#runModule('discovery', () => this.discoverConnectors().then(() => undefined));
-    await this.#runModule('usage', () =>
-      this.refresh({ userInitiated: mode === 'hard-rebuild', mode })
-    );
+    await this.#runModule('usage', () => this.refresh({ userInitiated, mode }));
     await this.#runModule('pricing', () =>
       this.#queueDatabaseWrite(async () => {
         await this.#repository.ensureQueryIndexes?.();
@@ -438,6 +483,101 @@ export class UsageApplication {
       settings: this.#repository.getMonitoringSettings(),
       connectors: this.#repository.getConnectorRuntimeStates()
     };
+  }
+
+  async getPlanSettings(): Promise<PlanSettings> {
+    return {
+      catalogVersion: this.#planCatalog.version,
+      domains: this.#planEligibleDomains(),
+      subscriptions: this.#repository.getPlanSubscriptions()
+    };
+  }
+
+  async updatePlanSubscription(input: PlanSubscriptionInput): Promise<PlanSettings> {
+    const domain = this.#planEligibleDomains().find(
+      (candidate) =>
+        candidate.providerId === input.providerId &&
+        candidate.billingDomainId === input.billingDomainId
+    );
+    if (!domain) throw new Error('Unknown subscription billing domain');
+    if (input.plan === null) {
+      this.#repository.deletePlanSubscription(input.providerId, input.billingDomainId);
+      return this.getPlanSettings();
+    }
+
+    const preset = input.plan.planId
+      ? planCatalogEntry(this.#planCatalog, input.plan.planId)
+      : null;
+    if (input.plan.planId && !preset) throw new Error('Unknown plan preset');
+    if (
+      preset &&
+      (preset.providerId !== input.providerId || preset.billingDomainId !== input.billingDomainId)
+    ) {
+      throw new Error('Plan preset belongs to another billing domain');
+    }
+
+    const amount = input.plan.amount ?? preset?.amount;
+    if (amount === undefined) throw new Error('A plan price is required');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('A plan price must be a positive amount');
+    }
+    const currency = (input.plan.currency ?? preset?.currency ?? 'USD').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw new Error('A plan currency must be a 3-letter code');
+    const billingPeriod = input.plan.billingPeriod ?? preset?.billingPeriod ?? 'monthly';
+    const anchorDate = input.plan.anchorDate ?? null;
+    if (anchorDate !== null && Number.isNaN(new Date(`${anchorDate}T00:00:00.000Z`).getTime())) {
+      throw new Error('A renewal date must be a calendar date');
+    }
+
+    const overridesPreset =
+      preset !== null &&
+      (amount !== preset.amount ||
+        currency !== preset.currency.toUpperCase() ||
+        billingPeriod !== preset.billingPeriod);
+
+    this.#repository.savePlanSubscription({
+      providerId: input.providerId,
+      billingDomainId: input.billingDomainId,
+      planId: preset?.id ?? null,
+      displayName: preset?.displayName ?? '',
+      amount,
+      currency,
+      billingPeriod,
+      anchorDate,
+      priceSource: preset && !overridesPreset ? 'catalog-preset' : 'user-entered',
+      updatedAt: this.#clock().toISOString()
+    });
+    return this.getPlanSettings();
+  }
+
+  /**
+   * A billing domain can carry a plan price when its connector does not report
+   * an actual metered charge. Metered domains keep their own billed amounts and
+   * never receive a declared subscription price.
+   */
+  #planEligibleDomains(): PlanEligibleDomain[] {
+    const domains = new Map<string, PlanEligibleDomain>();
+    for (const definition of this.#connectorDefinitions) {
+      if (definition.expectedCoverage?.includes('actual-cost')) continue;
+      const key = `${definition.target.provider.id}:${definition.target.billingDomain.id}`;
+      if (domains.has(key)) continue;
+      domains.set(key, {
+        providerId: definition.target.provider.id,
+        providerDisplayName: definition.target.provider.displayName,
+        billingDomainId: definition.target.billingDomain.id,
+        billingDomainDisplayName: definition.target.billingDomain.displayName,
+        presets: planCatalogEntriesForDomain(
+          this.#planCatalog,
+          definition.target.provider.id,
+          definition.target.billingDomain.id
+        )
+      });
+    }
+    return [...domains.values()].sort((left, right) =>
+      `${left.providerId}:${left.billingDomainId}`.localeCompare(
+        `${right.providerId}:${right.billingDomainId}`
+      )
+    );
   }
 
   async #sendNotificationTransitions(): Promise<void> {

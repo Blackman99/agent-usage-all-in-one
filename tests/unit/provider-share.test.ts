@@ -63,9 +63,7 @@ describe('Provider share chart', () => {
       'retail-equivalent',
       (providerId) => (providerId === 'codex' ? '#111111' : '#222222'),
       (value) => `$${value}`,
-      (share) => `${share * 100}%`,
-      (provider, metric) =>
-        `${metric}:${provider.retailEquivalent.authorities.join(',')}:${provider.retailEquivalent.observedAt}`
+      (share) => `${share * 100}%`
     );
 
     expect(entries).toEqual([
@@ -73,8 +71,7 @@ describe('Provider share chart', () => {
         name: 'Codex',
         value: 15,
         share: 0.6,
-        color: '#111111',
-        formattedEvidence: 'retail-equivalent:estimate:2026-08-28T10:05:00.000Z'
+        color: '#111111'
       }),
       expect.objectContaining({ name: 'Claude Code', value: 10, share: 0.4, color: '#222222' })
     ]);
@@ -86,8 +83,7 @@ describe('Provider share chart', () => {
       'tokens',
       () => '#7788ff',
       (value) => `${value} Tokens`,
-      (share) => `${share * 100}%`,
-      (provider) => `${provider.authorities.join(',')}:${provider.lastObservedAt}`
+      (share) => `${share * 100}%`
     );
     const option = buildProviderShareChartOption(entries, {
       text: '#ffffff',
@@ -110,8 +106,7 @@ describe('Provider share chart', () => {
       'tokens',
       () => '#7788ff',
       (value) => `${value} Tokens`,
-      (share) => `${share * 100}%`,
-      (provider) => `${provider.authorities.join(',')}:${provider.lastObservedAt}`
+      (share) => `${share * 100}%`
     );
     const option = buildProviderShareChartOption(entries, {
       text: '#ffffff',
@@ -126,7 +121,7 @@ describe('Provider share chart', () => {
     expect(legend.tooltip).toMatchObject({ show: true });
     expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('250 Tokens');
     expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('25%');
-    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('official-client');
+    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).not.toContain('official-client');
   });
 
   it('includes OpenCode in the cost donut when local-history has retail-equivalent evidence', () => {
@@ -148,8 +143,7 @@ describe('Provider share chart', () => {
       'retail-equivalent',
       () => '#7788ff',
       (value) => `$${value}`,
-      (share) => `${share * 100}%`,
-      (provider) => provider.retailEquivalent.authorities.join(',')
+      (share) => `${share * 100}%`
     );
 
     expect(entries).toEqual(
@@ -158,8 +152,7 @@ describe('Provider share chart', () => {
           name: 'OpenCode',
           billingDomainDisplayName: 'Local history',
           value: 5,
-          share: 1 / 6,
-          formattedEvidence: 'estimate'
+          share: 1 / 6
         })
       ])
     );

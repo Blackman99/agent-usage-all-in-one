@@ -12,6 +12,8 @@
     HistoryModelPriceEvidence,
     HistoryWindow,
     MonitoringSettings,
+    PlanBillingPeriod,
+    PlanSettings,
     ProcessingStatus,
     ProviderOverview,
     QuotaBucket,
@@ -41,9 +43,12 @@
   import ModelDetailChart from '$lib/ModelDetailChart.svelte';
   import ModelBreakdownTreemap from '$lib/ModelBreakdownTreemap.svelte';
   import ModelTrendStackedChart from '$lib/ModelTrendStackedChart.svelte';
+  import PlanValueChart from '$lib/PlanValueChart.svelte';
   import ProviderShareChart from '$lib/ProviderShareChart.svelte';
   import QuotaTimelineChart from '$lib/QuotaTimelineChart.svelte';
   import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
+  import { buildPlanValueRanking, type PlanValueFormatters } from '$lib/plan-value.js';
+  import { trendSegmentColor } from '$lib/usage-trend.js';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
   import '$lib/dashboard-polish.css';
 
@@ -56,6 +61,14 @@
   const DEFAULT_AGENT_PROVIDER_IDS = new Set(
     DEFAULT_AGENT_PROVIDERS.map((provider) => provider.id)
   );
+
+  interface PlanDraft {
+    selection: string;
+    amount: string;
+    currency: string;
+    billingPeriod: PlanBillingPeriod;
+    anchorDate: string;
+  }
 
   let locale: Locale = 'en';
   let metaDescription: string;
@@ -83,13 +96,16 @@
   let selectedWindow: HistoryWindow = '7d';
   let selectedCurrency: 'CNY' | 'USD' = 'CNY';
   let selectedTrendMetric: 'tokens' | 'retail-equivalent' = 'retail-equivalent';
-  let breakdownDimension: 'model' | 'day' = 'model';
   let breakdownView: 'list' | 'treemap' | 'trend' = 'list';
   let selectedModelId: string | null = null;
   let modelDetailTrigger: HTMLButtonElement | null = null;
   let modelDetailPanel: HTMLElement | null = null;
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
+  let planSettings: PlanSettings | null = null;
+  let planError = false;
+  let planDrafts: Record<string, PlanDraft> = {};
+  let pendingPlanDomain: string | null = null;
   let diagnostics: DoctorReport | null = null;
   let diagnosticsLoaded = false;
   let retention: RetentionStatus | null = null;
@@ -126,6 +142,36 @@
           providers: Object.values(agentProviders)
         } as UsageOverview);
   $: effectiveOverview = activeDashboardView === 'agents' ? agentViewOverview : overview;
+  $: processingBusy = processing
+    ? Object.values(processing.modules).some(
+        (module) => module.state === 'pending' || module.state === 'running'
+      )
+    : false;
+  // A manual refresh only queues background collection, so the workbench stays
+  // busy until that work lands rather than for the request alone.
+  $: workbenchBusy = workbenchLoading || refreshing || processingBusy;
+  $: planValueCurrency = effectiveOverview?.workbench?.comparisonCurrency ?? selectedCurrency;
+  $: planValueFormatters = createPlanValueFormatters(planValueCurrency, locale);
+  // Only billing domains that can actually hold a declared price are offered:
+  // OpenCode local history, for one, is cross-Provider local usage with no plan.
+  $: planEligibleKeys = new Set(
+    (planSettings?.domains ?? []).map((domain) =>
+      planDomainKey(domain.providerId, domain.billingDomainId)
+    )
+  );
+  $: planValueUnconfigured = (
+    effectiveOverview?.workbench?.planValue?.unconfiguredDomains ?? []
+  ).filter((domain) =>
+    planEligibleKeys.has(planDomainKey(domain.providerId, domain.billingDomainId))
+  );
+  $: planValueRanking = effectiveOverview?.workbench?.planValue
+    ? buildPlanValueRanking(
+        effectiveOverview.workbench.planValue,
+        trendSegmentColor,
+        planValueFormatters,
+        t('planCustom')
+      )
+    : [];
 
   onMount(async () => {
     initTheme();
@@ -139,6 +185,7 @@
       loadAgentProviders(),
       loadConnectors(),
       loadMonitoring(),
+      loadPlanSettings(),
       loadRetention(),
       loadProcessing()
     ]);
@@ -158,9 +205,8 @@
     return translate(locale, key);
   }
 
-  function breakdownShareLabel(dimension: 'model' | 'day'): string {
-    if (selectedTrendMetric === 'tokens') return t('tokenShare');
-    return t(dimension === 'model' ? 'costShare' : 'retailShare');
+  function breakdownShareLabel(): string {
+    return selectedTrendMetric === 'tokens' ? t('tokenShare') : t('costShare');
   }
 
   function toggleLocale(): void {
@@ -326,6 +372,101 @@
       monitoringError = false;
     } catch {
       monitoringError = true;
+    }
+  }
+
+  async function loadPlanSettings(): Promise<void> {
+    try {
+      const response = await fetch('/api/plans');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      planSettings = (await response.json()) as PlanSettings;
+      planDrafts = planDraftsFor(planSettings);
+      planError = false;
+    } catch {
+      planError = true;
+    }
+  }
+
+  function planDomainKey(providerId: string, billingDomainId: string): string {
+    return `${providerId}:${billingDomainId}`;
+  }
+
+  function planDraftsFor(settings: PlanSettings): Record<string, PlanDraft> {
+    const subscriptions = new Map(
+      settings.subscriptions.map((subscription) => [
+        planDomainKey(subscription.providerId, subscription.billingDomainId),
+        subscription
+      ])
+    );
+    return Object.fromEntries(
+      settings.domains.map((domain) => {
+        const key = planDomainKey(domain.providerId, domain.billingDomainId);
+        const subscription = subscriptions.get(key);
+        const selection = subscription
+          ? (subscription.priceSource === 'catalog-preset' && subscription.planId) || 'custom'
+          : 'none';
+        return [
+          key,
+          {
+            selection,
+            amount: subscription ? String(subscription.amount) : '',
+            currency: subscription?.currency ?? 'USD',
+            billingPeriod: subscription?.billingPeriod ?? 'monthly',
+            anchorDate: subscription?.anchorDate ?? ''
+          }
+        ];
+      })
+    );
+  }
+
+  function updatePlanDraft(key: string, changes: Partial<PlanDraft>): void {
+    const current = planDrafts[key];
+    if (!current) return;
+    const next = { ...current, ...changes };
+    if (changes.selection && changes.selection !== 'custom' && changes.selection !== 'none') {
+      const preset = planSettings?.domains
+        .flatMap((domain) => domain.presets)
+        .find((entry) => entry.id === changes.selection);
+      if (preset) {
+        next.amount = String(preset.amount);
+        next.currency = preset.currency;
+        next.billingPeriod = preset.billingPeriod;
+      }
+    }
+    planDrafts = { ...planDrafts, [key]: next };
+  }
+
+  async function savePlanDraft(providerId: string, billingDomainId: string): Promise<void> {
+    const key = planDomainKey(providerId, billingDomainId);
+    const draft = planDrafts[key];
+    if (!draft) return;
+    const amount = Number(draft.amount);
+    const plan =
+      draft.selection === 'none'
+        ? null
+        : {
+            planId: draft.selection === 'custom' ? null : draft.selection,
+            amount: Number.isFinite(amount) && amount > 0 ? amount : undefined,
+            currency: draft.currency,
+            billingPeriod: draft.billingPeriod,
+            anchorDate: draft.anchorDate === '' ? null : draft.anchorDate
+          };
+    pendingPlanDomain = key;
+    try {
+      const response = await fetch('/api/plans', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ providerId, billingDomainId, plan })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      planSettings = (await response.json()) as PlanSettings;
+      planDrafts = planDraftsFor(planSettings);
+      planError = false;
+      await loadOverview();
+    } catch {
+      planError = true;
+    } finally {
+      pendingPlanDomain = null;
     }
   }
 
@@ -762,19 +903,6 @@
     return t(keys[coverage]);
   }
 
-  function timePrecisionLabel(
-    precision: ProviderOverview['tokenEvidence']['timePrecisions'][number]
-  ): string {
-    const keys: Record<ProviderOverview['tokenEvidence']['timePrecisions'][number], MessageKey> = {
-      event: 'precisionEvent',
-      hour: 'precisionHour',
-      day: 'precisionDay',
-      'billing-period': 'precisionBillingPeriod',
-      unknown: 'precisionUnknown'
-    };
-    return t(keys[precision]);
-  }
-
   function usageScopeLabel(
     scope: ProviderOverview['tokenEvidence']['usageScopes'][number]
   ): string {
@@ -835,7 +963,6 @@
     model: UsageOverview['workbench']['modelRanking']['entries'][number]
   ) {
     const recordedTokens = model.trend.map(() => 0);
-    const timePrecisions = model.trend.map(() => [] as HistoryModelObservation['timePrecision'][]);
     for (const observation of model.observations) {
       let low = 0;
       let high = model.trend.length - 1;
@@ -848,27 +975,19 @@
           low = middle + 1;
         } else {
           recordedTokens[middle] += observation.recordedTokens;
-          if (!timePrecisions[middle].includes(observation.timePrecision)) {
-            timePrecisions[middle].push(observation.timePrecision);
-          }
           break;
         }
       }
     }
     return model.trend.map((bucket, index) => {
-      const retailAvailable =
-        bucket.retailEquivalent.status !== 'unavailable' && bucket.retailEquivalent.amount !== null;
-      const selectedCost = retailAvailable
-        ? bucket.retailEquivalent
-        : (bucket.reportedEstimate ?? bucket.retailEquivalent);
+      const selectedCost =
+        bucket.retailEquivalent.status !== 'unavailable' && bucket.retailEquivalent.amount !== null
+          ? bucket.retailEquivalent
+          : (bucket.reportedEstimate ?? bucket.retailEquivalent);
       return {
         recordedTokens: bucket.gap ? null : recordedTokens[index],
-        timePrecision: timePrecisions[index].map(timePrecisionLabel).join(' + ') || t('unknown'),
         costAmount: selectedCost.amount,
-        costCurrency: selectedCost.comparisonCurrency,
-        costPurpose: retailAvailable ? t('apiRetailEquivalent') : t('providerReportedEstimate'),
-        costAuthorities: selectedCost.authorities,
-        costObservedAt: selectedCost.observedAt
+        costCurrency: selectedCost.comparisonCurrency
       };
     });
   }
@@ -1227,6 +1346,26 @@
     }).format(amount);
   }
 
+  function formatPlanPeriodRange(start: string, end: string): string {
+    const format = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' });
+    return `${format.format(new Date(start))} – ${format.format(new Date(end))}`;
+  }
+
+  function createPlanValueFormatters(currency: string, activeLocale: Locale): PlanValueFormatters {
+    return {
+      money: (amount) => (amount === null ? t('notAvailable') : formatMoney(amount, currency)),
+      tokens: (value) =>
+        value === null ? t('notAvailable') : `${formatCompactNumber(value)} ${t('tokens')}`,
+      ratio: (value, bound) => {
+        if (value === null) return t('notAvailable');
+        const formatted = `${new Intl.NumberFormat(activeLocale, {
+          maximumFractionDigits: value < 10 ? 1 : 0
+        }).format(value)}x`;
+        return bound === 'lower' ? `≥ ${formatted}` : formatted;
+      }
+    };
+  }
+
   function selectUsageMetric(metric: 'tokens' | 'retail-equivalent'): void {
     selectedTrendMetric = metric;
   }
@@ -1266,59 +1405,19 @@
     segment: UsageOverview['workbench']['trend']['buckets'][number]['segments'][number],
     metric: 'tokens' | 'retail-equivalent'
   ): string {
+    const cost =
+      segment.retailEquivalent.amount === null
+        ? segment.reportedEstimate
+        : segment.retailEquivalent;
     const value =
       metric === 'tokens'
         ? `${formatNumber(segment.recordedTokens)} ${t('tokens')}`
-        : [
-            ...(segment.retailEquivalent.amount === null
-              ? []
-              : [
-                  `${t('apiRetailEquivalent')}: ${formatMoney(
-                    segment.retailEquivalent.amount,
-                    segment.retailEquivalent.currency
-                  )}`
-                ]),
-            ...(segment.reportedEstimate?.amount == null
-              ? []
-              : [
-                  `${t('providerReportedEstimate')}: ${formatMoney(
-                    segment.reportedEstimate.amount,
-                    segment.reportedEstimate.currency
-                  )}`
-                ])
-          ].join('; ') || t('notAvailable');
-    const precision = segment.timePrecisions.map(timePrecisionLabel).join(' + ') || t('unknown');
-    const authorities =
-      segment.authorities && segment.authorities.length > 0
-        ? segment.authorities.map(authorityLabel).join(' + ')
-        : authorityLabel('unavailable');
+        : cost?.amount == null
+          ? t('notAvailable')
+          : formatMoney(cost.amount, cost.currency);
     const headlineScope =
       segment.includedInHeadline === false ? ` · ${t('separateFromHeadline')}` : '';
-    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}${headlineScope}: ${value} · ${t('timePrecision')}: ${precision} · ${t('source')}: ${authorities} · ${formatReset(segment.lastObservedAt ?? null)}`;
-  }
-
-  function overviewTokenDisplayEvidence(currentOverview: UsageOverview): {
-    authorities: DataAuthority[];
-    lastObservedAt: string | null;
-  } {
-    const histories = currentOverview.providers.flatMap((provider) =>
-      provider.billingDomains
-        .filter((domain) => domain.id === provider.summaryBillingDomainId)
-        .map((domain) => domain.history)
-    );
-    const authorities = [
-      ...new Set(histories.flatMap((history) => history.authorities ?? []))
-    ].sort();
-    const lastObservedAt = histories
-      .flatMap((history) => (history.lastObservedAt ? [history.lastObservedAt] : []))
-      .sort((left, right) => right.localeCompare(left))[0];
-    return { authorities, lastObservedAt: lastObservedAt ?? null };
-  }
-
-  function displayAuthorities(authorities: DataAuthority[] | undefined): string {
-    return authorities && authorities.length > 0
-      ? authorities.map(authorityLabel).join(' + ')
-      : authorityLabel('unavailable');
+    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}${headlineScope}: ${value}`;
   }
 
   function rankedModels(
@@ -1445,6 +1544,11 @@
               )}
               {@const domainFreshness = selectedDomain.freshness ?? provider.freshness}
               {@const domainCoverage = selectedDomain.coverage ?? provider.coverage}
+              {@const domainConnector = connectorForDomain(
+                connectors,
+                provider.id,
+                selectedDomain.id
+              )}
               <article
                 class="provider-card"
                 class:provider-card-loading={initialProviderLoading}
@@ -1457,13 +1561,6 @@
                     aria-hidden="true"
                   >
                     <div class="agent-card-skeleton-content">
-                      <div class="agent-skeleton-connection">
-                        <span>
-                          <i class="agent-skeleton-block"></i>
-                          <i class="agent-skeleton-block"></i>
-                        </span>
-                        <i class="agent-skeleton-block"></i>
-                      </div>
                       <div class="agent-skeleton-section-label">
                         <i class="agent-skeleton-block"></i>
                       </div>
@@ -1483,48 +1580,67 @@
                   </div>
                 {/if}
                 <div class="provider-heading">
-                  <div>
-                    {#if logo}
-                      <img
-                        class="provider-logo"
-                        data-provider-logo={provider.id}
-                        src={logoSrc(logo)}
-                        alt=""
-                      />
-                    {/if}
-                    <div>
+                  {#if logo}
+                    <img
+                      class="provider-logo"
+                      data-provider-logo={provider.id}
+                      src={logoSrc(logo)}
+                      alt=""
+                    />
+                  {/if}
+                  <div class="provider-heading-copy">
+                    <div class="provider-heading-top">
                       <h2 data-provider-logo={logo ? undefined : provider.id}>
                         {provider.displayName}
                       </h2>
-                      <p
-                        class="freshness"
-                        data-status={providerUpdating
-                          ? 'updating'
-                          : domainFreshness.status === 'unavailable'
-                            ? 'unavailable'
-                            : 'available'}
-                        role={providerUpdating ? 'status' : undefined}
-                        data-testid={providerUpdating
-                          ? `agent-provider-update-${provider.id}`
-                          : undefined}
-                      >
-                        <span></span>
-                        {#if providerUpdating}
-                          {t('updating')}
-                        {:else}
-                          {domainFreshness.status === 'fresh'
-                            ? t('updatedNow')
-                            : domainFreshness.lastSuccessAt
-                              ? t('updated')
-                              : t('unavailable')}
-                          {domainFreshness.lastSuccessAt
-                            ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
-                            : ''}
+                      <div class="provider-status">
+                        <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
+                        {#if domainConnector?.state === 'connected'}
+                          <span
+                            class="connection-chip"
+                            data-testid={`connector-${domainConnector.id}`}
+                          >
+                            <span class="visually-hidden"
+                              >{connectorStateLabel(domainConnector.state)}</span
+                            >
+                            <button
+                              title={`${connectorStateLabel(domainConnector.state)} · ${t('manageConnection')}`}
+                              aria-label={t('manageConnection')}
+                              on:click={() => openSettings(`connector:${domainConnector.id}`)}
+                            >
+                              <span aria-hidden="true">⚙</span>
+                            </button>
+                          </span>
                         {/if}
-                      </p>
+                      </div>
                     </div>
+                    <p
+                      class="freshness"
+                      data-status={providerUpdating
+                        ? 'updating'
+                        : domainFreshness.status === 'unavailable'
+                          ? 'unavailable'
+                          : 'available'}
+                      role={providerUpdating ? 'status' : undefined}
+                      data-testid={providerUpdating
+                        ? `agent-provider-update-${provider.id}`
+                        : undefined}
+                    >
+                      <span></span>
+                      {#if providerUpdating}
+                        {t('updating')}
+                      {:else}
+                        {domainFreshness.status === 'fresh'
+                          ? t('updatedNow')
+                          : domainFreshness.lastSuccessAt
+                            ? t('updated')
+                            : t('unavailable')}
+                        {domainFreshness.lastSuccessAt
+                          ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
+                          : ''}
+                      {/if}
+                    </p>
                   </div>
-                  <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
                 </div>
 
                 {#if (provider.billingDomains?.length ?? 0) > 1}
@@ -1549,92 +1665,80 @@
 
                 {#each [selectedDomain] as domain (domain.id)}
                   {@const connector = connectorForDomain(connectors, provider.id, domain.id)}
-                  {#if connector}
-                    {#if connector.state === 'connected'}
-                      <div class="connected-summary" data-testid={`connector-${connector.id}`}>
+                  {#if connector && connector.state !== 'connected'}
+                    <details
+                      class:connection-pending={pendingConnectorId === connector.id}
+                      class="inline-connection"
+                      data-testid={`connector-${connector.id}`}
+                      aria-busy={pendingConnectorId === connector.id}
+                      open
+                    >
+                      <summary>
                         <span>
                           <strong>{connectorStateLabel(connector.state)}</strong>
-                          <small>{connector.target.billingDomain.displayName}</small>
+                          {#if connector.experimental}<small>{t('experimental')}</small>{/if}
                         </span>
-                        <button on:click={() => openSettings(`connector:${connector.id}`)}
-                          >{t('manageConnection')}</button
-                        >
-                      </div>
-                    {:else}
-                      <details
-                        class:connection-pending={pendingConnectorId === connector.id}
-                        class="inline-connection"
-                        data-testid={`connector-${connector.id}`}
-                        aria-busy={pendingConnectorId === connector.id}
-                        open
-                      >
-                        <summary>
-                          <span>
-                            <strong>{connectorStateLabel(connector.state)}</strong>
-                            {#if connector.experimental}<small>{t('experimental')}</small>{/if}
-                          </span>
-                          {t('connectionSetup')}
-                        </summary>
-                        <div class="inline-connection-body">
-                          <p class="permission">{connectorPermission(connector)}</p>
-                          <div class="connection-meta">
-                            <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
-                            <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
-                          </div>
-                          <div class="coverage-list">
-                            <span>{t('coverageLabel')}</span>
-                            <strong
-                              >{connector.expectedCoverage
-                                .map(coverageDimensionLabel)
-                                .join(' · ')}</strong
-                            >
-                          </div>
-                          {#if connector.credentialOwner === 'agent-usage'}
-                            <label class="secret-field">
-                              <span>{t('managementKey')}</span>
-                              <input
-                                type="password"
-                                autocomplete="off"
-                                aria-label={`${connector.displayName} ${t('managementKey')}`}
-                                value={secretInputs[connector.id] ?? ''}
-                                on:input={(event) =>
-                                  (secretInputs = {
-                                    ...secretInputs,
-                                    [connector.id]: event.currentTarget.value
-                                  })}
-                              />
-                            </label>
-                          {/if}
-                          <div class="connection-actions">
-                            {#if connector.state === 'discovered' || connector.state === 'skipped'}
-                              <button
-                                class="primary-action"
-                                disabled={!connector.installed ||
-                                  pendingConnectorId === connector.id ||
-                                  (connector.credentialOwner === 'agent-usage' &&
-                                    !secretInputs[connector.id])}
-                                on:click={() => configureConnector(connector.id, 'connect')}
-                                >{t('connect')}</button
-                              >
-                            {/if}
-                            {#if connector.state === 'error' || connector.state === 'not-installed'}
-                              <button
-                                disabled={pendingConnectorId === connector.id}
-                                on:click={() => configureConnector(connector.id, 'retry')}
-                                >{t('retry')}</button
-                              >
-                            {/if}
-                            {#if connector.state !== 'skipped'}
-                              <button
-                                disabled={pendingConnectorId === connector.id}
-                                on:click={() => configureConnector(connector.id, 'skip')}
-                                >{t('skip')}</button
-                              >
-                            {/if}
-                          </div>
+                        {t('connectionSetup')}
+                      </summary>
+                      <div class="inline-connection-body">
+                        <p class="permission">{connectorPermission(connector)}</p>
+                        <div class="connection-meta">
+                          <span>{connector.installed ? t('installed') : t('notInstalled')}</span>
+                          <span>{credentialOwnerLabel(connector.credentialOwner)}</span>
                         </div>
-                      </details>
-                    {/if}
+                        <div class="coverage-list">
+                          <span>{t('coverageLabel')}</span>
+                          <strong
+                            >{connector.expectedCoverage
+                              .map(coverageDimensionLabel)
+                              .join(' · ')}</strong
+                          >
+                        </div>
+                        {#if connector.credentialOwner === 'agent-usage'}
+                          <label class="secret-field">
+                            <span>{t('managementKey')}</span>
+                            <input
+                              type="password"
+                              autocomplete="off"
+                              aria-label={`${connector.displayName} ${t('managementKey')}`}
+                              value={secretInputs[connector.id] ?? ''}
+                              on:input={(event) =>
+                                (secretInputs = {
+                                  ...secretInputs,
+                                  [connector.id]: event.currentTarget.value
+                                })}
+                            />
+                          </label>
+                        {/if}
+                        <div class="connection-actions">
+                          {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                            <button
+                              class="primary-action"
+                              disabled={!connector.installed ||
+                                pendingConnectorId === connector.id ||
+                                (connector.credentialOwner === 'agent-usage' &&
+                                  !secretInputs[connector.id])}
+                              on:click={() => configureConnector(connector.id, 'connect')}
+                              >{t('connect')}</button
+                            >
+                          {/if}
+                          {#if connector.state === 'error' || connector.state === 'not-installed'}
+                            <button
+                              disabled={pendingConnectorId === connector.id}
+                              on:click={() => configureConnector(connector.id, 'retry')}
+                              >{t('retry')}</button
+                            >
+                          {/if}
+                          {#if connector.state !== 'skipped'}
+                            <button
+                              disabled={pendingConnectorId === connector.id}
+                              on:click={() => configureConnector(connector.id, 'skip')}
+                              >{t('skip')}</button
+                            >
+                          {/if}
+                        </div>
+                      </div>
+                    </details>
                   {/if}
                   <div class="section-label">{t('quota')}</div>
                   <div class="quotas">
@@ -1698,13 +1802,7 @@
           role="tabpanel"
           aria-labelledby="token-model-costs-tab"
         >
-          {#if refreshing || processing?.modules.pricing.state === 'running'}
-            <p class="module-progress" role="status" data-testid="model-costs-refresh-status">
-              {t('updatingModelCosts')}
-            </p>
-          {/if}
           {#if effectiveOverview.workbench}
-            {@const overviewTokenEvidence = overviewTokenDisplayEvidence(effectiveOverview)}
             {@const workbench = effectiveOverview.workbench}
             <section
               class="token-money-workbench"
@@ -1757,9 +1855,9 @@
                 class="usage-summary-board"
                 data-testid="usage-summary-board"
                 aria-label={t('usageOverview')}
-                aria-busy={workbenchLoading}
+                aria-busy={workbenchBusy}
               >
-                {#if workbenchLoading}
+                {#if workbenchBusy}
                   <div
                     class="panel-progress"
                     role="status"
@@ -1788,24 +1886,6 @@
                           workbench.comparisonCurrency
                         )}
                   </strong>
-                  <span data-testid="trend-mode">
-                    {selectedTrendMetric === 'tokens'
-                      ? t('recordedTokens')
-                      : t('apiRetailEquivalent')}
-                  </span>
-                  {#if selectedTrendMetric === 'retail-equivalent'}
-                    <small>
-                      {t('apiRateEstimate')} · {t('pricingCoverage')}
-                      {formatPercent(workbench.costs.retailEquivalent.pricingCoverage)} ·
-                      {displayAuthorities(workbench.costs.retailEquivalent.authorities)} ·
-                      {formatReset(workbench.costs.retailEquivalent.observedAt)}
-                    </small>
-                  {:else}
-                    <small>
-                      {displayAuthorities(overviewTokenEvidence.authorities)} ·
-                      {formatReset(overviewTokenEvidence.lastObservedAt)}
-                    </small>
-                  {/if}
                 </div>
 
                 <div
@@ -1864,21 +1944,15 @@
                       </dd>
                     </div>
                   </dl>
-                  <small class="usage-totals-evidence">
-                    {t('classificationCoverage')}
-                    {formatPercent(workbench.tokenBreakdown.classificationCoverage)} ·
-                    {displayAuthorities(workbench.tokenBreakdown.authorities)} ·
-                    {formatReset(workbench.tokenBreakdown.lastObservedAt)}
-                  </small>
                 </div>
               </section>
 
               <div
                 class="usage-overview-grid"
                 data-testid="usage-analysis-grid"
-                aria-busy={workbenchLoading}
+                aria-busy={workbenchBusy}
               >
-                {#if workbenchLoading}
+                {#if workbenchBusy}
                   <div
                     class="panel-progress"
                     role="status"
@@ -1900,8 +1974,6 @@
                     {locale}
                     {formatUsageMetric}
                     {formatPercent}
-                    {displayAuthorities}
-                    {formatReset}
                   />
                 </section>
 
@@ -1921,13 +1993,187 @@
                 {/key}
               </div>
 
+              {#if workbench.planValue}
+                <section
+                  class="plan-value"
+                  data-testid="plan-value"
+                  aria-labelledby="plan-value-heading"
+                  aria-busy={workbenchBusy}
+                >
+                  <div class="plan-value-heading">
+                    <h3 id="plan-value-heading">{t('planValue')}</h3>
+                    <small>{t('planValueSubtitle')}</small>
+                  </div>
+
+                  {#if workbench.planValue.entries.length === 0}
+                    <div class="plan-value-empty" data-testid="plan-value-empty">
+                      <p>{t('planValueEmpty')}</p>
+                      <button type="button" on:click={() => openSettings('plans')}>
+                        {t('planValueEmptyAction')}
+                      </button>
+                    </div>
+                  {:else}
+                    <div class="plan-value-body">
+                      <PlanValueChart
+                        planValue={workbench.planValue}
+                        {locale}
+                        formatters={planValueFormatters}
+                      />
+
+                      <ol class="plan-value-ranking" data-testid="plan-value-ranking">
+                        {#each planValueRanking as row (row.key)}
+                          <li data-testid="plan-value-row">
+                            <div class="plan-value-row-heading">
+                              <span class="plan-value-name">
+                                <span class="plan-value-swatch" style={`background:${row.color}`}
+                                ></span>
+                                <strong>{row.name}</strong>
+                                <small>{row.planLabel}</small>
+                              </span>
+                              <span
+                                class="plan-value-ratio"
+                                class:plan-value-below={row.ratio !== null && !row.beatsBreakEven}
+                                data-testid="plan-value-ratio">{row.ratioLabel}</span
+                              >
+                            </div>
+                            <div
+                              class="plan-value-meter"
+                              role="img"
+                              aria-label={`${t('planValueRatio')} ${row.ratioLabel}`}
+                            >
+                              <span
+                                class="plan-value-meter-fill"
+                                style={`width:${row.meterPercent}%;background:${row.color}`}
+                              ></span>
+                              <span
+                                class="plan-value-break-even"
+                                style={`left:${row.breakEvenPercent}%`}
+                                title={t('planValueBreakEven')}
+                              ></span>
+                            </div>
+                            <dl class="plan-value-facts">
+                              <div>
+                                <dt>{t('planValuePaid')}</dt>
+                                <dd>{row.paidLabel}</dd>
+                              </div>
+                              <div>
+                                <dt>{t('planValueWorth')}</dt>
+                                <dd>{row.worthLabel}</dd>
+                              </div>
+                              <div>
+                                <dt>{t('planValueEffectiveUnitPrice')}</dt>
+                                <dd>{row.effectiveUnitPriceLabel}</dd>
+                              </div>
+                              <div>
+                                <dt>{t('planValueRetailUnitPrice')}</dt>
+                                <dd>{row.retailUnitPriceLabel}</dd>
+                              </div>
+                              {#if row.savingsLabel}
+                                <div>
+                                  <dt>
+                                    {row.savingsIsLoss
+                                      ? t('planValueOverpaid')
+                                      : t('planValueSavings')}
+                                  </dt>
+                                  <dd>{row.savingsLabel} · {t('planValuePerMillion')}</dd>
+                                </div>
+                              {/if}
+                            </dl>
+                            {#if row.period}
+                              <div class="plan-value-period" data-testid="plan-value-period">
+                                <div class="plan-value-period-heading">
+                                  <span>
+                                    {t('planPeriodLabel')} · {formatPlanPeriodRange(
+                                      row.period.start,
+                                      row.period.end
+                                    )}
+                                  </span>
+                                  <span data-testid="plan-value-period-progress">
+                                    {Math.floor(row.period.elapsedDays)}/{Math.round(
+                                      row.period.totalDays
+                                    )}
+                                    {t('planPeriodDays')}
+                                  </span>
+                                </div>
+                                <div
+                                  class="plan-value-meter plan-value-period-meter"
+                                  role="img"
+                                  aria-label={`${t('planPeriodEarnedBack')} ${
+                                    row.period.earnedLabel
+                                  } / ${row.period.periodCostLabel}`}
+                                >
+                                  <span
+                                    class="plan-value-meter-fill"
+                                    style={`width:${row.period.earnedPercent}%;background:${row.color}`}
+                                  ></span>
+                                  <span
+                                    class="plan-value-pace"
+                                    style={`left:${row.period.elapsedPercent}%`}
+                                    title={row.period.onPace
+                                      ? t('planPeriodOnPace')
+                                      : t('planPeriodBehindPace')}
+                                  ></span>
+                                </div>
+                                <small class:plan-value-behind={!row.period.onPace}>
+                                  {t('planPeriodEarnedBack')}
+                                  {row.period.earnedLabel} / {row.period.periodCostLabel} · {row
+                                    .period.onPace
+                                    ? t('planPeriodOnPace')
+                                    : t('planPeriodBehindPace')}
+                                </small>
+                              </div>
+                            {/if}
+                            {#if row.bound === 'lower'}
+                              <p class="plan-value-caveat">{t('planValuePartial')}</p>
+                            {:else if row.bound === 'unavailable'}
+                              <p class="plan-value-caveat">{t('planValueUnavailable')}</p>
+                            {/if}
+                          </li>
+                        {/each}
+                      </ol>
+                    </div>
+                    <p class="plan-value-note">{t('planValueWindowNote')}</p>
+                  {/if}
+
+                  {#if workbench.planValue.meteredDomains.length > 0 || planValueUnconfigured.length > 0}
+                    <ul class="plan-value-aside" data-testid="plan-value-aside">
+                      {#each workbench.planValue.meteredDomains as domain (`${domain.providerId}:${domain.billingDomainId}`)}
+                        <li>
+                          <strong
+                            >{domain.providerDisplayName} · {domain.billingDomainDisplayName}</strong
+                          >
+                          <span>{t('planValueMetered')}</span>
+                          <span
+                            >{t('actualCost')} · {formatMoney(
+                              domain.actualCost.amount,
+                              workbench.comparisonCurrency
+                            )}</span
+                          >
+                        </li>
+                      {/each}
+                      {#each planValueUnconfigured as domain (`${domain.providerId}:${domain.billingDomainId}`)}
+                        <li>
+                          <strong
+                            >{domain.providerDisplayName} · {domain.billingDomainDisplayName}</strong
+                          >
+                          <span>{t('planValueUnconfigured')}</span>
+                          <button type="button" on:click={() => openSettings('plans')}>
+                            {t('planValueEmptyAction')}
+                          </button>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </section>
+              {/if}
+
               <section
                 class="model-ranking"
                 data-testid="usage-breakdown"
                 aria-labelledby="model-ranking-heading"
-                aria-busy={workbenchLoading}
+                aria-busy={workbenchBusy}
               >
-                {#if workbenchLoading}
+                {#if workbenchBusy}
                   <div
                     class="panel-progress"
                     role="status"
@@ -1940,235 +2186,145 @@
                   <div>
                     <h3 id="model-ranking-heading">{t('breakdown')}</h3>
                   </div>
-                  <div class="segmented-control" role="group" aria-label={t('breakdown')}>
+                  <div
+                    class="segmented-control"
+                    role="tablist"
+                    aria-label={t('breakdownView')}
+                    data-testid="breakdown-view-tabs"
+                  >
                     <button
                       type="button"
-                      aria-pressed={breakdownDimension === 'model'}
-                      on:click={() => (breakdownDimension = 'model')}>{t('model')}</button
+                      role="tab"
+                      aria-selected={breakdownView === 'list'}
+                      on:click={() => (breakdownView = 'list')}>{t('list')}</button
                     >
                     <button
                       type="button"
-                      aria-pressed={breakdownDimension === 'day'}
-                      on:click={() => (breakdownDimension = 'day')}>{t('day')}</button
+                      role="tab"
+                      aria-selected={breakdownView === 'treemap'}
+                      on:click={() => (breakdownView = 'treemap')}>{t('treemap')}</button
+                    >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={breakdownView === 'trend'}
+                      on:click={() => (breakdownView = 'trend')}>{t('trendStacked')}</button
                     >
                   </div>
-                  {#if breakdownDimension === 'model'}
-                    <div
-                      class="segmented-control"
-                      role="tablist"
-                      aria-label={t('breakdownView')}
-                      data-testid="breakdown-view-tabs"
-                    >
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={breakdownView === 'list'}
-                        on:click={() => (breakdownView = 'list')}>{t('list')}</button
-                      >
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={breakdownView === 'treemap'}
-                        on:click={() => (breakdownView = 'treemap')}>{t('treemap')}</button
-                      >
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={breakdownView === 'trend'}
-                        on:click={() => (breakdownView = 'trend')}>{t('trendStacked')}</button
-                      >
-                    </div>
-                  {/if}
                 </div>
                 <div class="breakdown-header" aria-hidden="true">
-                  <span>{breakdownDimension === 'model' ? t('model') : t('day')}</span>
+                  <span>{t('model')}</span>
                   <span>{t('cost')}</span>
-                  <span>{breakdownShareLabel(breakdownDimension)}</span>
+                  <span>{breakdownShareLabel()}</span>
                   <span>{t('tokens')}</span>
                 </div>
-                {#if breakdownDimension === 'model'}
-                  {#if breakdownView === 'treemap'}
-                    <div class="treemap-wrap" role="tabpanel">
-                      <ModelBreakdownTreemap
-                        models={rankedModels(workbench, selectedTrendMetric)}
-                        metric={selectedTrendMetric}
-                        currency={workbench.comparisonCurrency}
-                        {locale}
-                        {formatUsageMetric}
-                        {formatPercent}
-                        {displayAuthorities}
-                        {formatReset}
-                        onSelect={(modelId) => void openModelDetail(modelId, null)}
-                      />
-                      <p class="treemap-hint">{t('treemapHint')}</p>
-                    </div>
-                  {:else if breakdownView === 'trend'}
-                    <div class="treemap-wrap" role="tabpanel">
-                      <ModelTrendStackedChart
-                        models={rankedModels(workbench, selectedTrendMetric)}
-                        metric={selectedTrendMetric}
-                        currency={workbench.comparisonCurrency}
-                        {locale}
-                        {formatUsageMetric}
-                        onSelect={(modelId) => void openModelDetail(modelId, null)}
-                      />
-                    </div>
-                  {:else}
-                    <div role="tabpanel">
-                      <ol class="ranking-list">
-                        {#each rankedModels(workbench, selectedTrendMetric) as model (model.id)}
-                          {@const modelLogo = providerLogoSources(model.providerId)}
-                          {@const modelCost =
-                            model.retailEquivalent.amount !== null
-                              ? model.retailEquivalent
-                              : (model.reportedEstimate ?? model.retailEquivalent)}
-                          {@const modelCostIsReported =
-                            model.retailEquivalent.amount === null &&
-                            model.reportedEstimate?.amount != null}
-                          {@const modelShare = modelMetricShare(model, selectedTrendMetric)}
-                          <li>
-                            <button
-                              type="button"
-                              data-testid="model-ranking-row"
-                              on:click={(event) => openModelDetail(model.id, event.currentTarget)}
-                              on:keydown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault();
-                                  void openModelDetail(model.id, event.currentTarget);
-                                }
-                              }}
-                            >
-                              <span class="ranking-identity">
-                                {#if modelLogo}
-                                  <img
-                                    class="ranking-logo"
-                                    data-provider-logo={model.providerId}
-                                    src={logoSrc(modelLogo)}
-                                    alt=""
-                                  />
-                                {/if}
-                                <span>
-                                  <strong>{model.model}</strong>
-                                  <small
-                                    >{model.providerDisplayName} · {model.billingDomainDisplayName}</small
-                                  >
-                                  {#if model.includedInHeadline === false}
-                                    <small>{t('separateFromHeadline')}</small>
-                                  {/if}
-                                  <small>
-                                    {t('tokens')}: {displayAuthorities(model.authorities)} ·
-                                    {formatReset(model.lastObservedAt)}
-                                  </small>
-                                  <small>
-                                    {modelCostIsReported
-                                      ? t('providerReportedEstimate')
-                                      : t('apiRetailEquivalent')}: {displayAuthorities(
-                                      modelCost.authorities
-                                    )} · {formatReset(modelCost.observedAt)}
-                                  </small>
-                                </span>
-                              </span>
-                              <span class="ranking-value" data-label={t('cost')}>
-                                <strong>
-                                  {modelCost.amount === null
-                                    ? t('notAvailable')
-                                    : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
-                                </strong>
-                              </span>
-                              <span
-                                class="ranking-value ranking-share-value"
-                                data-label={breakdownShareLabel('model')}
-                              >
-                                <strong>
-                                  {model.includedInHeadline === false
-                                    ? t('headlineShareNotApplicable')
-                                    : formatPercent(modelShare)}
-                                </strong>
-                                {#if modelShare !== null}
-                                  <span
-                                    class="model-share-track"
-                                    data-testid="model-share-meter"
-                                    role="meter"
-                                    aria-label={`${model.model} ${breakdownShareLabel('model')}`}
-                                    aria-valuemin="0"
-                                    aria-valuemax="100"
-                                    aria-valuenow={Math.round(modelShare * 1000) / 10}
-                                  >
-                                    <i
-                                      style={`width: ${Math.max(2, Math.min(100, modelShare * 100))}%`}
-                                    ></i>
-                                  </span>
-                                {/if}
-                              </span>
-                              <span class="ranking-value" data-label={t('tokens')}>
-                                <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
-                                  >{formatCompactNumber(model.tokenTotals.total)}</strong
-                                >
-                              </span>
-                            </button>
-                          </li>
-                        {/each}
-                      </ol>
-                      {#if workbench.modelRanking.unclassified.length > 0}
-                        <div class="unclassified-usage">
-                          <strong>{t('unclassifiedUsage')}</strong>
-                          {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
-                            <span>
-                              {item.providerDisplayName} · {item.billingDomainDisplayName}
-                              {#if item.includedInHeadline === false}
-                                · {t('separateFromHeadline')}{/if}
-                              <b aria-label={tokenValueLabel(item.tokenTotals.total)}
-                                >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
-                              >
-                              <small>
-                                {item.includedInHeadline !== false
-                                  ? formatPercent(item.tokenShare)
-                                  : t('headlineShareNotApplicable')}
-                              </small>
-                              <small>
-                                {displayAuthorities(item.authorities)} ·
-                                {formatReset(item.lastObservedAt)}
-                              </small>
-                            </span>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
+                {#if breakdownView === 'treemap'}
+                  <div class="treemap-wrap" role="tabpanel">
+                    <ModelBreakdownTreemap
+                      models={rankedModels(workbench, selectedTrendMetric)}
+                      metric={selectedTrendMetric}
+                      currency={workbench.comparisonCurrency}
+                      {locale}
+                      {formatUsageMetric}
+                      {formatPercent}
+                      onSelect={(modelId) => void openModelDetail(modelId, null)}
+                    />
+                    <p class="treemap-hint">{t('treemapHint')}</p>
+                  </div>
+                {:else if breakdownView === 'trend'}
+                  <div class="treemap-wrap" role="tabpanel">
+                    <ModelTrendStackedChart
+                      models={rankedModels(workbench, selectedTrendMetric)}
+                      metric={selectedTrendMetric}
+                      currency={workbench.comparisonCurrency}
+                      {locale}
+                      {formatUsageMetric}
+                      onSelect={(modelId) => void openModelDetail(modelId, null)}
+                    />
+                  </div>
                 {:else}
-                  <ol class="day-breakdown-list">
-                    {#each [...workbench.dayBreakdown]
-                      .filter( (day) => (selectedTrendMetric === 'tokens' ? !day.gap : !day.gap || day.retailEquivalent.records > 0) )
-                      .reverse() as day (day.start)}
-                      <li data-testid="day-breakdown-row">
-                        <span class="day-identity">
-                          <strong>{day.label}</strong>
-                          <small>
-                            {t('tokens')}: {displayAuthorities(day.authorities)} ·
-                            {formatReset(day.lastObservedAt)}
-                          </small>
-                          <small>
-                            {t('cost')}: {displayAuthorities(day.retailEquivalent.authorities)} · {formatReset(
-                              day.retailEquivalent.observedAt
-                            )}
-                          </small>
-                        </span>
-                        <span class="day-value" data-label={t('cost')}>
-                          {formatMoney(day.retailEquivalent.amount, workbench.comparisonCurrency)}
-                        </span>
-                        <span class="day-value" data-label={breakdownShareLabel('day')}
-                          >{formatPercent(
-                            selectedTrendMetric === 'tokens' ? day.tokenShare : day.retailShare
-                          )}</span
-                        >
-                        <span class="day-value" data-label={t('tokens')}>
-                          {day.recordedTokens === null
-                            ? t('notAvailable')
-                            : formatCompactNumber(day.recordedTokens)}
-                        </span>
-                      </li>
-                    {/each}
-                  </ol>
+                  <div role="tabpanel">
+                    <ol class="ranking-list">
+                      {#each rankedModels(workbench, selectedTrendMetric) as model (model.id)}
+                        {@const modelLogo = providerLogoSources(model.providerId)}
+                        {@const modelCost =
+                          model.retailEquivalent.amount !== null
+                            ? model.retailEquivalent
+                            : (model.reportedEstimate ?? model.retailEquivalent)}
+                        {@const modelShare = modelMetricShare(model, selectedTrendMetric)}
+                        <li>
+                          <button
+                            type="button"
+                            data-testid="model-ranking-row"
+                            on:click={(event) => openModelDetail(model.id, event.currentTarget)}
+                            on:keydown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                void openModelDetail(model.id, event.currentTarget);
+                              }
+                            }}
+                          >
+                            <span class="ranking-identity">
+                              {#if modelLogo}
+                                <img
+                                  class="ranking-logo"
+                                  data-provider-logo={model.providerId}
+                                  src={logoSrc(modelLogo)}
+                                  alt=""
+                                />
+                              {/if}
+                              <span>
+                                <strong>{model.model}</strong>
+                                <small
+                                  >{model.providerDisplayName} · {model.billingDomainDisplayName}</small
+                                >
+                                {#if model.includedInHeadline === false}
+                                  <small>{t('separateFromHeadline')}</small>
+                                {/if}
+                              </span>
+                            </span>
+                            <span class="ranking-value" data-label={t('cost')}>
+                              <strong>
+                                {modelCost.amount === null
+                                  ? t('notAvailable')
+                                  : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
+                              </strong>
+                            </span>
+                            <span
+                              class="ranking-value ranking-share-value"
+                              data-label={breakdownShareLabel()}
+                            >
+                              <strong>
+                                {model.includedInHeadline === false
+                                  ? t('headlineShareNotApplicable')
+                                  : formatPercent(modelShare)}
+                              </strong>
+                              {#if modelShare !== null}
+                                <span
+                                  class="model-share-track"
+                                  data-testid="model-share-meter"
+                                  role="meter"
+                                  aria-label={`${model.model} ${breakdownShareLabel()}`}
+                                  aria-valuemin="0"
+                                  aria-valuemax="100"
+                                  aria-valuenow={Math.round(modelShare * 1000) / 10}
+                                >
+                                  <i
+                                    style={`width: ${Math.max(2, Math.min(100, modelShare * 100))}%`}
+                                  ></i>
+                                </span>
+                              {/if}
+                            </span>
+                            <span class="ranking-value" data-label={t('tokens')}>
+                              <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
+                                >{formatCompactNumber(model.tokenTotals.total)}</strong
+                              >
+                            </span>
+                          </button>
+                        </li>
+                      {/each}
+                    </ol>
+                  </div>
                 {/if}
               </section>
             </section>
@@ -2280,6 +2436,126 @@
                 </article>
               {/each}
             </div>
+          </section>
+
+          <section
+            class="plans-section"
+            aria-labelledby="plans-heading"
+            data-settings-target="plans"
+            data-testid="settings-plans"
+            class:settings-target-active={settingsTarget === 'plans'}
+            tabindex="-1"
+          >
+            <div class="settings-section-heading">
+              <h2 id="plans-heading">{t('plans')}</h2>
+              <p>{t('plansSubtitle')}</p>
+            </div>
+            {#if planError}
+              <p class="settings-error" role="status">{t('plansUnavailable')}</p>
+            {/if}
+            {#if planSettings}
+              <div class="plan-settings">
+                {#each planSettings.domains as domain (`${domain.providerId}:${domain.billingDomainId}`)}
+                  {@const key = planDomainKey(domain.providerId, domain.billingDomainId)}
+                  {@const draft = planDrafts[key]}
+                  {@const saved = planSettings.subscriptions.find(
+                    (subscription) =>
+                      subscription.providerId === domain.providerId &&
+                      subscription.billingDomainId === domain.billingDomainId
+                  )}
+                  <article
+                    data-testid={`plan-domain-${domain.providerId}-${domain.billingDomainId}`}
+                  >
+                    <div class="plan-settings-heading">
+                      <strong>{domain.providerDisplayName}</strong>
+                      <small>{domain.billingDomainDisplayName}</small>
+                    </div>
+                    {#if draft}
+                      <label>
+                        <span>{t('planPreset')}</span>
+                        <select
+                          value={draft.selection}
+                          on:change={(event) =>
+                            updatePlanDraft(key, { selection: event.currentTarget.value })}
+                        >
+                          <option value="none">{t('planNone')}</option>
+                          {#each domain.presets as preset (preset.id)}
+                            <option value={preset.id}>{preset.displayName}</option>
+                          {/each}
+                          <option value="custom">{t('planCustom')}</option>
+                        </select>
+                      </label>
+                      {#if draft.selection !== 'none'}
+                        <div class="plan-settings-price">
+                          <label>
+                            <span>{t('planAmount')}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={draft.amount}
+                              on:input={(event) =>
+                                updatePlanDraft(key, { amount: event.currentTarget.value })}
+                            />
+                          </label>
+                          <label>
+                            <span>{t('planCurrency')}</span>
+                            <input
+                              type="text"
+                              maxlength="3"
+                              value={draft.currency}
+                              on:input={(event) =>
+                                updatePlanDraft(key, {
+                                  currency: event.currentTarget.value.toUpperCase()
+                                })}
+                            />
+                          </label>
+                          <label>
+                            <span>{t('planPeriod')}</span>
+                            <select
+                              value={draft.billingPeriod}
+                              on:change={(event) =>
+                                updatePlanDraft(key, {
+                                  billingPeriod: event.currentTarget.value as PlanBillingPeriod
+                                })}
+                            >
+                              <option value="monthly">{t('planPeriodMonthly')}</option>
+                              <option value="annual">{t('planPeriodAnnual')}</option>
+                            </select>
+                          </label>
+                        </div>
+                        <label>
+                          <span>{t('planAnchorDate')}</span>
+                          <input
+                            type="date"
+                            value={draft.anchorDate}
+                            on:input={(event) =>
+                              updatePlanDraft(key, { anchorDate: event.currentTarget.value })}
+                          />
+                          <small>{t('planAnchorHint')}</small>
+                        </label>
+                      {/if}
+                      <div class="plan-settings-actions">
+                        <button
+                          type="button"
+                          disabled={pendingPlanDomain === key}
+                          on:click={() => savePlanDraft(domain.providerId, domain.billingDomainId)}
+                        >
+                          {draft.selection === 'none' ? t('planClear') : t('planSave')}
+                        </button>
+                        {#if saved}
+                          <small>
+                            {saved.priceSource === 'catalog-preset'
+                              ? t('planPresetSource')
+                              : t('planUserEntered')}
+                          </small>
+                        {/if}
+                      </div>
+                    {/if}
+                  </article>
+                {/each}
+              </div>
+            {/if}
           </section>
 
           <section class="monitoring-section" aria-labelledby="monitoring-heading">
@@ -2409,10 +2685,6 @@
       model.retailEquivalent.status !== 'unavailable'
         ? model.retailEquivalent
         : model.reportedEstimate}
-    {@const modelCostLabel =
-      model.retailEquivalent.status !== 'unavailable'
-        ? t('apiRetailEquivalent')
-        : t('providerReportedEstimate')}
     {@const priceSnapshots = uniquePriceSnapshots(model.priceEvidence)}
     {@const compositionTotals = nonOverlappingComposition(model.observations, model.tokenTotals)}
     {@const trendEvidence = modelTrendEvidence(model)}
@@ -2441,33 +2713,18 @@
             <span>
               <small>{t('recordedTotal')}</small>
               <b>{formatNumber(model.tokenEvidence.recordedTokens)}</b>
-              <em>{displayAuthorities(model.authorities)} · {formatReset(model.lastObservedAt)}</em>
             </span>
             <span>
-              <small>{modelCostLabel}</small>
+              <small>{t('cost')}</small>
               <b>
                 {modelCost.status !== 'unavailable'
                   ? formatMoney(modelCost.amount, modelCost.comparisonCurrency)
                   : t('notAvailable')}
               </b>
-              <em
-                >{displayAuthorities(modelCost.authorities)} · {formatReset(
-                  modelCost.observedAt
-                )}</em
-              >
-            </span>
-            <span>
-              <small>{t('pricingCoverage')}</small>
-              <b>{formatPercent(model.retailEquivalent.pricingCoverage)}</b>
-              <em>
-                {displayAuthorities(model.retailEquivalent.authorities)} ·
-                {formatReset(model.retailEquivalent.observedAt)}
-              </em>
             </span>
             <span>
               <small>{t('observations')}</small>
               <b>{formatNumber(model.tokenEvidence.observationCount)}</b>
-              <em>{displayAuthorities(model.authorities)} · {formatReset(model.lastObservedAt)}</em>
             </span>
           </div>
 
@@ -2481,10 +2738,6 @@
               {locale}
               {formatNumber}
               {formatMoney}
-              {displayAuthorities}
-              formatObservedAt={formatReset}
-              aggregateAuthorities={model.authorities}
-              aggregateObservedAt={model.lastObservedAt}
             />
           </section>
 
@@ -2495,14 +2748,6 @@
           >
             <h3 id="model-evidence-heading">{t('evidenceSummary')}</h3>
             <div>
-              <span>
-                <small>{t('providerEvidence')}</small>
-                <strong>
-                  {displayAuthorities(model.authorities)} ·
-                  {model.tokenEvidence.timePrecisions.map(timePrecisionLabel).join(' + ') ||
-                    t('unknown')}
-                </strong>
-              </span>
               <span>
                 <small>{t('scope')}</small>
                 <strong>
@@ -2904,17 +3149,6 @@
     line-height: 1;
   }
 
-  .usage-headline > span,
-  .usage-headline > small {
-    color: #929baa;
-    font-size: 0.7rem;
-  }
-
-  .usage-headline > span {
-    color: #c8ced8;
-    font-size: 0.76rem;
-  }
-
   .provider-share-heading {
     display: grid;
     gap: 5px;
@@ -2976,11 +3210,305 @@
     font-weight: 550;
   }
 
-  .usage-totals-evidence {
+  .plan-value {
+    position: relative;
+    margin-top: 14px;
+    padding: 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: 18px;
+    background: var(--surface-subtle);
+  }
+
+  .plan-value-heading {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 14px;
+  }
+
+  .plan-value-heading h3 {
+    margin: 0;
+    color: var(--text-strong);
+    font-size: 0.9rem;
+  }
+
+  .plan-value-heading small {
+    color: var(--muted);
+    font-size: 0.64rem;
+  }
+
+  .plan-value-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .plan-value-ranking {
+    display: grid;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .plan-value-ranking li {
+    display: grid;
+    gap: 8px;
+    padding: 12px 14px;
+    border: 1px solid rgba(122, 136, 164, 0.14);
+    border-radius: 14px;
+    background: var(--surface-inset);
+  }
+
+  .plan-value-row-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .plan-value-name {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .plan-value-name strong {
+    color: var(--text-strong);
+    font-size: 0.78rem;
+    font-weight: 560;
+  }
+
+  .plan-value-name small {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 0.64rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plan-value-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    align-self: center;
+    flex: none;
+  }
+
+  .plan-value-ratio {
+    color: var(--text-strong);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .plan-value-ratio.plan-value-below {
+    color: var(--muted);
+  }
+
+  .plan-value-meter {
+    position: relative;
+    height: 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--border) 55%, transparent);
+  }
+
+  .plan-value-meter-fill {
     display: block;
-    margin-top: 16px;
-    color: #7f8897;
+    height: 100%;
+    border-radius: 999px;
+  }
+
+  .plan-value-break-even {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 1px;
+    background: var(--muted);
+  }
+
+  .plan-value-period {
+    display: grid;
+    gap: 6px;
+    padding-top: 9px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .plan-value-period-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--muted);
     font-size: 0.62rem;
+  }
+
+  .plan-value-period-meter {
+    height: 5px;
+  }
+
+  .plan-value-pace {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--text-strong);
+    opacity: 0.55;
+  }
+
+  .plan-value-period small {
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-value-period small.plan-value-behind {
+    color: color-mix(in srgb, var(--muted) 55%, #d98b6a);
+  }
+
+  .plan-settings label small {
+    color: var(--muted);
+    font-size: 0.58rem;
+    line-height: 1.4;
+  }
+
+  .plan-value-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 10px;
+    margin: 0;
+  }
+
+  .plan-value-facts dt {
+    color: var(--muted);
+    font-size: 0.6rem;
+  }
+
+  .plan-value-facts dd {
+    margin: 3px 0 0;
+    color: var(--text-strong);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-value-caveat,
+  .plan-value-note {
+    margin: 8px 2px 0;
+    color: var(--muted);
+    font-size: 0.63rem;
+    line-height: 1.45;
+  }
+
+  .plan-value-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 18px;
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+  }
+
+  .plan-value-empty p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.74rem;
+  }
+
+  .plan-value-aside {
+    display: grid;
+    gap: 8px;
+    margin: 14px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .plan-value-aside li {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+    color: var(--muted);
+    font-size: 0.66rem;
+  }
+
+  .plan-value-aside strong {
+    color: var(--text-strong);
+    font-weight: 550;
+  }
+
+  .plan-settings {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+  }
+
+  .plan-settings article {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--surface-inset);
+  }
+
+  .plan-settings-heading {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .plan-settings-heading strong {
+    color: var(--text-strong);
+    font-size: 0.78rem;
+  }
+
+  .plan-settings-heading small {
+    color: var(--muted);
+    font-size: 0.64rem;
+  }
+
+  .plan-settings label {
+    display: grid;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 0.63rem;
+  }
+
+  .plan-settings-price {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .plan-settings input,
+  .plan-settings select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface-subtle);
+    color: var(--text-strong);
+    font-size: 0.72rem;
+  }
+
+  .plan-settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .plan-settings-actions small {
+    color: var(--muted);
+    font-size: 0.6rem;
   }
 
   .model-ranking {
@@ -3025,8 +3553,7 @@
   }
 
   .breakdown-header,
-  .ranking-list button,
-  .day-breakdown-list li {
+  .ranking-list button {
     display: grid;
     grid-template-columns: minmax(220px, 1.7fr) minmax(110px, 0.7fr) minmax(90px, 0.5fr) minmax(
         100px,
@@ -3146,68 +3673,6 @@
       var(--primary),
       color-mix(in srgb, var(--primary) 55%, #78d9b2)
     );
-  }
-
-  .unclassified-usage {
-    display: grid;
-    gap: 6px;
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px dashed rgba(122, 136, 164, 0.18);
-  }
-
-  .unclassified-usage > strong {
-    color: #aab2c0;
-    font-size: 0.68rem;
-  }
-
-  .unclassified-usage > span {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #8993a3;
-    font-size: 0.66rem;
-  }
-
-  .unclassified-usage b {
-    margin-left: auto;
-    color: #dce2ec;
-  }
-
-  .unclassified-usage small {
-    text-align: right;
-  }
-
-  .day-breakdown-list {
-    display: grid;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .day-breakdown-list li {
-    min-height: 52px;
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(122, 136, 164, 0.11);
-    color: #cdd2dc;
-    font-size: 0.72rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .day-breakdown-list li span {
-    text-align: right;
-  }
-
-  .day-breakdown-list .day-identity {
-    display: grid;
-    gap: 4px;
-    text-align: left;
-  }
-
-  .day-identity small {
-    color: #7f8897;
-    font-size: 0.6rem;
-    font-weight: 400;
   }
 
   .history-toolbar {
@@ -3604,7 +4069,7 @@
   }
 
   .provider-card-loading {
-    min-height: 500px;
+    min-height: 400px;
   }
 
   .provider-card-loading > :not(.agent-card-skeleton-overlay):not(.provider-heading) {
@@ -3614,8 +4079,8 @@
   .agent-card-skeleton-overlay {
     position: absolute;
     z-index: 2;
-    inset: 72px 0 0;
-    padding: 18px 26px 26px;
+    inset: 74px 0 0;
+    padding: 0 26px 26px;
     background: var(--surface);
   }
 
@@ -3637,43 +4102,10 @@
     animation: skeleton-shimmer 1.25s ease-in-out infinite;
   }
 
-  .agent-skeleton-connection {
-    display: flex;
-    min-height: 50px;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    border: 1px solid color-mix(in srgb, var(--success-border) 55%, var(--border));
-    border-radius: 14px;
-    background: color-mix(in srgb, var(--success-bg) 50%, var(--surface));
-  }
-
-  .agent-skeleton-connection span {
-    display: grid;
-    width: 56%;
-    gap: 6px;
-  }
-
-  .agent-skeleton-connection span .agent-skeleton-block:first-child {
-    width: 62%;
-  }
-
-  .agent-skeleton-connection span .agent-skeleton-block:last-child {
-    width: 82%;
-    min-height: 10px;
-  }
-
-  .agent-skeleton-connection > .agent-skeleton-block {
-    width: 72px;
-    min-height: 30px;
-    border-radius: 9px;
-  }
-
+  /* Mirrors the loaded card: the heading stays real, then the quota section
+     label and its rows. */
   .agent-skeleton-section-label {
-    margin-top: 20px;
-    padding-top: 18px;
-    border-top: 1px solid rgba(122, 136, 164, 0.13);
+    padding-top: 20px;
   }
 
   .agent-skeleton-section-label .agent-skeleton-block {
@@ -3682,7 +4114,7 @@
   }
 
   .agent-skeleton-quota-list {
-    margin-top: 18px;
+    margin-top: 12px;
   }
 
   .agent-skeleton-quota-row + .agent-skeleton-quota-row {
@@ -3770,16 +4202,24 @@
     color: #edf1ff;
   }
 
-  .provider-heading,
-  .provider-heading > div:first-child {
+  .provider-heading {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 14px;
   }
 
-  .provider-heading > div:first-child {
-    justify-content: flex-start;
+  .provider-heading-copy {
+    min-width: 0;
+    flex: 1;
+  }
+
+  /* The status cluster rides on the Agent name's own line, so it costs the card
+     no extra height. */
+  .provider-heading-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
   }
 
   .provider-logo {
@@ -3828,19 +4268,59 @@
     animation: status-pulse 1s ease-in-out infinite alternate;
   }
 
+  .provider-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    margin-left: auto;
+    gap: 6px;
+  }
+
+  /* Connected state and its management action live in one compact control so a
+     long Agent name still shares the row with them. */
+  .connection-chip {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .connection-chip button {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--success-border);
+    border-radius: 999px;
+    background: var(--success-bg);
+    color: var(--success-text);
+    cursor: pointer;
+    font-size: 0.82rem;
+    line-height: 1;
+  }
+
+  .connection-chip button:hover {
+    border-color: var(--success-text);
+  }
+
+  .connection-chip button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
   .coverage {
-    padding: 6px 10px;
+    padding: 4px 9px;
     border: 1px solid var(--success-border);
     border-radius: 999px;
     color: var(--success-text);
-    font-size: 0.7rem;
+    font-size: 0.66rem;
     text-transform: uppercase;
+    white-space: nowrap;
   }
 
   .section-label {
     margin-top: auto;
     padding-top: 20px;
-    border-top: 1px solid rgba(122, 136, 164, 0.13);
   }
 
   .quota-row + .quota-row {
@@ -3911,40 +4391,6 @@
 
   .state.error {
     color: #ff9b9b;
-  }
-
-  .connected-summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin: 18px 0 4px;
-    padding: 10px 12px;
-    border: 1px solid var(--success-border);
-    border-radius: 14px;
-    background: var(--success-bg);
-  }
-
-  .connected-summary > span {
-    display: grid;
-    gap: 2px;
-    color: var(--success-text);
-    font-size: 0.72rem;
-  }
-
-  .connected-summary small {
-    color: var(--muted);
-  }
-
-  .connected-summary button {
-    min-height: 30px;
-    padding: 0 10px;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    font-size: 0.7rem;
   }
 
   .settings-backdrop {
@@ -4058,15 +4504,6 @@
     color: var(--text-strong);
     font-size: 0.95rem;
     font-variant-numeric: tabular-nums;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .model-detail-summary em {
-    overflow: hidden;
-    color: var(--muted);
-    font-size: 0.56rem;
-    font-style: normal;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -4308,15 +4745,9 @@
   .eyebrow,
   .section-label,
   .usage-toolbar p,
-  .usage-headline > span,
-  .usage-headline > small,
   .ranking-identity small,
   .breakdown-header,
   .usage-totals dt,
-  .usage-totals-evidence,
-  .day-identity small,
-  .unclassified-usage > strong,
-  .unclassified-usage > span,
   .privacy-section > div > p:not(.eyebrow),
   .privacy-section small,
   .diagnostics-grid span,
@@ -4349,7 +4780,6 @@
   .ranking-heading h3,
   .ranking-identity strong,
   .ranking-value strong,
-  .unclassified-usage b,
   .inline-connection summary strong,
   .coverage-list strong,
   .model-detail-header button,
@@ -4584,6 +5014,18 @@
       padding: 16px;
     }
 
+    .plan-value {
+      padding: 16px;
+    }
+
+    .plan-value-body {
+      grid-template-columns: 1fr;
+    }
+
+    .plan-settings-price {
+      grid-template-columns: 1fr;
+    }
+
     .usage-totals {
       padding: 18px 0 0;
       border-top: 1px solid var(--border-soft);
@@ -4605,8 +5047,7 @@
     }
 
     .breakdown-header,
-    .ranking-list button,
-    .day-breakdown-list li {
+    .ranking-list button {
       grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(86px, 0.6fr));
     }
 
@@ -4615,8 +5056,7 @@
     }
 
     .breakdown-header,
-    .ranking-list,
-    .day-breakdown-list {
+    .ranking-list {
       min-width: 620px;
     }
 

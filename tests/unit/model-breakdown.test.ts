@@ -96,8 +96,7 @@ describe('Model breakdown treemap', () => {
       'tokens',
       (providerId) => (providerId === 'codex' ? '#111111' : '#222222'),
       (value) => `${value} Tokens`,
-      (share) => `${Math.round(share * 100)}%`,
-      (model, metric) => `${metric}:${model.authorities.join(',')}:${model.lastObservedAt}`
+      (share) => `${Math.round(share * 100)}%`
     );
 
     expect(entries).toHaveLength(3);
@@ -113,7 +112,6 @@ describe('Model breakdown treemap', () => {
         share: 750 / 1050,
         formattedValue: '750 Tokens',
         formattedShare: '71%',
-        formattedEvidence: 'tokens:local-observation:2026-08-28T10:00:00.000Z',
         color: '#222222'
       })
     );
@@ -125,8 +123,7 @@ describe('Model breakdown treemap', () => {
       'retail-equivalent',
       () => '#7788ff',
       (value) => `$${value}`,
-      (share) => `${share * 100}%`,
-      (model) => model.reportedEstimate.authorities.join(',')
+      (share) => `${share * 100}%`
     );
 
     expect(entries).toEqual([
@@ -146,8 +143,7 @@ describe('Model breakdown treemap', () => {
       'tokens',
       () => '#7788ff',
       (value) => `${value} Tokens`,
-      (share) => `${share * 100}%`,
-      (model) => model.authorities.join(',')
+      (share) => `${share * 100}%`
     );
     const option = buildModelBreakdownOption(entries, {
       text: '#ffffff',

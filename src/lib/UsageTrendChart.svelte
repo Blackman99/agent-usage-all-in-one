@@ -58,6 +58,16 @@
   $: chartBuckets = buckets.slice(chartViewport.start, chartViewport.start + chartViewport.size);
   $: chartSeries = buildTrendChartSeries(chartBuckets, metric);
   $: visibleMaximum = trendMaximum(chartSeries);
+  // One legend entry per Provider billing domain: the cost purpose stays visible
+  // in the plot itself through the solid and dashed lines.
+  $: legendSeries = chartSeries.filter(
+    (series, index) =>
+      chartSeries.findIndex(
+        (candidate) =>
+          candidate.providerId === series.providerId &&
+          candidate.billingDomainId === series.billingDomainId
+      ) === index
+  );
   $: hoverBucket = trendHoverIndex === null ? null : chartBuckets[trendHoverIndex];
   $: chartOption = buildTrendChartOption(
     chartBuckets.map((bucket) => bucket.label),
@@ -331,18 +341,11 @@
     </div>
   </div>
   <div class="trend-legend" aria-hidden="true">
-    {#each chartSeries as segment (segment.key)}
+    {#each legendSeries as segment (segment.key)}
       <span>
-        <i
-          style={segment.costPurpose === 'reported-estimate'
-            ? `background: repeating-linear-gradient(90deg, ${trendSegmentColor(segment.providerId, segment.billingDomainId)} 0 5px, transparent 5px 9px)`
-            : `background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+        <i style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
         ></i>
         {segment.providerDisplayName} · {segment.billingDomainDisplayName}
-        {#if segment.costPurpose}
-          · {segment.costPurpose === 'reported-estimate'
-            ? t('providerReportedEstimate')
-            : t('apiRetailEquivalent')}{/if}
         {#if segment.includedInHeadline === false}
           · {t('separateFromHeadline')}{/if}
       </span>
@@ -355,7 +358,7 @@
       <thead>
         <tr>
           <th>{t('interval')}</th>
-          <th>{t('providerEvidence')}</th>
+          <th>{metric === 'tokens' ? t('tokens') : t('cost')}</th>
         </tr>
       </thead>
       <tbody>

@@ -59,7 +59,9 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
     await expect(agentPanel.locator(`[data-provider-logo="${provider.id}"]`)).toBeVisible();
     const skeleton = page.getByTestId(`agent-provider-skeleton-${provider.id}`);
     await expect(skeleton).toBeVisible();
-    await expect(skeleton.locator('.agent-skeleton-connection')).toBeVisible();
+    // The skeleton mirrors the loaded card: quota section only, since the
+    // heading with its status control stays real while a Provider loads.
+    await expect(skeleton.locator('.agent-skeleton-connection')).toHaveCount(0);
     await expect(skeleton.locator('.agent-skeleton-section-label')).toBeVisible();
     await expect(skeleton.locator('.agent-skeleton-quota-row')).toHaveCount(3);
     for (const quotaRow of await skeleton.locator('.agent-skeleton-quota-row').all()) {
@@ -71,7 +73,7 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
   const skeletonCardHeights = await agentPanel
     .locator('.provider-card')
     .evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().height)));
-  expect(Math.min(...skeletonCardHeights)).toBeGreaterThanOrEqual(500);
+  expect(Math.min(...skeletonCardHeights)).toBeGreaterThanOrEqual(400);
   await expect(page.getByTestId('agent-index-skeleton')).toHaveCount(0);
   await expect(agentPanel.locator('.agent-skeleton-heading')).toHaveCount(0);
   await expect(page.getByText('Loading cached agent usage…')).toHaveCount(0);
@@ -516,7 +518,13 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await xaiApi.getByRole('textbox', { name: /Management API key/ }).fill('browser-fake-key');
   await xaiApi.getByRole('button', { name: 'Connect' }).click();
   expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-fake-key' });
-  await expect(xaiApi.getByText('Connected')).toBeVisible();
+  // The connected state rides on the card's status control: visible as its
+  // tooltip and title, and exposed to assistive technology as text.
+  await expect(xaiApi.getByText('Connected')).toHaveCount(1);
+  await expect(xaiApi.getByRole('button', { name: 'Manage connection' })).toHaveAttribute(
+    'title',
+    /Connected/
+  );
   await expect(xaiApi).not.toContainText('browser-fake-key');
   await expect.poll(() => requestCounts.connectors).toBeGreaterThan(beforeAction.connectors);
   expect(requestCounts.overview).toBeGreaterThan(beforeAction.overview);
@@ -1204,11 +1212,75 @@ test('does not expose manual telemetry setup when Claude and Grok have no Token 
   await expect(page.getByText(/agent-usage telemetry-env/)).toHaveCount(0);
 });
 
-test('keeps the workbench steady while a window switch refreshes', async ({ page }) => {
+test('marks the workbench busy while background usage processing runs', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  let usageState: 'running' | 'ready' = 'running';
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-30T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [],
+        providers: []
+      })
+    });
+  });
+  await page.route('**/api/processing', async (route) => {
+    const module = (state: 'running' | 'ready') => ({
+      state,
+      startedAt: '2026-08-30T02:00:00.000Z',
+      completedAt: state === 'ready' ? '2026-08-30T02:00:01.000Z' : null,
+      message: null
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        startedAt: '2026-08-30T02:00:00.000Z',
+        hardRebuild: false,
+        modules: {
+          discovery: module('ready'),
+          usage: module(usageState),
+          pricing: module('ready'),
+          retention: module('ready')
+        }
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 700))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  await expect(workbench.getByTestId('usage-headline')).toBeVisible();
+  // Cached numbers stay readable while the daemon keeps collecting.
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('usage-headline')).toContainText('9.00');
+
+  usageState = 'ready';
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toHaveCount(0);
+});
+
+test('keeps the workbench steady during manual and window refreshes', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  let releaseManualRefresh = () => {};
+  const delayedManualRefresh = new Promise<void>((resolve) => {
+    releaseManualRefresh = resolve;
+  });
   let releaseDelayedWindowRequest = () => {};
   const delayedWindowRequest = new Promise<void>((resolve) => {
     releaseDelayedWindowRequest = resolve;
+  });
+  await page.route('**/api/refresh**', async (route) => {
+    await delayedManualRefresh;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
   });
   await page.route('**/api/doctor', async (route) => {
     await route.fulfill({
@@ -1238,6 +1310,21 @@ test('keeps the workbench steady while a window switch refreshes', async ({ page
   await expect(workbench.getByTestId('usage-headline')).toBeVisible();
   await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
   const settledBoxes = await workbenchPanelBoxes(page);
+  const settledToolbarBox = await workbench.locator('.usage-toolbar').boundingBox();
+
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Refreshing…', exact: true })).toBeVisible();
+  // The workbench answers a manual refresh on its own panels, not only in the button.
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toBeVisible();
+  const manualRefreshStatusCount = await page.getByTestId('model-costs-refresh-status').count();
+  const refreshingToolbarBox = await workbench.locator('.usage-toolbar').boundingBox();
+  releaseManualRefresh();
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+  expect(manualRefreshStatusCount).toBe(0);
+  expect(refreshingToolbarBox).toEqual(settledToolbarBox);
+  expect(await workbenchPanelBoxes(page)).toEqual(settledBoxes);
 
   await workbench.getByRole('button', { name: '30d' }).click();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
@@ -1249,6 +1336,81 @@ test('keeps the workbench steady while a window switch refreshes', async ({ page
   releaseDelayedWindowRequest();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
   expect(await workbenchPanelBoxes(page)).toEqual(settledBoxes);
+});
+
+test('compares a declared plan price with the retail equivalent of the same window', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    const url = new URL(route.request().url());
+    const fixture = historyOverviewFixture(
+      url.searchParams.get('window') ?? '24h',
+      100,
+      url.searchParams.get('currency') ?? 'CNY',
+      20
+    ) as { workbench: { planValue: { unconfiguredDomains: unknown[] } } };
+    // Codex can hold a plan price; the fixture's own History Agent cannot, so
+    // only Codex may be offered here.
+    fixture.workbench.planValue.unconfiguredDomains = [
+      {
+        providerId: 'codex',
+        providerDisplayName: 'Codex',
+        billingDomainId: 'subscription',
+        billingDomainDisplayName: 'Subscription',
+        recordedTokens: 500
+      },
+      {
+        providerId: 'history-agent',
+        providerDisplayName: 'History Agent',
+        billingDomainId: 'api',
+        billingDomainDisplayName: 'API',
+        recordedTokens: 100
+      }
+    ];
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(fixture) });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+
+  const planValue = page.getByTestId('plan-value');
+  await expect(planValue.getByRole('heading', { name: 'Subscription value' })).toBeVisible();
+  await expect(planValue.getByTestId('plan-value-chart')).toBeVisible();
+  await expect(planValue.getByTestId('plan-value-empty')).toHaveCount(0);
+
+  const row = planValue.getByTestId('plan-value-row');
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText('History Agent · API');
+  await expect(row).toContainText('History plan');
+  await expect(row.getByTestId('plan-value-ratio')).toHaveText('5x');
+  await expect(row).toContainText('Prorated plan cost');
+  await expect(row).toContainText('Retail equivalent');
+  await expect(planValue).toContainText('Plan price prorated to the selected window');
+
+  // The subscription's own cycle is measured separately, and how far into that
+  // cycle it sits stays visible beside the result.
+  const period = row.getByTestId('plan-value-period');
+  await expect(period).toContainText('This billing period');
+  await expect(row.getByTestId('plan-value-period-progress')).toHaveText('16/31 days');
+  await expect(period).toContainText('Earned back');
+  await expect(period).toContainText('Behind the pace to pay for itself');
+
+  const aside = planValue.getByTestId('plan-value-aside');
+  await expect(aside).toContainText('Codex · Subscription');
+  await expect(aside).not.toContainText('History Agent');
+
+  // Every eligible billing domain can be given a price, and the metered xAI API
+  // domain is never offered one.
+  await planValue.getByRole('button', { name: 'Set your plan price in settings' }).first().click();
+  const plans = page.getByTestId('settings-plans');
+  await expect(plans.getByRole('heading', { name: 'Subscription plans' })).toBeVisible();
+  await expect(plans.getByTestId('plan-domain-claude-code-subscription')).toBeVisible();
+  await expect(plans.getByTestId('plan-domain-grok-grok-build-subscription')).toBeVisible();
+  await expect(plans.getByTestId('plan-domain-grok-xai-api')).toHaveCount(0);
+  await expect(
+    plans.getByTestId('plan-domain-claude-code-subscription').getByRole('combobox').first()
+  ).toContainText('Claude Max 20x');
 });
 
 test('switches 24-hour, 7-day, and 30-day token and cost history without mixing cost kinds', async ({
@@ -1300,7 +1462,9 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByRole('heading', { name: 'Tokens & model costs' })).toBeVisible();
   await expect(workbench.getByTestId('usage-headline')).toContainText('CN¥9.00');
-  await expect(workbench.getByTestId('usage-headline')).toContainText('API retail equivalent');
+  // The headline carries the amount alone: no authority, coverage, or metric caption.
+  await expect(workbench.getByTestId('usage-headline')).not.toContainText('API retail equivalent');
+  await expect(workbench.getByTestId('trend-mode')).toHaveCount(0);
   await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
   const retailTrend = workbench
     .getByTestId('usage-trend-chart')
@@ -1323,7 +1487,6 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await workbench.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
-  await expect(workbench.getByTestId('trend-mode')).toHaveText('Recorded tokens');
   await expect(providerShareData).toContainText('700 Tokens');
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await workbench.getByRole('button', { name: '24h' }).click();
@@ -1350,7 +1513,6 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
   await workbench.getByRole('button', { name: 'Cost', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
-  await expect(workbench.getByTestId('trend-mode')).toHaveText('API retail equivalent');
   const trendTable = workbench.getByRole('table', { name: 'Trend data' });
   await expect(trendTable).toContainText('Gap');
   await expect(trendTable).toContainText('Billing period');
@@ -1423,7 +1585,8 @@ test('shows known token categories when classification coverage is partial', asy
   await expect(
     totals.getByText('Cache write', { exact: true }).locator('..').locator('dd')
   ).toHaveText('5');
-  await expect(totals).toContainText('83.3%');
+  // Classification coverage is no longer printed beside the totals.
+  await expect(totals).not.toContainText('83.3%');
 
   overview.workbench.tokenBreakdown = {
     status: 'unavailable',
@@ -1578,8 +1741,8 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(rows.first()).toContainText('Unavailable');
   await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/openai.svg');
   await expect(rows.filter({ hasText: 'model-five' })).toHaveCount(1);
-  await expect(ranking.getByText('Unclassified usage')).toBeVisible();
-  await expect(ranking.getByText('1,000 Tokens')).toBeVisible();
+  // Unclassified usage is no longer surfaced under the ranking.
+  await expect(ranking.getByText('Unclassified usage')).toHaveCount(0);
 
   await page
     .getByTestId('token-money-workbench')
@@ -1597,17 +1760,18 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
   await expect(rows.filter({ hasText: 'model-five' })).toHaveCount(1);
 
-  await ranking.getByRole('button', { name: 'Day', exact: true }).click();
-  await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(2);
-  await expect(ranking).toContainText('Bucket 1');
-  const costOnlyDay = ranking.getByTestId('day-breakdown-row').filter({ hasText: 'Cost only' });
-  await expect(costOnlyDay).toContainText('Unavailable');
+  // The breakdown keeps a single model dimension: no Model/Day switch remains.
+  await expect(ranking.getByRole('button', { name: 'Day', exact: true })).toHaveCount(0);
+  await expect(ranking.getByRole('button', { name: 'Model', exact: true })).toHaveCount(0);
+  await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(0);
   await page
     .getByTestId('token-money-workbench')
     .getByRole('button', { name: 'Tokens', exact: true })
     .click();
-  await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(1);
-  await ranking.getByRole('button', { name: 'Model', exact: true }).click();
+  await page
+    .getByTestId('token-money-workbench')
+    .getByRole('button', { name: 'Cost', exact: true })
+    .click();
 
   const fableRow = rows.filter({ hasText: 'fable-model' });
   await fableRow.focus();
@@ -1676,12 +1840,10 @@ test('presents model detail as a compact visual summary instead of long visible 
   ).toBeGreaterThanOrEqual(8);
   await expect(detail).toContainText('Activity overview');
   await expect(detail.getByTestId('model-detail-summary')).toContainText('Recorded total 450');
-  await expect(detail.getByTestId('model-detail-summary')).toContainText('API retail equivalent');
+  await expect(detail.getByTestId('model-detail-summary')).toContainText('Cost');
+  await expect(detail.getByTestId('model-detail-summary')).not.toContainText('Local observation');
   await expect(detail.getByTestId('model-detail-summary')).toContainText('$4.00');
   await expect(detail.getByTestId('model-detail-summary')).toContainText('Observations 1');
-  await expect(detail.getByTestId('model-evidence-summary')).toContainText(
-    'Local observation · Event'
-  );
   await expect(detail.getByTestId('model-evidence-summary')).toContainText('This Mac only');
   await expect(detail.getByTestId('model-evidence-summary')).toContainText(
     '2026-08-01 · Official fixture pricing'
@@ -1699,11 +1861,7 @@ test('presents model detail as a compact visual summary instead of long visible 
   );
   await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Gap');
   await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('$4.00');
-  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText(
-    'API retail equivalent'
-  );
-  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Event');
-  await expect(detail.getByRole('table', { name: 'Model trend' })).toContainText('Estimate');
+  await expect(detail.getByRole('table', { name: 'Model trend' })).not.toContainText('Estimate');
   await expect(detail.getByText('Audit details')).toHaveCount(0);
   await expect(detail.getByRole('table', { name: 'Provider evidence' })).toHaveCount(0);
   await expect(detail.getByRole('table', { name: 'Price line items' })).toHaveCount(0);
@@ -2025,17 +2183,15 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
   await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
     'History Agent'
   );
-  await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
-    'Source: Estimate'
-  );
   await page.mouse.move(0, 0);
   await expect(providerShareChart.locator('.provider-share-tooltip')).toBeHidden();
   await providerShareChart.hover({
     position: { x: providerChartBox!.width / 2, y: providerChartBox!.height - 10 }
   });
   await expect(providerShareChart.locator('.provider-share-tooltip')).toHaveText(
-    /History Agent.*100%.*Source: Estimate/
+    /History Agent.*100%/
   );
+  await expect(providerShareChart.locator('.provider-share-tooltip')).not.toContainText('Source:');
   await page.mouse.move(0, 0);
   await expect(providerShareChart.locator('.provider-share-tooltip')).toBeHidden();
   await expect(page.getByTestId('model-share-meter').first()).toHaveAttribute('role', 'meter');
@@ -2646,7 +2802,72 @@ function tokenMoneyWorkbenchFixture(window: string, total: number, currency: str
       authorities: index === 0 ? ['official-account'] : [],
       lastObservedAt: index === 0 ? '2026-08-28T01:57:00.000Z' : null
     })),
-    modelRanking: modelRankingFixture(currency, bucketCount)
+    modelRanking: modelRankingFixture(currency, bucketCount),
+    planValue: {
+      windowDays: 30,
+      comparisonCurrency: currency,
+      catalogVersion: '2026-08-30',
+      entries: [
+        {
+          providerId: 'history-agent',
+          providerDisplayName: 'History Agent',
+          billingDomainId: 'api',
+          billingDomainDisplayName: 'API',
+          includedInHeadline: true,
+          plan: {
+            planId: 'history-plan',
+            displayName: 'History plan',
+            amount: 20,
+            currency: 'USD',
+            billingPeriod: 'monthly',
+            priceSource: 'catalog-preset',
+            updatedAt: '2026-08-01T00:00:00.000Z'
+          },
+          windowDays: 30,
+          windowPlanCost: {
+            status: 'available',
+            amount: comparison.retail / 5,
+            nativeAmount: 0.25,
+            nativeCurrency: 'USD',
+            comparisonCurrency: currency,
+            conversionUnavailableReason: null,
+            exchangeRates: []
+          },
+          recordedTokens: total,
+          retailEquivalent: metric('retail-equivalent', comparison.retail, 1.25, 'estimate'),
+          valueRatio: 5,
+          ratioBound: 'exact',
+          status: 'available',
+          effectiveUnitPrice: comparison.retail / 5 / (total / 1_000_000),
+          retailUnitPrice: comparison.retail / (total / 1_000_000),
+          pricingCoverage: 1,
+          authorities: ['official-account'],
+          lastObservedAt: '2026-08-28T01:57:00.000Z',
+          billingPeriod: {
+            start: '2026-08-12T00:00:00.000Z',
+            end: '2026-09-12T00:00:00.000Z',
+            elapsedDays: 16,
+            totalDays: 31,
+            progress: 16 / 31,
+            periodCost: {
+              status: 'available',
+              amount: comparison.retail,
+              nativeAmount: 20,
+              nativeCurrency: 'USD',
+              comparisonCurrency: currency,
+              conversionUnavailableReason: null,
+              exchangeRates: []
+            },
+            recordedTokens: total,
+            retailEquivalent: metric('retail-equivalent', comparison.retail / 2, 1.25, 'estimate'),
+            breakEvenRatio: 0.5,
+            ratioBound: 'exact'
+          }
+        }
+      ],
+      meteredDomains: [],
+      unconfiguredDomains: []
+    }
   };
 }
 

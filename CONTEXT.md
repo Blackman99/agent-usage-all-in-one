@@ -89,6 +89,32 @@ be merged.
   reported estimate without relabelling its purpose. A strict API retail-
   equivalent order remains separately available in the read model. Unclassified
   usage remains visible beside the ranking and never occupies it.
+- **Plan subscription**: A user-declared recurring price for one billing domain:
+  amount, currency, and billing period. It is a local declaration, not collected
+  evidence, and it never becomes a Cost record.
+- **Plan catalog**: Built-in preset plan prices. Each preset carries the official
+  page and retrieval date it was read from; a plan whose official price cannot be
+  read is absent rather than guessed. Every preset remains editable because
+  regional pricing, annual billing, and seats are not represented.
+- **Window plan cost**: One plan price prorated at read time over the selected
+  window, using the average length of that plan's own billing period. It is a
+  comparison denominator, never a stored amount.
+- **Plan value ratio**: API retail equivalent divided by window plan cost for one
+  subscription billing domain. It compares two cost purposes without combining
+  them.
+- **Effective unit price**: Window plan cost divided by that billing domain's
+  recorded Tokens. **Retail unit price** is its API retail equivalent divided by
+  its priced Tokens. The two answer what a Token cost and what it was worth.
+- **Renewal date**: A user-declared date on which a plan subscription renews.
+  Any past or future renewal resolves the same current billing period; without
+  one the period stays unknown.
+- **Billing period to date**: One subscription's own current period measured from
+  its start to now, against the whole period price. It answers whether that
+  period has paid for itself yet and is not comparable across Providers sitting
+  at different points in their cycles.
+- **Break-even pace**: The share of the period price earned back so far read
+  against the share of the period elapsed. Ahead of that pace the period is on
+  track to pay for itself.
 - **Trend gap**: An hourly or daily interval with no Token observation. It stays
   visibly discontinuous; cost evidence does not fabricate a Token observation.
 - **Data authority**: The provenance level of a value: official account,
@@ -215,3 +241,25 @@ be merged.
     `opencode-go`, attributed to the Go subscription, or added to Go allowance
     values. A successful local scan retires legacy Go-attributed local rows; a
     failed scan retains the last successful snapshot.
+37. A plan subscription is a user declaration. It never becomes a Cost record,
+    never enters workbench cost metrics or trends, and is never allocated to an
+    observation, model, session, or day.
+38. Window plan cost is derived at read time from exactly one plan price. It
+    keeps its native amount and currency, and stays unavailable when the
+    comparison conversion is missing or stale rather than falling back to the
+    native number.
+39. Plan value ratio divides API retail equivalent by window plan cost for one
+    billing domain; the two purposes are never added. Partial pricing coverage
+    makes the ratio an explicit lower bound. An unavailable retail equivalent
+    leaves the ratio unavailable and never zero.
+40. Only billing domains with a declared plan price enter the plan value map.
+    Metered billing domains keep their own actual cost, are separately
+    identified, and never receive a plan value ratio.
+41. A billing period is derived from one declared renewal date and the plan's own
+    period length, with month-end renewals clamped into shorter months. Without a
+    renewal date the period is unknown, never assumed to align with the selected
+    window or the calendar month.
+42. Billing-period evidence is collected over each subscription's own period and
+    is independent of the selected window. Its elapsed and total days stay
+    visible with the result, because a period that has barely started is not a
+    poor result and cannot be compared with one that is nearly over.

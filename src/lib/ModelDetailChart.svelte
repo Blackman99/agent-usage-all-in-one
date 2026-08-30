@@ -44,12 +44,9 @@
 
   type TrendEvidence = {
     recordedTokens: number | null;
-    timePrecision: string;
+
     costAmount: number | null;
     costCurrency: string;
-    costPurpose: string;
-    costAuthorities: WorkbenchModelTrendBucket['authorities'];
-    costObservedAt: string | null | undefined;
   };
 
   type ChartTheme = {
@@ -76,10 +73,6 @@
     locale: Locale;
     formatNumber: (value: number) => string;
     formatMoney: (amount: number | null, currency: string) => string;
-    displayAuthorities: (authorities: WorkbenchModelTrendBucket['authorities']) => string;
-    formatObservedAt: (value: string | null | undefined) => string;
-    aggregateAuthorities: WorkbenchModelTrendBucket['authorities'];
-    aggregateObservedAt: string | null;
   };
 
   export let compositionTotals: TokenTotals;
@@ -89,10 +82,6 @@
   export let locale: Locale;
   export let formatNumber: (value: number) => string;
   export let formatMoney: (amount: number | null, currency: string) => string;
-  export let displayAuthorities: (authorities: WorkbenchModelTrendBucket['authorities']) => string;
-  export let formatObservedAt: (value: string | null | undefined) => string;
-  export let aggregateAuthorities: WorkbenchModelTrendBucket['authorities'];
-  export let aggregateObservedAt: string | null;
 
   let chartEl: HTMLDivElement | null = null;
   let chart: ECharts | null = null;
@@ -139,11 +128,7 @@
     colors: theme,
     locale,
     formatNumber,
-    formatMoney,
-    displayAuthorities,
-    formatObservedAt,
-    aggregateAuthorities,
-    aggregateObservedAt
+    formatMoney
   });
   $: if (chart) render(option);
 
@@ -160,14 +145,9 @@
       colors,
       locale,
       formatNumber,
-      formatMoney,
-      displayAuthorities,
-      formatObservedAt,
-      aggregateAuthorities,
-      aggregateObservedAt
+      formatMoney
     } = input;
     const label = (key: MessageKey) => translate(locale, key);
-    const aggregateProvenance = `${displayAuthorities(aggregateAuthorities)} · ${formatObservedAt(aggregateObservedAt)}`;
     const recordedLabel = label('recordedTotal');
     const costLabel = label('cost');
     const costCurrency =
@@ -180,7 +160,6 @@
       title: [
         {
           text: label('tokenBreakdown'),
-          subtext: aggregateProvenance,
           left: compact ? 16 : '3%',
           top: compact ? 8 : 10,
           textStyle: { color: colors.text, fontSize: 12, fontWeight: 600 },
@@ -188,7 +167,6 @@
         },
         {
           text: label('modelTrend'),
-          subtext: aggregateProvenance,
           left: compact ? 16 : '47%',
           top: compact ? '53%' : 10,
           textStyle: { color: colors.text, fontSize: 12, fontWeight: 600 },
@@ -230,15 +208,15 @@
           const dataIndex = typeof parameter.dataIndex === 'number' ? parameter.dataIndex : -1;
           const value = typeof parameter.value === 'number' ? parameter.value : 0;
           if (parameter.seriesType === 'pie') {
-            return `${parameter.name}\n${formatNumber(value)} ${label('tokens')}\n${aggregateProvenance}`;
+            return `${parameter.name}\n${formatNumber(value)} ${label('tokens')}`;
           }
           const bucket = trend[dataIndex];
           const evidence = trendEvidence[dataIndex];
           if (!bucket || !evidence) return `${formatNumber(value)} ${label('tokens')}`;
           if (parameter.seriesName === costLabel) {
-            return `${bucket.label}\n${formatMoney(evidence.costAmount, evidence.costCurrency)} · ${evidence.costPurpose}\n${displayAuthorities(evidence.costAuthorities)} · ${formatObservedAt(evidence.costObservedAt)}\n${label('timePrecision')}: ${evidence.timePrecision}`;
+            return `${bucket.label}\n${formatMoney(evidence.costAmount, evidence.costCurrency)}`;
           }
-          return `${bucket.label}\n${formatNumber(value)} ${label('tokens')}\n${displayAuthorities(bucket.authorities)} · ${formatObservedAt(bucket.lastObservedAt)}\n${label('timePrecision')}: ${evidence.timePrecision}`;
+          return `${bucket.label}\n${formatNumber(value)} ${label('tokens')}`;
         }
       },
       grid: {
@@ -414,7 +392,7 @@
   <table aria-label={t('tokenBreakdown')}>
     <thead>
       <tr>
-        <th>{t('tokens')}</th><th>{t('total')}</th><th>{t('providerEvidence')}</th>
+        <th>{t('tokens')}</th><th>{t('total')}</th>
       </tr>
     </thead>
     <tbody>
@@ -422,9 +400,6 @@
         <tr>
           <td>{entry.name}</td>
           <td>{formatNumber(entry.value)}</td>
-          <td>
-            {displayAuthorities(aggregateAuthorities)} · {formatObservedAt(aggregateObservedAt)}
-          </td>
         </tr>
       {/each}
     </tbody>
@@ -435,10 +410,6 @@
         <th>{t('interval')}</th>
         <th>{t('tokens')}</th>
         <th>{t('cost')}</th>
-        <th>{t('source')}</th>
-        <th>{t('providerEvidence')}</th>
-        <th>{t('latestData')}</th>
-        <th>{t('timePrecision')}</th>
       </tr>
     </thead>
     <tbody>
@@ -456,15 +427,6 @@
               ? t('notAvailable')
               : formatMoney(evidence.costAmount, evidence.costCurrency)}
           </td>
-          <td>{evidence?.costPurpose ?? t('notAvailable')}</td>
-          <td>
-            {displayAuthorities(bucket.authorities)} · {formatObservedAt(bucket.lastObservedAt)};
-            {displayAuthorities(evidence?.costAuthorities)} · {formatObservedAt(
-              evidence?.costObservedAt
-            )}
-          </td>
-          <td>{formatObservedAt(bucket.lastObservedAt)}</td>
-          <td>{evidence?.timePrecision ?? t('unknown')}</td>
         </tr>
       {/each}
     </tbody>

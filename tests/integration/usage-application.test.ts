@@ -84,6 +84,83 @@ describe('UsageApplication', () => {
     repository.close();
   });
 
+  it('collects again for a user-initiated background refresh inside the connector interval', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-interval-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let collections = 0;
+    const connector: Connector = {
+      id: 'codex',
+      async collect() {
+        collections += 1;
+        return {
+          provider: { id: 'codex', displayName: 'Codex' },
+          billingDomains: [{ id: 'subscription', displayName: 'Subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-30T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({
+      repository,
+      connectors: [connector],
+      connectorPolicies: { codex: { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: 20_000 } }
+    });
+
+    await application.startBackgroundProcessing();
+    expect(collections).toBe(1);
+
+    // An automatic recovery pass stays under the Provider's collection interval.
+    await application.startBackgroundProcessing();
+    expect(collections).toBe(1);
+
+    // Asking for a refresh collects now instead of waiting out the interval.
+    await application.startBackgroundProcessing({ userInitiated: true });
+    expect(collections).toBe(2);
+  });
+
+  it('queues a user-initiated collection behind an in-flight scheduled run', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-queued-user-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    let collections = 0;
+    let releaseCollection!: () => void;
+    const collectionGate = new Promise<void>((resolve) => {
+      releaseCollection = resolve;
+    });
+    const connector: Connector = {
+      id: 'codex',
+      async collect() {
+        collections += 1;
+        if (collections === 1) await collectionGate;
+        return {
+          provider: { id: 'codex', displayName: 'Codex' },
+          billingDomains: [{ id: 'subscription', displayName: 'Subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-30T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({
+      repository,
+      connectors: [connector],
+      connectorPolicies: { codex: { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: 20_000 } }
+    });
+
+    const scheduled = application.startBackgroundProcessing();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const requested = application.startBackgroundProcessing({ userInitiated: true });
+    releaseCollection();
+    await scheduled;
+    await requested;
+
+    expect(collections).toBe(2);
+  });
+
   it('queues hard collection behind an in-flight incremental refresh', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-hard-refresh-'));
     workspaces.push(workspace);

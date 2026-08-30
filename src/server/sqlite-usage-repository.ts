@@ -20,6 +20,9 @@ import type {
   HistoryModelObservation,
   HistoryWindow,
   MonitoringSettings,
+  PlanBillingPeriod,
+  PlanPriceSource,
+  PlanSubscription,
   PriceSnapshotReference,
   ProviderOverview,
   QuotaBucket,
@@ -40,6 +43,12 @@ import type {
   UsageRepository
 } from '../core/types.js';
 import { normalizeTokenObservation } from '../core/token-normalization.js';
+import {
+  billingPeriodContaining,
+  buildWorkbenchPlanValue,
+  type PlanBillingPeriodSummary,
+  type PlanValueDomainInput
+} from '../core/plan-pricing.js';
 import type { ConnectorStatusRecord, ConnectorSetupState } from '../core/onboarding-types.js';
 
 const FRESHNESS_WINDOW_MS = 15 * 60 * 1000;
@@ -1028,10 +1037,17 @@ export class SqliteUsageRepository implements UsageRepository {
       this.#getProviderOverview(provider, now, query)
     );
     const riskSummary = buildRiskSummary(overviews);
+    const planSubscriptions = this.getPlanSubscriptions();
     return {
       generatedAt: now.toISOString(),
       globalSummary: buildGlobalSummary(overviews, riskSummary, now, query),
-      workbench: buildTokenMoneyWorkbench(overviews, now, query),
+      workbench: buildTokenMoneyWorkbench(
+        overviews,
+        now,
+        query,
+        planSubscriptions,
+        this.#planBillingPeriodSummaries(planSubscriptions, now, query)
+      ),
       providers: overviews,
       riskSummary
     };
@@ -1164,6 +1180,77 @@ export class SqliteUsageRepository implements UsageRepository {
         settings.notificationsEnabled ? 1 : 0,
         settings.startAtLogin ? 1 : 0
       );
+  }
+
+  getPlanSubscriptions(): PlanSubscription[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT provider_id, billing_domain_id, plan_id, display_name, amount, currency,
+                billing_period, anchor_date, price_source, updated_at
+         FROM plan_subscriptions
+         ORDER BY provider_id, billing_domain_id`
+      )
+      .all() as unknown as Array<{
+      provider_id: string;
+      billing_domain_id: string;
+      plan_id: string | null;
+      display_name: string;
+      amount: number;
+      currency: string;
+      billing_period: string;
+      anchor_date: string | null;
+      price_source: string;
+      updated_at: string;
+    }>;
+    return rows.map((row) => ({
+      providerId: row.provider_id,
+      billingDomainId: row.billing_domain_id,
+      planId: row.plan_id,
+      displayName: row.display_name,
+      amount: row.amount,
+      currency: row.currency,
+      billingPeriod: row.billing_period as PlanBillingPeriod,
+      anchorDate: row.anchor_date,
+      priceSource: row.price_source as PlanPriceSource,
+      updatedAt: row.updated_at
+    }));
+  }
+
+  savePlanSubscription(subscription: PlanSubscription): void {
+    this.#database
+      .prepare(
+        `INSERT INTO plan_subscriptions (
+           provider_id, billing_domain_id, plan_id, display_name, amount, currency,
+           billing_period, anchor_date, price_source, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(provider_id, billing_domain_id) DO UPDATE SET
+           plan_id = excluded.plan_id,
+           display_name = excluded.display_name,
+           amount = excluded.amount,
+           currency = excluded.currency,
+           billing_period = excluded.billing_period,
+           anchor_date = excluded.anchor_date,
+           price_source = excluded.price_source,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        subscription.providerId,
+        subscription.billingDomainId,
+        subscription.planId,
+        subscription.displayName,
+        subscription.amount,
+        subscription.currency,
+        subscription.billingPeriod,
+        subscription.anchorDate,
+        subscription.priceSource,
+        subscription.updatedAt
+      );
+  }
+
+  deletePlanSubscription(providerId: string, billingDomainId: string): void {
+    this.#database
+      .prepare('DELETE FROM plan_subscriptions WHERE provider_id = ? AND billing_domain_id = ?')
+      .run(providerId, billingDomainId);
   }
 
   getNotificationState(key: string): string | null {
@@ -1719,6 +1806,120 @@ export class SqliteUsageRepository implements UsageRepository {
     };
   }
 
+  /**
+   * Cycle-to-date evidence for every subscription that declares a renewal date.
+   * Each Provider is measured over its own billing period, which is why this
+   * cannot reuse the one rolling window the rest of the workbench shares.
+   */
+  #planBillingPeriodSummaries(
+    subscriptions: PlanSubscription[],
+    now: Date,
+    query: UsageQuery
+  ): Map<string, PlanBillingPeriodSummary> {
+    const normalized = normalizeUsageQuery(now, query);
+    const summaries = new Map<string, PlanBillingPeriodSummary>();
+    for (const subscription of subscriptions) {
+      if (!subscription.anchorDate) continue;
+      const period = billingPeriodContaining(
+        subscription.anchorDate,
+        subscription.billingPeriod,
+        now
+      );
+      if (!period) continue;
+      const observedThrough = new Date(Math.min(now.getTime(), period.end.getTime()));
+      summaries.set(`${subscription.providerId}:${subscription.billingDomainId}`, {
+        start: period.start.toISOString(),
+        end: period.end.toISOString(),
+        observedThrough: observedThrough.toISOString(),
+        ...this.#rangeUsageSummary(
+          subscription.providerId,
+          subscription.billingDomainId,
+          period.start,
+          observedThrough,
+          normalized.comparisonCurrency
+        )
+      });
+    }
+    return summaries;
+  }
+
+  #rangeUsageSummary(
+    providerId: string,
+    billingDomainId: string,
+    start: Date,
+    end: Date,
+    comparisonCurrency: string
+  ): Pick<PlanBillingPeriodSummary, 'recordedTokens' | 'observationCount' | 'retailEquivalent'> {
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+    const usage = this.#database
+      .prepare(
+        `SELECT id, model, observed_at, authority, total_tokens, input_tokens, output_tokens,
+                reasoning_tokens, cache_read_tokens, cache_write_tokens, cache_write_5m_tokens,
+                cache_write_1h_tokens, source_reported_total_tokens,
+                unclassified_tokens, total_derivation, model_attribution, time_precision,
+                usage_scope, aggregation_temporality, reasoning_semantics,
+                cache_read_semantics, cache_write_semantics
+         FROM usage_observations
+         WHERE provider_id = ? AND billing_domain_id = ?
+           AND observed_at >= ? AND observed_at < ?
+           AND ${additiveUsagePredicate()}
+         ORDER BY observed_at, id`
+      )
+      .all(providerId, billingDomainId, startIso, endIso) as unknown as UsageHistoryRow[];
+    const costs = this.#database
+      .prepare(
+        `SELECT id, source_id, billing_domain_id, observed_at, kind, amount, currency, authority,
+                price_snapshot_id, price_snapshot_version, price_snapshot_source,
+                price_snapshot_canonical_model, price_snapshot_effective_at,
+                price_snapshot_effective_until, price_snapshot_currency,
+                price_snapshot_rates_json, price_snapshot_source_url,
+                price_snapshot_context_tier, model, usage_observation_id, priced_tokens,
+                line_items_json, calculated_at
+         FROM cost_records
+         WHERE provider_id = ? AND billing_domain_id = ?
+           AND observed_at >= ? AND observed_at < ?
+         ORDER BY observed_at, id`
+      )
+      .all(providerId, billingDomainId, startIso, endIso) as unknown as CostRow[];
+    const rateRows = this.#database
+      .prepare(
+        `SELECT id, base_currency, quote_currency, rate, observed_at, source
+         FROM exchange_rate_snapshots WHERE observed_at < ? ORDER BY observed_at DESC, id`
+      )
+      .all(endIso) as unknown as ExchangeRateRow[];
+    const rateByCurrency = new Map<string, ExchangeRateRow>();
+    for (const row of rateRows) {
+      if (row.quote_currency === comparisonCurrency && !rateByCurrency.has(row.base_currency)) {
+        rateByCurrency.set(row.base_currency, row);
+      }
+    }
+
+    const evidence = emptyTokenEvidence();
+    for (const row of usage) addTokenEvidence(evidence, row);
+    const finished = finishTokenEvidence(evidence);
+    const usedRates = new Map<string, ExchangeRateSnapshot>();
+    const historyCosts = summarizeHistoryCosts(
+      costs,
+      finished.recordedTokens,
+      rateByCurrency,
+      comparisonCurrency,
+      end,
+      usedRates
+    );
+    return {
+      recordedTokens: finished.recordedTokens,
+      observationCount: finished.observationCount,
+      retailEquivalent: buildWorkbenchMetric(
+        historyCosts,
+        'retail-equivalent',
+        comparisonCurrency,
+        finished.recordedTokens,
+        [...usedRates.values()]
+      )
+    };
+  }
+
   #getBillingHistory(
     providerId: string,
     billingDomainId: string,
@@ -2172,6 +2373,19 @@ export class SqliteUsageRepository implements UsageRepository {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS plan_subscriptions (
+        provider_id TEXT NOT NULL,
+        billing_domain_id TEXT NOT NULL,
+        plan_id TEXT,
+        display_name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        currency TEXT NOT NULL,
+        billing_period TEXT NOT NULL,
+        anchor_date TEXT,
+        price_source TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider_id, billing_domain_id)
+      );
     `);
     const usageColumns = this.#database
       .prepare('PRAGMA table_info(usage_observations)')
@@ -2349,6 +2563,14 @@ export class SqliteUsageRepository implements UsageRepository {
       if (!quotaColumns.some((column) => column.name === name)) {
         this.#database.exec(`ALTER TABLE quota_buckets ADD COLUMN ${name} ${type}`);
       }
+    }
+    // A database written before billing periods were modelled keeps its plan
+    // rows; the renewal date is simply unknown until it is declared.
+    const planColumns = this.#database
+      .prepare('PRAGMA table_info(plan_subscriptions)')
+      .all() as unknown as Array<{ name: string }>;
+    if (planColumns.length > 0 && !planColumns.some((column) => column.name === 'anchor_date')) {
+      this.#database.exec('ALTER TABLE plan_subscriptions ADD COLUMN anchor_date TEXT');
     }
   }
 }
@@ -2644,7 +2866,9 @@ function buildGlobalSummary(
 function buildTokenMoneyWorkbench(
   providers: ProviderOverview[],
   now: Date,
-  query: UsageQuery
+  query: UsageQuery,
+  planSubscriptions: PlanSubscription[],
+  planBillingPeriods: Map<string, PlanBillingPeriodSummary>
 ): UsageOverview['workbench'] {
   const normalized = normalizeUsageQuery(now, query);
   const allHistories = allDomainHistories(providers);
@@ -2882,8 +3106,47 @@ function buildTokenMoneyWorkbench(
       observationCount > 0 ? recordedTokens : null,
       retailEquivalent,
       reportedEstimate
-    )
+    ),
+    planValue: buildWorkbenchPlanValue({
+      domains: planValueDomains(allHistories, comparisonCurrency),
+      subscriptions: planSubscriptions,
+      comparisonCurrency,
+      start: normalized.start.toISOString(),
+      end: normalized.end.toISOString(),
+      rates: uniqueExchangeRates(allHistories.flatMap(({ history }) => history.exchangeRates)),
+      billingPeriods: planBillingPeriods
+    })
   };
+}
+
+function planValueDomains(
+  histories: ReturnType<typeof allDomainHistories>,
+  comparisonCurrency: string
+): PlanValueDomainInput[] {
+  return histories.map(({ provider, domain, history, includedInHeadline }) => {
+    const domainTokens = history.tokenEvidence.recordedTokens;
+    const metric = (purpose: UsageOverview['workbench']['costs']['actual']['purpose']) =>
+      buildWorkbenchMetric(
+        history.costs,
+        purpose,
+        comparisonCurrency,
+        domainTokens,
+        history.exchangeRates
+      );
+    return {
+      providerId: provider.id,
+      providerDisplayName: provider.displayName,
+      billingDomainId: domain.id,
+      billingDomainDisplayName: domain.displayName,
+      includedInHeadline,
+      recordedTokens: domainTokens,
+      observationCount: history.tokenEvidence.observationCount,
+      retailEquivalent: metric('retail-equivalent'),
+      actualCost: metric('actual'),
+      authorities: history.authorities ?? [],
+      lastObservedAt: history.lastObservedAt ?? null
+    };
+  });
 }
 
 function allDomainHistories(providers: ProviderOverview[]): Array<{

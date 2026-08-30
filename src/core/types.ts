@@ -574,6 +574,7 @@ export interface TokenMoneyWorkbench {
   tokenBreakdown: WorkbenchTokenBreakdown;
   dayBreakdown: WorkbenchDayBreakdown[];
   modelRanking: WorkbenchModelRanking;
+  planValue: WorkbenchPlanValue;
 }
 
 export interface WorkbenchProviderSummary {
@@ -672,6 +673,139 @@ export interface WorkbenchModelRanking {
   byRetailEquivalent: string[];
   entries: WorkbenchModelEntry[];
   unclassified: WorkbenchUnclassifiedUsage[];
+}
+
+export type PlanBillingPeriod = 'monthly' | 'annual';
+
+export type PlanPriceSource = 'catalog-preset' | 'user-entered';
+
+export interface PlanSubscription {
+  providerId: string;
+  billingDomainId: string;
+  planId: string | null;
+  displayName: string;
+  amount: number;
+  currency: string;
+  billingPeriod: PlanBillingPeriod;
+  /**
+   * A declared renewal date. Any past or future renewal resolves the same
+   * current billing period; without one the period stays unknown.
+   */
+  anchorDate: string | null;
+  priceSource: PlanPriceSource;
+  updatedAt: string;
+}
+
+export interface WorkbenchPlanMoneyAmount {
+  status: 'available' | 'unavailable';
+  amount: number | null;
+  nativeAmount: number;
+  nativeCurrency: string;
+  comparisonCurrency: string;
+  conversionUnavailableReason: 'missing-rate' | 'stale-rate' | null;
+  exchangeRates: ExchangeRateSnapshot[];
+}
+
+/**
+ * The subscription's own billing period, measured to date. It answers whether
+ * this period has paid for itself yet; it is not comparable across Providers
+ * sitting at different points in their cycles, which `elapsedDays` and
+ * `totalDays` make visible.
+ */
+export interface WorkbenchPlanBillingPeriod {
+  start: string;
+  end: string;
+  elapsedDays: number;
+  totalDays: number;
+  progress: number;
+  periodCost: WorkbenchPlanMoneyAmount;
+  recordedTokens: number | null;
+  retailEquivalent: WorkbenchMoneyMetric;
+  breakEvenRatio: number | null;
+  ratioBound: 'exact' | 'lower' | 'unavailable';
+}
+
+export interface WorkbenchPlanValueEntry {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  includedInHeadline: boolean;
+  plan: Omit<PlanSubscription, 'providerId' | 'billingDomainId'>;
+  windowDays: number;
+  windowPlanCost: WorkbenchPlanMoneyAmount;
+  billingPeriod: WorkbenchPlanBillingPeriod | null;
+  recordedTokens: number | null;
+  retailEquivalent: WorkbenchMoneyMetric;
+  valueRatio: number | null;
+  ratioBound: 'exact' | 'lower' | 'unavailable';
+  status: 'available' | 'partial' | 'unavailable';
+  effectiveUnitPrice: number | null;
+  retailUnitPrice: number | null;
+  pricingCoverage: number | null;
+  authorities: DataAuthority[];
+  lastObservedAt: string | null;
+}
+
+export interface WorkbenchPlanValueMeteredDomain {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  recordedTokens: number | null;
+  actualCost: WorkbenchMoneyMetric;
+  retailEquivalent: WorkbenchMoneyMetric;
+}
+
+export interface WorkbenchPlanValueUnconfiguredDomain {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  recordedTokens: number;
+}
+
+export interface PlanCatalogEntry {
+  id: string;
+  providerId: string;
+  billingDomainId: string;
+  displayName: string;
+  amount: number;
+  currency: string;
+  billingPeriod: PlanBillingPeriod;
+  source: {
+    title: string;
+    url: string;
+    retrievedAt: string;
+  };
+}
+
+export interface PlanCatalog {
+  version: string;
+  entries: PlanCatalogEntry[];
+}
+
+export interface PlanEligibleDomain {
+  providerId: string;
+  providerDisplayName: string;
+  billingDomainId: string;
+  billingDomainDisplayName: string;
+  presets: PlanCatalogEntry[];
+}
+
+export interface PlanSettings {
+  catalogVersion: string;
+  domains: PlanEligibleDomain[];
+  subscriptions: PlanSubscription[];
+}
+
+export interface WorkbenchPlanValue {
+  windowDays: number;
+  comparisonCurrency: string;
+  catalogVersion: string;
+  entries: WorkbenchPlanValueEntry[];
+  meteredDomains: WorkbenchPlanValueMeteredDomain[];
+  unconfiguredDomains: WorkbenchPlanValueUnconfiguredDomain[];
 }
 
 export interface GlobalUsageContribution {
@@ -799,6 +933,9 @@ export interface UsageRepository {
   saveConnectorRuntimeState(state: ConnectorRuntimeState): void;
   getMonitoringSettings(): MonitoringSettings;
   saveMonitoringSettings(settings: MonitoringSettings): void;
+  getPlanSubscriptions(): PlanSubscription[];
+  savePlanSubscription(subscription: PlanSubscription): void;
+  deletePlanSubscription(providerId: string, billingDomainId: string): void;
   getNotificationState(key: string): string | null;
   saveNotificationState(key: string, value: string): void;
   saveConnectorDiagnostic(diagnostic: ConnectorDiagnostic): void;

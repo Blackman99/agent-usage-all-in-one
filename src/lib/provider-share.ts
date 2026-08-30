@@ -29,7 +29,6 @@ export interface ProviderShareEntry {
   color: string;
   formattedValue: string;
   formattedShare: string;
-  formattedEvidence: string;
 }
 
 export interface ProviderShareTheme {
@@ -44,8 +43,7 @@ export function buildProviderShareEntries(
   metric: ProviderShareMetric,
   colorFor: (providerId: string, billingDomainId: string) => string,
   formatValue: (value: number) => string,
-  formatShare: (share: number) => string,
-  formatEvidence: (provider: ProviderShareSource, metric: ProviderShareMetric) => string
+  formatShare: (share: number) => string
 ): ProviderShareEntry[] {
   return providers.flatMap((provider) => {
     const value = metric === 'tokens' ? provider.recordedTokens : provider.retailEquivalent.amount;
@@ -68,8 +66,7 @@ export function buildProviderShareEntries(
         share,
         color: colorFor(provider.providerId, provider.billingDomainId),
         formattedValue: formatValue(value),
-        formattedShare: formatShare(share),
-        formattedEvidence: formatEvidence(provider, metric)
+        formattedShare: formatShare(share)
       }
     ];
   });
@@ -195,8 +192,7 @@ function formatTooltip(
   return [
     `<strong>${escapeHtml(data.name)}</strong>`,
     `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.billingDomainDisplayName)}</span>`,
-    `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`,
-    `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.formattedEvidence)}</span>`
+    `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`
   ].join('<br>');
 }
 

@@ -24,6 +24,16 @@ The dashboard has two primary tabs:
   model rankings with visual share bars and the public API retail equivalent of
   eligible token usage.
 
+Declare what each plan costs in Settings and the same tab adds a **subscription
+value** view: it prorates that price over the selected range and compares it with
+the API retail equivalent of the tokens the plan produced, mapping every
+subscription against a break-even line and ranking the value multiple beside what
+a million tokens actually cost you. Adding the plan's renewal date also measures
+each subscription over its own billing period, showing how far into that cycle it
+is and whether it is on pace to pay for itself, so a plan in its first week is
+never read against one in its fourth. The plan price is a local declaration; it
+never becomes a cost record and never enters any cost total.
+
 Actual charges, provider-reported estimates, fixed subscription fees, and API
 retail equivalents are separate evidence. The API retail equivalent is not a bill
 and is never presented as subscription spend. Unknown models or prices remain

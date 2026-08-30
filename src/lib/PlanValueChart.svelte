@@ -1,68 +1,85 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { TreemapChart, type TreemapSeriesOption } from 'echarts/charts';
+  import {
+    LineChart,
+    ScatterChart,
+    type LineSeriesOption,
+    type ScatterSeriesOption
+  } from 'echarts/charts';
   import {
     AriaComponent,
+    GridComponent,
     TitleComponent,
     TooltipComponent,
     type AriaComponentOption,
+    type GridComponentOption,
     type TitleComponentOption,
     type TooltipComponentOption
   } from 'echarts/components';
   import { init, use, type ComposeOption, type ECharts } from 'echarts/core';
   import { CanvasRenderer } from 'echarts/renderers';
 
-  import type { WorkbenchModelEntry } from '$core/types.js';
+  import type { WorkbenchPlanValue } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
-  import {
-    buildModelBreakdownEntries,
-    buildModelBreakdownOption,
-    type ModelBreakdownMetric,
-    type ModelBreakdownTheme
-  } from '$lib/model-breakdown.js';
   import { THEME_EVENT } from '$lib/theme.js';
+  import {
+    buildPlanValuePoints,
+    buildPlanValueScatterOption,
+    type PlanValueFormatters,
+    type PlanValueTheme
+  } from '$lib/plan-value.js';
   import { trendSegmentColor } from '$lib/usage-trend.js';
 
-  use([TreemapChart, TooltipComponent, TitleComponent, AriaComponent, CanvasRenderer]);
+  use([
+    ScatterChart,
+    LineChart,
+    GridComponent,
+    TooltipComponent,
+    TitleComponent,
+    AriaComponent,
+    CanvasRenderer
+  ]);
 
-  type ModelBreakdownChartOption = ComposeOption<
-    TreemapSeriesOption | TooltipComponentOption | TitleComponentOption | AriaComponentOption
+  type PlanValueChartOption = ComposeOption<
+    | ScatterSeriesOption
+    | LineSeriesOption
+    | GridComponentOption
+    | TooltipComponentOption
+    | TitleComponentOption
+    | AriaComponentOption
   >;
 
-  export let models: WorkbenchModelEntry[];
-  export let metric: ModelBreakdownMetric;
-  export let currency: string;
+  export let planValue: WorkbenchPlanValue;
   export let locale: Locale = detectLocale('');
-  export let formatUsageMetric: (
-    value: number | null,
-    currency: string,
-    metric: ModelBreakdownMetric
-  ) => string;
-  export let formatPercent: (value: number | null) => string;
-  export let onSelect: (modelId: string) => void;
+  export let formatters: PlanValueFormatters;
 
   let chartEl: HTMLDivElement | null = null;
   let chartRoot: HTMLElement | null = null;
   let chart: ECharts | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let theme: ModelBreakdownTheme = {
+  let theme: PlanValueTheme = {
     text: '#f4f6fb',
     muted: '#9aa4b4',
     surface: '#171c25',
     border: '#2b3441'
   };
 
-  $: entries = buildModelBreakdownEntries(
-    models,
-    metric,
-    trendSegmentColor,
-    (value) => formatUsageMetric(value, currency, metric),
-    formatPercent
-  );
-  $: chartOption = buildModelBreakdownOption(
-    entries,
+  $: points = buildPlanValuePoints(planValue, trendSegmentColor, t('planCustom'));
+  $: chartOption = buildPlanValueScatterOption(
+    points,
     theme,
-    { notAvailable: t('notAvailable'), separateFromHeadline: t('separateFromHeadline') },
+    {
+      paid: t('planValuePaid'),
+      worth: t('planValueWorth'),
+      ratio: t('planValueRatio'),
+      tokens: t('tokens'),
+      effectiveUnitPrice: t('planValueEffectiveUnitPrice'),
+      retailUnitPrice: t('planValueRetailUnitPrice'),
+      perMillion: t('planValuePerMillion'),
+      partial: t('planValuePartial'),
+      empty: t('planValueEmpty')
+    },
+    formatters,
     !prefersReducedMotion()
   );
   $: if (chart) void renderChart(chartOption);
@@ -96,14 +113,14 @@
     theme = {
       text: resolvedCssColor(source, '--text-strong', theme.text),
       muted: resolvedCssColor(source, '--muted', theme.muted),
-      surface: resolvedCssColor(source, '--surface', theme.surface),
+      surface: resolvedCssColor(source, '--surface-subtle', theme.surface),
       border: resolvedCssColor(source, '--border', theme.border)
     };
   }
 
-  async function renderChart(option: ReturnType<typeof buildModelBreakdownOption>) {
+  async function renderChart(option: ReturnType<typeof buildPlanValueScatterOption>) {
     if (!chart) return;
-    chart.setOption(option as unknown as ModelBreakdownChartOption, {
+    chart.setOption(option as unknown as PlanValueChartOption, {
       notMerge: true,
       lazyUpdate: false
     });
@@ -115,12 +132,7 @@
     if (!chartEl) return;
     syncChartTheme();
     chart = init(chartEl, undefined, { renderer: 'canvas', useDirtyRect: true });
-    chart.on('click', (parameters) => {
-      const data = parameters?.data;
-      const modelId =
-        data && typeof data === 'object' ? (data as { modelId?: unknown }).modelId : null;
-      if (typeof modelId === 'string') onSelect(modelId);
-    });
+    chart.getDom().setAttribute('aria-hidden', 'true');
     resizeObserver = new ResizeObserver(() => chart?.resize());
     resizeObserver.observe(chartEl);
     window.addEventListener(THEME_EVENT, syncChartTheme);
@@ -134,28 +146,63 @@
   });
 </script>
 
-<div class="model-breakdown-treemap-root" bind:this={chartRoot}>
+<div class="plan-value-chart-root" bind:this={chartRoot}>
   <div
-    class="model-breakdown-echarts"
+    class="plan-value-echarts"
     bind:this={chartEl}
-    data-testid="model-breakdown-treemap"
+    data-testid="plan-value-chart"
     data-chart-engine="echarts"
-    aria-label={t('modelBreakdownTreemap')}
   ></div>
+  <div class="plan-value-data">
+    <table aria-label={t('planValueChartLabel')}>
+      <thead>
+        <tr>
+          <th>{t('plans')}</th>
+          <th>{t('planValuePaid')}</th>
+          <th>{t('planValueWorth')}</th>
+          <th>{t('planValueRatio')}</th>
+          <th>{t('tokens')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each points as point (point.key)}
+          <tr>
+            <td>{point.name} · {point.planLabel}</td>
+            <td>{formatters.money(point.paid)}</td>
+            <td>{formatters.money(point.worth)}</td>
+            <td>{formatters.ratio(point.ratio, point.bound)}</td>
+            <td>{formatters.tokens(point.tokens)}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <style>
-  .model-breakdown-treemap-root {
+  .plan-value-chart-root {
     min-width: 0;
   }
 
-  .model-breakdown-echarts {
+  .plan-value-echarts {
     width: 100%;
-    height: clamp(280px, 36vh, 420px);
+    height: 320px;
+  }
+
+  .plan-value-data {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    border: 0;
+    white-space: nowrap;
   }
 
   @media (max-width: 680px) {
-    .model-breakdown-echarts {
+    .plan-value-echarts {
       height: 300px;
     }
   }

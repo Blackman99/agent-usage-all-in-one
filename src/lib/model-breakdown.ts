@@ -36,7 +36,6 @@ export interface ModelBreakdownEntry {
   color: string;
   formattedValue: string;
   formattedShare: string;
-  formattedEvidence: string;
 }
 
 export interface ModelBreakdownTheme {
@@ -61,8 +60,7 @@ export function buildModelBreakdownEntries(
   metric: ModelBreakdownMetric,
   colorFor: (providerId: string, billingDomainId: string) => string,
   formatValue: (value: number) => string,
-  formatShare: (share: number) => string,
-  formatEvidence: (model: ModelBreakdownSource, metric: ModelBreakdownMetric) => string
+  formatShare: (share: number) => string
 ): ModelBreakdownEntry[] {
   const chartable = models.flatMap((model) => {
     const value = metric === 'tokens' ? model.tokenTotals.total : modelBreakdownCost(model);
@@ -110,8 +108,7 @@ export function buildModelBreakdownEntries(
       share: entry.value / total,
       color: colorFor(entry.model.providerId, entry.model.billingDomainId),
       formattedValue: formatValue(entry.value),
-      formattedShare: formatShare(entry.value / total),
-      formattedEvidence: formatEvidence(entry.model, metric)
+      formattedShare: formatShare(entry.value / total)
     };
   });
 }
@@ -197,7 +194,6 @@ export function buildModelBreakdownOption(
           modelId: entry.modelId,
           formattedValue: entry.formattedValue,
           formattedShare: entry.formattedShare,
-          formattedEvidence: entry.formattedEvidence,
           providerDisplayName: entry.providerDisplayName,
           billingDomainDisplayName: entry.billingDomainDisplayName,
           includedInHeadline: entry.includedInHeadline,
@@ -240,9 +236,6 @@ function formatTreemapTooltip(
       `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(labels.separateFromHeadline)}</span>`
     );
   }
-  lines.push(
-    `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(entry.formattedEvidence)}</span>`
-  );
   return lines.join('<br>');
 }
 
