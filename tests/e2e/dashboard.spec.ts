@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 let home: string;
 let launchUrl: string;
@@ -600,67 +600,64 @@ test('renders Codex quota without card diagnostics and keeps human actions in se
     });
   });
   await page.route('**/api/overview**', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        generatedAt: '2026-08-28T02:00:00.000Z',
-        providers: [
-          withTokenDomain(
-            {
-              id: 'codex',
-              displayName: 'Codex',
-              freshness: { status: 'stale', lastSuccessAt: '2026-08-27T02:00:00.000Z' },
-              health: {
-                status: 'degraded',
-                errorCode: 'codex-account-unavailable',
-                message: 'Codex account usage is unavailable.',
-                recovery: 'Run codex login, then refresh Agent Usage.'
-              },
-              coverage: {
-                quota: 'complete',
-                tokens: 'complete',
-                actualCost: 'unavailable',
-                history: 'complete'
-              },
-              quotaBuckets: [
-                {
-                  id: 'codex:primary',
-                  billingDomainId: 'subscription',
-                  label: '5 hour',
-                  usedPercent: 42,
-                  resetsAt: '2026-08-28T05:00:00.000Z',
-                  authority: 'official-account'
-                },
-                {
-                  id: 'codex:secondary',
-                  billingDomainId: 'subscription',
-                  label: 'Week',
-                  usedPercent: 18,
-                  resetsAt: '2026-09-01T00:00:00.000Z',
-                  authority: 'official-account'
-                }
-              ],
-              tokenTotals: { total: 1250, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-              tokenEvidence: tokenEvidenceFixture(
-                { total: 1250 },
-                {
-                  sourceReportedTokens: 1250,
-                  unclassifiedTokens: 1250,
-                  classifiedTokens: 0,
-                  classificationCoverage: 0,
-                  totalDerivations: ['source-reported'],
-                  timePrecisions: ['day'],
-                  usageScopes: ['account-wide']
-                }
-              ),
-              tokenAuthority: 'official-account'
+    await fulfillOverview(route, {
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      providers: [
+        withTokenDomain(
+          {
+            id: 'codex',
+            displayName: 'Codex',
+            freshness: { status: 'stale', lastSuccessAt: '2026-08-27T02:00:00.000Z' },
+            health: {
+              status: 'degraded',
+              errorCode: 'codex-account-unavailable',
+              message: 'Codex account usage is unavailable.',
+              recovery: 'Run codex login, then refresh Agent Usage.'
             },
-            'subscription',
-            'Codex subscription',
-            '2026-08-27T02:00:00.000Z'
-          )
-        ]
-      })
+            coverage: {
+              quota: 'complete',
+              tokens: 'complete',
+              actualCost: 'unavailable',
+              history: 'complete'
+            },
+            quotaBuckets: [
+              {
+                id: 'codex:primary',
+                billingDomainId: 'subscription',
+                label: '5 hour',
+                usedPercent: 42,
+                resetsAt: '2026-08-28T05:00:00.000Z',
+                authority: 'official-account'
+              },
+              {
+                id: 'codex:secondary',
+                billingDomainId: 'subscription',
+                label: 'Week',
+                usedPercent: 18,
+                resetsAt: '2026-09-01T00:00:00.000Z',
+                authority: 'official-account'
+              }
+            ],
+            tokenTotals: { total: 1250, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            tokenEvidence: tokenEvidenceFixture(
+              { total: 1250 },
+              {
+                sourceReportedTokens: 1250,
+                unclassifiedTokens: 1250,
+                classifiedTokens: 0,
+                classificationCoverage: 0,
+                totalDerivations: ['source-reported'],
+                timePrecisions: ['day'],
+                usageScopes: ['account-wide']
+              }
+            ),
+            tokenAuthority: 'official-account'
+          },
+          'subscription',
+          'Codex subscription',
+          '2026-08-27T02:00:00.000Z'
+        )
+      ]
     });
   });
 
@@ -719,93 +716,90 @@ test('keeps successful usage visible when an auxiliary settings request fails', 
 test('shows OpenCode Go account quota without duplicating its Token history', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.route('**/api/overview**', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        generatedAt: '2026-08-28T02:00:00.000Z',
-        providers: [
-          withTokenDomain(
-            {
-              id: 'opencode-go',
-              displayName: 'OpenCode Go',
-              freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
-              health: {
-                status: 'healthy',
-                errorCode: null,
-                message: null,
-                recovery: null
-              },
-              coverage: {
-                quota: 'complete',
-                tokens: 'complete',
-                actualCost: 'unavailable',
-                history: 'complete'
-              },
-              quotaBuckets: [
-                {
-                  id: 'monthly',
-                  billingDomainId: 'go-subscription',
-                  label: 'Month',
-                  usedPercent: 50,
-                  resetsAt: '2026-09-28T00:00:00.000Z',
-                  authority: 'official-account',
-                  scope: 'account-wide',
-                  status: 'ok',
-                  limitAmount: 60,
-                  limitCurrency: 'USD',
-                  fallbackStatus: 'unknown'
-                },
-                {
-                  id: 'weekly',
-                  billingDomainId: 'go-subscription',
-                  label: 'Week',
-                  usedPercent: 40,
-                  resetsAt: '2026-09-01T00:00:00.000Z',
-                  authority: 'official-account',
-                  scope: 'account-wide',
-                  status: 'ok',
-                  limitAmount: 30,
-                  limitCurrency: 'USD',
-                  fallbackStatus: 'unknown'
-                },
-                {
-                  id: 'rolling',
-                  billingDomainId: 'go-subscription',
-                  label: '5 hour',
-                  usedPercent: 25,
-                  resetsAt: '2026-08-28T05:00:00.000Z',
-                  authority: 'official-account',
-                  scope: 'account-wide',
-                  status: 'ok',
-                  limitAmount: 12,
-                  limitCurrency: 'USD',
-                  fallbackStatus: 'unknown'
-                }
-              ],
-              tokenTotals: {
-                total: 1200,
-                input: 700,
-                output: 250,
-                reasoning: 50,
-                cacheRead: 200,
-                cacheWrite: 0
-              },
-              tokenEvidence: tokenEvidenceFixture(
-                { total: 1200 },
-                {
-                  totalDerivations: ['categorized'],
-                  timePrecisions: ['day'],
-                  usageScopes: ['this-mac']
-                }
-              ),
-              tokenAuthority: 'local-observation'
+    await fulfillOverview(route, {
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      providers: [
+        withTokenDomain(
+          {
+            id: 'opencode-go',
+            displayName: 'OpenCode Go',
+            freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
+            health: {
+              status: 'healthy',
+              errorCode: null,
+              message: null,
+              recovery: null
             },
-            'go-subscription',
-            'OpenCode Go subscription',
-            '2026-08-28T01:59:00.000Z'
-          )
-        ]
-      })
+            coverage: {
+              quota: 'complete',
+              tokens: 'complete',
+              actualCost: 'unavailable',
+              history: 'complete'
+            },
+            quotaBuckets: [
+              {
+                id: 'monthly',
+                billingDomainId: 'go-subscription',
+                label: 'Month',
+                usedPercent: 50,
+                resetsAt: '2026-09-28T00:00:00.000Z',
+                authority: 'official-account',
+                scope: 'account-wide',
+                status: 'ok',
+                limitAmount: 60,
+                limitCurrency: 'USD',
+                fallbackStatus: 'unknown'
+              },
+              {
+                id: 'weekly',
+                billingDomainId: 'go-subscription',
+                label: 'Week',
+                usedPercent: 40,
+                resetsAt: '2026-09-01T00:00:00.000Z',
+                authority: 'official-account',
+                scope: 'account-wide',
+                status: 'ok',
+                limitAmount: 30,
+                limitCurrency: 'USD',
+                fallbackStatus: 'unknown'
+              },
+              {
+                id: 'rolling',
+                billingDomainId: 'go-subscription',
+                label: '5 hour',
+                usedPercent: 25,
+                resetsAt: '2026-08-28T05:00:00.000Z',
+                authority: 'official-account',
+                scope: 'account-wide',
+                status: 'ok',
+                limitAmount: 12,
+                limitCurrency: 'USD',
+                fallbackStatus: 'unknown'
+              }
+            ],
+            tokenTotals: {
+              total: 1200,
+              input: 700,
+              output: 250,
+              reasoning: 50,
+              cacheRead: 200,
+              cacheWrite: 0
+            },
+            tokenEvidence: tokenEvidenceFixture(
+              { total: 1200 },
+              {
+                totalDerivations: ['categorized'],
+                timePrecisions: ['day'],
+                usageScopes: ['this-mac']
+              }
+            ),
+            tokenAuthority: 'local-observation'
+          },
+          'go-subscription',
+          'OpenCode Go subscription',
+          '2026-08-28T01:59:00.000Z'
+        )
+      ]
     });
   });
 
@@ -857,81 +851,78 @@ test('keeps Claude All models and Fable-only quota without duplicating local Tok
     });
   });
   await page.route('**/api/overview**', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        generatedAt: '2026-08-28T02:00:00.000Z',
-        providers: [
-          withTokenDomain(
-            {
-              id: 'claude-code',
-              displayName: 'Claude Code',
-              freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
-              health: {
-                status: 'degraded',
-                errorCode: 'claude-subscription-quota-unavailable',
-                message: 'Claude Code subscription quota is unavailable.',
-                recovery: 'Run doctor, check the connector, and retry refresh.'
-              },
-              coverage: {
-                quota: 'complete',
-                tokens: 'partial',
-                actualCost: 'unavailable',
-                history: 'partial'
-              },
-              quotaBuckets: [
-                {
-                  id: '5-hour-limit',
-                  billingDomainId: 'subscription',
-                  label: '5 hour',
-                  usedPercent: 42,
-                  resetsAt: '2026-08-28T04:13:00.000Z',
-                  authority: 'official-client',
-                  scope: 'account-wide'
-                },
-                {
-                  id: 'weekly-all-models',
-                  billingDomainId: 'subscription',
-                  label: 'Week · All models',
-                  usedPercent: 24,
-                  resetsAt: '2026-08-31T09:59:00.000Z',
-                  authority: 'official-client',
-                  scope: 'account-wide'
-                },
-                {
-                  id: 'weekly-fable-only',
-                  billingDomainId: 'subscription',
-                  label: 'Week · Fable only',
-                  usedPercent: 17,
-                  resetsAt: '2026-08-31T09:59:00.000Z',
-                  authority: 'official-client',
-                  scope: 'account-wide'
-                }
-              ],
-              tokenTotals: {
-                total: 575,
-                input: 100,
-                output: 25,
-                cacheRead: 400,
-                cacheWrite: 50
-              },
-              tokenEvidence: tokenEvidenceFixture(
-                { total: 575 },
-                {
-                  totalDerivations: ['categorized'],
-                  timePrecisions: ['event'],
-                  usageScopes: ['this-mac'],
-                  aggregationTemporalities: ['delta']
-                }
-              ),
-              tokenAuthority: 'local-observation'
+    await fulfillOverview(route, {
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      providers: [
+        withTokenDomain(
+          {
+            id: 'claude-code',
+            displayName: 'Claude Code',
+            freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
+            health: {
+              status: 'degraded',
+              errorCode: 'claude-subscription-quota-unavailable',
+              message: 'Claude Code subscription quota is unavailable.',
+              recovery: 'Run doctor, check the connector, and retry refresh.'
             },
-            'subscription',
-            'Claude subscription',
-            '2026-08-28T01:58:00.000Z'
-          )
-        ]
-      })
+            coverage: {
+              quota: 'complete',
+              tokens: 'partial',
+              actualCost: 'unavailable',
+              history: 'partial'
+            },
+            quotaBuckets: [
+              {
+                id: '5-hour-limit',
+                billingDomainId: 'subscription',
+                label: '5 hour',
+                usedPercent: 42,
+                resetsAt: '2026-08-28T04:13:00.000Z',
+                authority: 'official-client',
+                scope: 'account-wide'
+              },
+              {
+                id: 'weekly-all-models',
+                billingDomainId: 'subscription',
+                label: 'Week · All models',
+                usedPercent: 24,
+                resetsAt: '2026-08-31T09:59:00.000Z',
+                authority: 'official-client',
+                scope: 'account-wide'
+              },
+              {
+                id: 'weekly-fable-only',
+                billingDomainId: 'subscription',
+                label: 'Week · Fable only',
+                usedPercent: 17,
+                resetsAt: '2026-08-31T09:59:00.000Z',
+                authority: 'official-client',
+                scope: 'account-wide'
+              }
+            ],
+            tokenTotals: {
+              total: 575,
+              input: 100,
+              output: 25,
+              cacheRead: 400,
+              cacheWrite: 50
+            },
+            tokenEvidence: tokenEvidenceFixture(
+              { total: 575 },
+              {
+                totalDerivations: ['categorized'],
+                timePrecisions: ['event'],
+                usageScopes: ['this-mac'],
+                aggregationTemporalities: ['delta']
+              }
+            ),
+            tokenAuthority: 'local-observation'
+          },
+          'subscription',
+          'Claude subscription',
+          '2026-08-28T01:58:00.000Z'
+        )
+      ]
     });
   });
 
@@ -1006,74 +997,71 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
     });
   });
   await page.route('**/api/overview**', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        generatedAt: '2026-08-28T02:00:00.000Z',
-        providers: [
-          {
-            id: 'grok',
-            displayName: 'Grok',
-            summaryBillingDomainId: 'grok-build-subscription',
-            freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
-            health: {
-              status: 'healthy',
-              errorCode: null,
-              message: null,
-              recovery: null
-            },
-            coverage: {
-              quota: 'complete',
-              tokens: 'partial',
-              actualCost: 'unavailable',
-              history: 'partial'
-            },
-            quotaBuckets: [
-              {
-                id: 'grok-build:weekly',
-                billingDomainId: 'grok-build-subscription',
-                label: 'Weekly limit',
-                usedPercent: 61.2,
-                resetsAt: '2026-09-01T00:00:00.000Z',
-                authority: 'official-client',
-                scope: 'account-wide',
-                status: 'SuperGrok Heavy'
-              }
-            ],
-            tokenTotals: {
-              total: 525,
-              input: 100,
-              output: 25,
-              reasoning: 12,
-              cacheRead: 400,
-              cacheWrite: 0
-            },
-            tokenEvidence: tokenEvidenceFixture(
-              { total: 525 },
-              {
-                totalDerivations: ['categorized'],
-                timePrecisions: ['event'],
-                usageScopes: ['this-mac'],
-                aggregationTemporalities: ['delta']
-              }
-            ),
-            tokenAuthority: 'local-observation',
-            billingDomains: grokBillingDomains.map((domain) =>
-              domain.id === 'grok-build-subscription'
-                ? {
-                    ...domain,
-                    health: {
-                      status: 'degraded',
-                      errorCode: 'stale',
-                      message: 'Build telemetry is stale.',
-                      recovery: 'Refresh Grok Build telemetry.'
-                    }
+    await fulfillOverview(route, {
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      providers: [
+        {
+          id: 'grok',
+          displayName: 'Grok',
+          summaryBillingDomainId: 'grok-build-subscription',
+          freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
+          health: {
+            status: 'healthy',
+            errorCode: null,
+            message: null,
+            recovery: null
+          },
+          coverage: {
+            quota: 'complete',
+            tokens: 'partial',
+            actualCost: 'unavailable',
+            history: 'partial'
+          },
+          quotaBuckets: [
+            {
+              id: 'grok-build:weekly',
+              billingDomainId: 'grok-build-subscription',
+              label: 'Weekly limit',
+              usedPercent: 61.2,
+              resetsAt: '2026-09-01T00:00:00.000Z',
+              authority: 'official-client',
+              scope: 'account-wide',
+              status: 'SuperGrok Heavy'
+            }
+          ],
+          tokenTotals: {
+            total: 525,
+            input: 100,
+            output: 25,
+            reasoning: 12,
+            cacheRead: 400,
+            cacheWrite: 0
+          },
+          tokenEvidence: tokenEvidenceFixture(
+            { total: 525 },
+            {
+              totalDerivations: ['categorized'],
+              timePrecisions: ['event'],
+              usageScopes: ['this-mac'],
+              aggregationTemporalities: ['delta']
+            }
+          ),
+          tokenAuthority: 'local-observation',
+          billingDomains: grokBillingDomains.map((domain) =>
+            domain.id === 'grok-build-subscription'
+              ? {
+                  ...domain,
+                  health: {
+                    status: 'degraded',
+                    errorCode: 'stale',
+                    message: 'Build telemetry is stale.',
+                    recovery: 'Refresh Grok Build telemetry.'
                   }
-                : domain
-            )
-          }
-        ]
-      })
+                }
+              : domain
+          )
+        }
+      ]
     });
   });
 
@@ -1461,7 +1449,7 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByRole('heading', { name: 'Tokens & model costs' })).toBeVisible();
-  await expect(workbench.getByTestId('usage-headline')).toContainText('CN¥9.00');
+  await expect(workbench.getByTestId('usage-headline')).toContainText('¥9.00');
   // The headline carries the amount alone: no authority, coverage, or metric caption.
   await expect(workbench.getByTestId('usage-headline')).not.toContainText('API retail equivalent');
   await expect(workbench.getByTestId('trend-mode')).toHaveCount(0);
@@ -1476,12 +1464,10 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(reportedTrend).toHaveCount(1);
   await expect(retailTrend).not.toHaveAttribute('style', /transparent/);
   await expect(reportedTrend).toHaveAttribute('style', /fill: transparent/);
-  await expect(
-    workbench
-      .locator('.trend-legend span')
-      .filter({ hasText: 'Provider-reported estimate' })
-      .locator('i')
-  ).toHaveAttribute('style', /repeating-linear-gradient/);
+  // The legend names each Provider billing domain once; the dashed plot line
+  // keeps the reported-estimate series distinct.
+  await expect(workbench.locator('.trend-legend span')).toHaveCount(1);
+  await expect(workbench.locator('.trend-legend')).not.toContainText('Provider-reported estimate');
   const providerShareData = workbench.getByRole('table', { name: 'Provider share' });
   await expect(providerShareData).toContainText('History Agent');
   await expect(providerShareData).not.toContainText('Unknown Agent');
@@ -1515,7 +1501,9 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
   const trendTable = workbench.getByRole('table', { name: 'Trend data' });
   await expect(trendTable).toContainText('Gap');
-  await expect(trendTable).toContainText('Billing period');
+  // The accessible trend table carries the same names and amounts as the plot.
+  await expect(trendTable).toContainText('History Agent · API: $1.25');
+  await expect(trendTable).not.toContainText('Billing period');
   await page.reload();
   await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
@@ -1649,7 +1637,7 @@ test('supports hover, time-axis zoom, drag panning, and reset on the cost trend'
   await expect(tooltip).toBeVisible();
   await expect(tooltip).toContainText('Bucket 1');
   await expect(tooltip).toContainText('History Agent');
-  await expect(tooltip).toContainText('CN¥9.00');
+  await expect(tooltip).toContainText('¥9.00');
 
   await page.mouse.move(plotBox.x + plotBox.width / 2, plotBox.y + plotBox.height / 2);
   await plot.dispatchEvent('wheel', {
@@ -1700,7 +1688,8 @@ test('downloads a redacted export and clears only the selected local scope', asy
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Clear local usage' }).click();
-  await expect(page.getByText('No providers have reported usage yet.')).toBeVisible();
+  // Known Agents keep their cards; the cleared scope is reported in Settings.
+  await expect(page.getByTestId('agent-usage-panel')).toBeVisible();
   await expect(privacy).toContainText('0 raw observations');
 });
 
@@ -1719,10 +1708,7 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   const ranking = page.getByTestId('usage-breakdown');
   await expect(ranking.getByRole('heading', { name: 'Breakdown' })).toBeVisible();
-  await expect(ranking.getByRole('button', { name: 'Model', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
+  await expect(ranking.locator('.breakdown-header')).toContainText('Model');
   const rows = ranking.getByTestId('model-ranking-row');
   await expect(rows).toHaveCount(6);
   await expect(rows.first()).toContainText('fable-model');
@@ -1753,9 +1739,10 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
     .click();
   await expect(rows.first()).toContainText('fable-model');
   const grokRow = rows.filter({ hasText: 'Grok · xAI API' });
-  await expect(grokRow.locator('img')).toHaveAttribute('src', '/brands/grok-light.svg');
+  // The page renders in the light system theme here, so Grok uses its dark ink mark.
+  await expect(grokRow.locator('img')).toHaveAttribute('src', '/brands/grok-dark.svg');
   await expect(grokRow).toContainText('Separate domain · not included in headline');
-  await expect(grokRow).toContainText('Provider-reported estimate');
+  await expect(grokRow).not.toContainText('Provider-reported estimate');
   await expect(grokRow).toContainText('$3.00');
   await expect(rows.filter({ hasText: 'shared-model' })).toHaveCount(2);
   await expect(rows.filter({ hasText: 'model-five' })).toHaveCount(1);
@@ -1942,6 +1929,8 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   page
 }) => {
   const externalRequests: string[] = [];
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (!['127.0.0.1', 'localhost'].includes(url.hostname) && url.protocol !== 'data:') {
@@ -1950,10 +1939,12 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   });
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.route('**/api/overview**', async (route) => {
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(historyOverviewFixture('7d', 12_400, 'CNY'))
-    });
+    await fulfillOverview(
+      route,
+      historyOverviewFixture('7d', 12_400, 'CNY') as {
+        providers: Array<Record<string, unknown>>;
+      }
+    );
   });
 
   await page.emulateMedia({ colorScheme: 'light' });
@@ -2002,6 +1993,7 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     '12,400 Tokens'
   );
   await page.getByRole('tab', { name: 'Agent usage' }).click();
+  await expect(page.getByTestId('agent-usage-panel')).toBeVisible();
   expect(
     await page
       .locator('img[data-provider-logo="opencode-go"]')
@@ -2039,6 +2031,8 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   );
 
   await page.emulateMedia({ colorScheme: 'dark' });
+  // The resolved theme is applied by the theme store, so wait for it to land.
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   const darkBackground = await page.locator('body').evaluate((element) => {
     const style = getComputedStyle(element);
     return { color: style.color, image: style.backgroundImage, value: style.backgroundColor };
@@ -2069,6 +2063,8 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     )
     .toBe('/brands/grok-light.svg');
   expect(externalRequests).toEqual([]);
+  // A malformed Provider payload used to throw and freeze every later update.
+  expect(pageErrors).toEqual([]);
 });
 
 test('presents the dashboard as a cohesive hierarchy across its primary views', async ({
@@ -3587,6 +3583,42 @@ test('compares provider quota reset windows on an interactive homepage timeline'
   );
   await expect(timeline.locator('.quota-timeline-data')).not.toContainText('Grok');
 });
+
+async function fulfillOverview(
+  route: Route,
+  overview: { generatedAt?: string; providers: Array<Record<string, unknown>> }
+): Promise<void> {
+  const generatedAt = overview.generatedAt ?? '2026-08-28T02:00:00.000Z';
+  const pathname = new URL(route.request().url()).pathname;
+  if (pathname === '/api/overview/providers') {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt,
+        providers: overview.providers.map((provider) => ({
+          id: provider.id,
+          displayName: provider.displayName
+        }))
+      })
+    });
+    return;
+  }
+  const providerPrefix = '/api/overview/providers/';
+  if (pathname.startsWith(providerPrefix)) {
+    const providerId = decodeURIComponent(pathname.slice(providerPrefix.length));
+    const provider = overview.providers.find((candidate) => candidate.id === providerId);
+    await route.fulfill({
+      status: provider ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(provider ?? {})
+    });
+    return;
+  }
+  await route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ generatedAt, ...overview })
+  });
+}
 
 async function workbenchPanelBoxes(
   page: Page

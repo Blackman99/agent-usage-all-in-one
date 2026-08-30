@@ -38,6 +38,7 @@
     initTheme,
     setThemePreference,
     themePreference,
+    type ResolvedTheme,
     type ThemePreference
   } from '$lib/theme.js';
   import ModelDetailChart from '$lib/ModelDetailChart.svelte';
@@ -1172,8 +1173,10 @@
     return paths[providerId] ?? null;
   }
 
-  function logoSrc(sources: { dark: string; light: string }): string {
-    return $activeTheme === 'dark' ? sources.dark : sources.light;
+  // The resolved theme is an argument so the markup re-renders the mark when the
+  // theme changes: a store read hidden inside the function body is not tracked.
+  function logoSrc(sources: { dark: string; light: string }, theme: ResolvedTheme): string {
+    return theme === 'dark' ? sources.dark : sources.light;
   }
 
   function displayProviders(
@@ -1185,7 +1188,9 @@
       .filter((provider) => provider.id !== 'opencode')
       .map((provider) => ({
         ...provider,
-        billingDomains: [...provider.billingDomains]
+        // A Provider payload that arrives without billing domains must not take
+        // the whole dashboard down with it.
+        billingDomains: [...(provider.billingDomains ?? [])]
       }));
     for (const connector of connectionStatuses) {
       const { provider: targetProvider, billingDomain: targetDomain } = connector.target;
@@ -1584,7 +1589,7 @@
                     <img
                       class="provider-logo"
                       data-provider-logo={provider.id}
-                      src={logoSrc(logo)}
+                      src={logoSrc(logo, $activeTheme)}
                       alt=""
                     />
                   {/if}
@@ -2269,7 +2274,7 @@
                                 <img
                                   class="ranking-logo"
                                   data-provider-logo={model.providerId}
-                                  src={logoSrc(modelLogo)}
+                                  src={logoSrc(modelLogo, $activeTheme)}
                                   alt=""
                                 />
                               {/if}
