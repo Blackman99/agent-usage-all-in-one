@@ -2,6 +2,7 @@
   import { onDestroy, onMount, tick } from 'svelte';
 
   import type {
+    AgentProviderIndex,
     BillingDomainOverview,
     CoverageLevel,
     DataAuthority,
@@ -30,17 +31,42 @@
     isAutomaticallyManagedCategory
   } from '$lib/automatic-recovery.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
+  import {
+    activeTheme,
+    initTheme,
+    setThemePreference,
+    themePreference,
+    type ThemePreference
+  } from '$lib/theme.js';
   import ModelDetailChart from '$lib/ModelDetailChart.svelte';
+  import ModelBreakdownTreemap from '$lib/ModelBreakdownTreemap.svelte';
+  import ModelTrendStackedChart from '$lib/ModelTrendStackedChart.svelte';
   import ProviderShareChart from '$lib/ProviderShareChart.svelte';
   import QuotaTimelineChart from '$lib/QuotaTimelineChart.svelte';
   import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
   import '$lib/dashboard-polish.css';
 
+  const DEFAULT_AGENT_PROVIDERS: AgentProviderIndex['providers'] = [
+    { id: 'codex', displayName: 'Codex' },
+    { id: 'claude-code', displayName: 'Claude Code' },
+    { id: 'opencode-go', displayName: 'OpenCode Go' },
+    { id: 'grok', displayName: 'Grok' }
+  ];
+  const DEFAULT_AGENT_PROVIDER_IDS = new Set(
+    DEFAULT_AGENT_PROVIDERS.map((provider) => provider.id)
+  );
+
   let locale: Locale = 'en';
   let metaDescription: string;
   let overview: UsageOverview | null = null;
-  let loading = true;
+  let agentProviderIndex: AgentProviderIndex['providers'] = DEFAULT_AGENT_PROVIDERS;
+  let agentProviders: Record<string, ProviderOverview> = {};
+  let agentProviderLoading: Record<string, boolean> = Object.fromEntries(
+    DEFAULT_AGENT_PROVIDERS.map((provider) => [provider.id, true])
+  );
+  let indexedAgentProviderIds = new Set<string>();
+  let agentIndexLoading = true;
   let refreshing = false;
   let overviewError = false;
   let refreshError = false;
@@ -58,12 +84,14 @@
   let selectedCurrency: 'CNY' | 'USD' = 'CNY';
   let selectedTrendMetric: 'tokens' | 'retail-equivalent' = 'retail-equivalent';
   let breakdownDimension: 'model' | 'day' = 'model';
+  let breakdownView: 'list' | 'treemap' | 'trend' = 'list';
   let selectedModelId: string | null = null;
   let modelDetailTrigger: HTMLButtonElement | null = null;
   let modelDetailPanel: HTMLElement | null = null;
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
   let diagnostics: DoctorReport | null = null;
+  let diagnosticsLoaded = false;
   let retention: RetentionStatus | null = null;
   let deleteProductSecrets = false;
   let includeAccountIdentifiers = false;
@@ -78,8 +106,11 @@
   let settingsReturnFocus: HTMLElement | null = null;
   let settingsPanel: HTMLElement | null = null;
   let selectedModelEntry: UsageOverview['workbench']['modelRanking']['entries'][number] | null;
+  let agentViewOverview: UsageOverview | null;
+  let effectiveOverview: UsageOverview | null;
   let destroyed = false;
   let overviewRequestSequence = 0;
+  let agentProviderRequestSequences: Record<string, number> = {};
   let workbenchRequestSequence = 0;
   const automaticRecoveryController = createAutomaticRecoveryController(() => automaticRefresh());
 
@@ -87,8 +118,17 @@
 
   $: selectedModelEntry =
     overview?.workbench?.modelRanking.entries.find((entry) => entry.id === selectedModelId) ?? null;
+  $: agentViewOverview =
+    agentIndexLoading && agentProviderIndex.length === 0
+      ? null
+      : ({
+          generatedAt: new Date().toISOString(),
+          providers: Object.values(agentProviders)
+        } as UsageOverview);
+  $: effectiveOverview = activeDashboardView === 'agents' ? agentViewOverview : overview;
 
   onMount(async () => {
+    initTheme();
     locale = detectLocale(navigator.language);
     document.documentElement.lang = locale;
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -96,6 +136,7 @@
     selectedCurrency = storedCurrency();
     await Promise.all([
       loadOverview(),
+      loadAgentProviders(),
       loadConnectors(),
       loadMonitoring(),
       loadRetention(),
@@ -127,6 +168,22 @@
     document.documentElement.lang = locale;
   }
 
+  const themeCycle: ThemePreference[] = ['system', 'light', 'dark'];
+
+  function toggleTheme(): void {
+    const next = themeCycle[(themeCycle.indexOf($themePreference) + 1) % themeCycle.length];
+    setThemePreference(next);
+  }
+
+  function themeLabel(preference: ThemePreference): string {
+    const keys: Record<ThemePreference, MessageKey> = {
+      system: 'themeSystem',
+      light: 'themeLight',
+      dark: 'themeDark'
+    };
+    return t(keys[preference]);
+  }
+
   async function loadOverview(): Promise<void> {
     const requestSequence = ++overviewRequestSequence;
     const requestedWindow = selectedWindow;
@@ -146,8 +203,68 @@
       scheduleAutomaticRecovery();
     } catch {
       if (requestSequence === overviewRequestSequence) overviewError = true;
+    }
+  }
+
+  async function loadAgentProviders(): Promise<void> {
+    agentIndexLoading = true;
+    const immediatelyRequestedIds = new Set([
+      ...DEFAULT_AGENT_PROVIDER_IDS,
+      ...indexedAgentProviderIds
+    ]);
+    const immediateRequests = [...immediatelyRequestedIds].map((providerId) =>
+      loadAgentProvider(providerId)
+    );
+    try {
+      const response = await fetch('/api/overview/providers');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const index = (await response.json()) as AgentProviderIndex;
+      if (destroyed) return;
+      const visibleProviders = index.providers.filter((provider) => provider.id !== 'opencode');
+      const visibleProvidersById = new Map(
+        visibleProviders.map((provider) => [provider.id, provider])
+      );
+      indexedAgentProviderIds = new Set(visibleProvidersById.keys());
+      agentProviderIndex = [
+        ...DEFAULT_AGENT_PROVIDERS.map(
+          (provider) => visibleProvidersById.get(provider.id) ?? provider
+        ),
+        ...visibleProviders.filter((provider) => !DEFAULT_AGENT_PROVIDER_IDS.has(provider.id))
+      ];
+      agentIndexLoading = false;
+      const additionalRequests = visibleProviders
+        .filter((provider) => !immediatelyRequestedIds.has(provider.id))
+        .map((provider) => loadAgentProvider(provider.id));
+      await Promise.all([...immediateRequests, ...additionalRequests]);
+    } catch {
+      if (!destroyed) agentIndexLoading = false;
+      await Promise.all(immediateRequests);
+    }
+  }
+
+  async function loadAgentProvider(providerId: string): Promise<void> {
+    const sequence = (agentProviderRequestSequences[providerId] ?? 0) + 1;
+    agentProviderRequestSequences = { ...agentProviderRequestSequences, [providerId]: sequence };
+    agentProviderLoading = { ...agentProviderLoading, [providerId]: true };
+    try {
+      const parameters = new URLSearchParams({
+        window: selectedWindow,
+        timeZone,
+        currency: selectedCurrency
+      });
+      const response = await fetch(
+        `/api/overview/providers/${encodeURIComponent(providerId)}?${parameters}`
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const provider = (await response.json()) as ProviderOverview;
+      if (destroyed || agentProviderRequestSequences[providerId] !== sequence) return;
+      agentProviders = { ...agentProviders, [providerId]: provider };
+    } catch {
+      // Cached data or the known Provider shell remains visible; diagnostics stay in Settings.
     } finally {
-      if (!destroyed && requestSequence === overviewRequestSequence) loading = false;
+      if (!destroyed && agentProviderRequestSequences[providerId] === sequence) {
+        agentProviderLoading = { ...agentProviderLoading, [providerId]: false };
+      }
     }
   }
 
@@ -162,10 +279,15 @@
   async function performRefresh(mode: 'manual' | 'automatic'): Promise<void> {
     refreshing = true;
     try {
-      const endpoint = mode === 'automatic' ? '/api/refresh?mode=automatic' : '/api/refresh';
+      const endpoint =
+        mode === 'automatic'
+          ? '/api/refresh?mode=automatic&background=true'
+          : '/api/refresh?background=true';
       const response = await fetch(endpoint, { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await Promise.all([loadOverview(), loadDiagnostics()]);
+      await Promise.all([loadOverview(), loadAgentProviders(), loadDiagnostics()]);
+      await loadProcessing();
+      startProcessingPolling();
       refreshError = false;
     } catch {
       refreshError = true;
@@ -178,7 +300,9 @@
   }
 
   function scheduleAutomaticRecovery(): void {
-    if (destroyed || !overview) return;
+    // Connector diagnostics carry their own automatic-recovery evidence, so the
+    // first evaluation waits for them instead of refreshing twice.
+    if (destroyed || !overview || !diagnosticsLoaded) return;
     automaticRecoveryController.schedule(overview, diagnostics, refreshing);
   }
 
@@ -213,9 +337,13 @@
       if (destroyed) return;
       diagnostics = nextDiagnostics;
       diagnosticsError = false;
-      scheduleAutomaticRecovery();
     } catch {
       diagnosticsError = true;
+    } finally {
+      if (!destroyed) {
+        diagnosticsLoaded = true;
+        scheduleAutomaticRecovery();
+      }
     }
   }
 
@@ -237,24 +365,17 @@
       const next = (await response.json()) as ProcessingStatus;
       const previous = processing;
       processing = next;
-      if (next.modules.discovery.state === 'running') void loadConnectors();
-      if (next.modules.usage.state === 'running') void loadOverview();
-      if (
-        previous?.modules.discovery.state !== 'ready' &&
-        next.modules.discovery.state === 'ready'
-      ) {
+      if (processingModuleBecameReady(previous, next, 'discovery')) {
         void loadConnectors();
       }
-      if (
-        (previous?.modules.usage.state !== 'ready' && next.modules.usage.state === 'ready') ||
-        (previous?.modules.pricing.state !== 'ready' && next.modules.pricing.state === 'ready')
-      ) {
+      if (processingModuleBecameReady(previous, next, 'usage')) {
+        void loadAgentProviders();
         void loadOverview();
       }
-      if (
-        previous?.modules.retention.state !== 'ready' &&
-        next.modules.retention.state === 'ready'
-      ) {
+      if (processingModuleBecameReady(previous, next, 'pricing')) {
+        void loadOverview();
+      }
+      if (processingModuleBecameReady(previous, next, 'retention')) {
         void loadRetention();
       }
       hardRebuilding =
@@ -274,6 +395,18 @@
     } catch {
       // Processing progress is optional; cached data remains usable.
     }
+  }
+
+  function processingModuleBecameReady(
+    previous: ProcessingStatus | null,
+    next: ProcessingStatus,
+    moduleId: keyof ProcessingStatus['modules']
+  ): boolean {
+    return (
+      previous !== null &&
+      previous.modules[moduleId].state !== 'ready' &&
+      next.modules[moduleId].state === 'ready'
+    );
   }
 
   function startProcessingPolling(): void {
@@ -346,7 +479,13 @@
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       deleteProductSecrets = false;
-      await Promise.all([loadOverview(), loadConnectors(), loadDiagnostics(), loadRetention()]);
+      await Promise.all([
+        loadOverview(),
+        loadAgentProviders(),
+        loadConnectors(),
+        loadDiagnostics(),
+        loadRetention()
+      ]);
       privacyActionError = false;
     } catch {
       privacyActionError = true;
@@ -387,7 +526,12 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       await response.json();
       secretInputs = { ...secretInputs, [id]: '' };
-      await Promise.all([loadConnectors(), loadOverview(), loadDiagnostics()]);
+      await Promise.all([
+        loadConnectors(),
+        loadOverview(),
+        loadAgentProviders(),
+        loadDiagnostics()
+      ]);
     } catch {
       connectorsError = true;
     } finally {
@@ -909,9 +1053,14 @@
     return paths[providerId] ?? null;
   }
 
+  function logoSrc(sources: { dark: string; light: string }): string {
+    return $activeTheme === 'dark' ? sources.dark : sources.light;
+  }
+
   function displayProviders(
     currentOverview: UsageOverview,
-    connectionStatuses: ConnectorStatus[]
+    connectionStatuses: ConnectorStatus[],
+    indexedProviders: AgentProviderIndex['providers'] = []
   ): ProviderOverview[] {
     const providers = currentOverview.providers
       .filter((provider) => provider.id !== 'opencode')
@@ -928,6 +1077,14 @@
       }
       if (!provider.billingDomains.some((domain) => domain.id === targetDomain.id)) {
         provider.billingDomains.push(emptyBillingDomain(targetDomain.id, targetDomain.displayName));
+      }
+    }
+    for (const indexedProvider of indexedProviders) {
+      const provider = providers.find((candidate) => candidate.id === indexedProvider.id);
+      if (!provider) {
+        providers.push(emptyProvider(indexedProvider.id, indexedProvider.displayName));
+      } else if (!currentOverview.providers.some((candidate) => candidate.id === provider.id)) {
+        provider.displayName = indexedProvider.displayName;
       }
     }
     const priority: Record<string, number> = {
@@ -965,22 +1122,28 @@
     currentOverview: UsageOverview,
     connectionStatuses: ConnectorStatus[]
   ): QuotaTimelineProvider[] {
-    return displayProviders(currentOverview, connectionStatuses).flatMap((provider) => {
-      return provider.billingDomains.flatMap((domain) => {
-        const quotaBuckets = displayQuotaBuckets(domain.quotaBuckets);
-        if (quotaBuckets.length === 0) return [];
-        return [
-          {
-            providerId: provider.id,
-            providerDisplayName: provider.displayName,
-            billingDomainId: domain.id,
-            billingDomainDisplayName: domain.displayName,
-            observedAt: domain.freshness?.lastSuccessAt ?? provider.freshness.lastSuccessAt,
-            quotaBuckets
-          }
-        ];
-      });
-    });
+    return displayProviders(currentOverview, connectionStatuses, agentProviderIndex).flatMap(
+      (provider) => {
+        const domains =
+          provider.billingDomains.length > 0
+            ? provider.billingDomains
+            : [activeBillingDomain(provider, undefined)];
+        return domains.flatMap((domain) => {
+          const quotaBuckets = displayQuotaBuckets(domain.quotaBuckets);
+          if (quotaBuckets.length === 0) return [];
+          return [
+            {
+              providerId: provider.id,
+              providerDisplayName: provider.displayName,
+              billingDomainId: domain.id,
+              billingDomainDisplayName: domain.displayName,
+              observedAt: domain.freshness?.lastSuccessAt ?? provider.freshness.lastSuccessAt,
+              quotaBuckets
+            }
+          ];
+        });
+      }
+    );
   }
 
   function emptyProvider(id: string, displayName: string): ProviderOverview {
@@ -1058,6 +1221,7 @@
     return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency,
+      currencyDisplay: 'narrowSymbol',
       minimumFractionDigits: 2,
       maximumFractionDigits: Math.abs(amount) > 0 && Math.abs(amount) < 0.01 ? 8 : 2
     }).format(amount);
@@ -1169,7 +1333,7 @@
     });
   }
 
-  async function openModelDetail(id: string, trigger: HTMLButtonElement): Promise<void> {
+  async function openModelDetail(id: string, trigger: HTMLButtonElement | null): Promise<void> {
     selectedModelId = id;
     modelDetailTrigger = trigger;
     await tick();
@@ -1222,6 +1386,12 @@
         <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
           {t('settings')}
         </button>
+        <button class="theme-toggle" on:click={toggleTheme} aria-label={t('themeToggleAria')}>
+          <span class="theme-icon" aria-hidden="true"
+            >{$themePreference === 'system' ? '◐' : $activeTheme === 'dark' ? '☾' : '☀'}</span
+          >
+          {themeLabel($themePreference)}
+        </button>
         <button class="locale-toggle" on:click={toggleLocale}>
           {locale === 'en' ? '中文' : 'EN'}
         </button>
@@ -1232,18 +1402,27 @@
       </div>
     </header>
 
-    {#if loading}
-      <div class="state section-loading" aria-live="polite">
-        {activeDashboardView === 'agents' ? t('loadingAgentUsage') : t('loadingModelCosts')}
+    {#if !effectiveOverview}
+      <div
+        id="token-model-costs-panel"
+        data-testid="token-model-costs-panel"
+        role="tabpanel"
+        aria-labelledby="token-model-costs-tab"
+        aria-busy="true"
+      >
+        <section class="token-money-workbench initial-workbench-loading">
+          <p class="module-progress" role="status" data-testid="model-costs-initial-status">
+            {t('loadingModelCosts')}
+          </p>
+        </section>
       </div>
-    {:else if overviewError && !overview}
+    {:else if activeDashboardView === 'models' && overviewError && !overview}
       <div class="state error" role="alert">{t('error')}</div>
-    {:else if overview}
-      {@const overviewTokenEvidence = overviewTokenDisplayEvidence(overview)}
+    {:else if effectiveOverview}
       {#if refreshError}
         <div class="inline-error" role="status">{t('refreshUnavailable')}</div>
       {/if}
-      {#if overview.providers.length === 0}
+      {#if activeDashboardView === 'agents' && !agentIndexLoading && agentProviderIndex.length === 0 && connectors.length === 0}
         <div class="state compact">{t('noProviders')}</div>
       {/if}
       {#if activeDashboardView === 'agents'}
@@ -1253,27 +1432,65 @@
           role="tabpanel"
           aria-labelledby="agent-usage-tab"
         >
-          {#if processing?.modules.usage.state === 'running'}
-            <p class="module-progress" role="status">{t('updatingAgentUsage')}</p>
-          {/if}
           <section class="providers" aria-label={t('providersLabel')}>
-            {#each displayProviders(overview, connectors) as provider (provider.id)}
+            {#each displayProviders(effectiveOverview, connectors, agentProviderIndex) as provider (provider.id)}
               {@const logo = providerLogoSources(provider.id)}
+              {@const hasProviderData = Boolean(agentProviders[provider.id])}
+              {@const initialProviderLoading =
+                agentProviderLoading[provider.id] && !hasProviderData}
+              {@const providerUpdating = agentProviderLoading[provider.id] && hasProviderData}
               {@const selectedDomain = activeBillingDomain(
                 provider,
                 selectedBillingDomains[provider.id]
               )}
               {@const domainFreshness = selectedDomain.freshness ?? provider.freshness}
               {@const domainCoverage = selectedDomain.coverage ?? provider.coverage}
-              <article class="provider-card">
+              <article
+                class="provider-card"
+                class:provider-card-loading={initialProviderLoading}
+                aria-busy={agentProviderLoading[provider.id]}
+              >
+                {#if initialProviderLoading}
+                  <div
+                    class="agent-card-skeleton-overlay"
+                    data-testid={`agent-provider-skeleton-${provider.id}`}
+                    aria-hidden="true"
+                  >
+                    <div class="agent-card-skeleton-content">
+                      <div class="agent-skeleton-connection">
+                        <span>
+                          <i class="agent-skeleton-block"></i>
+                          <i class="agent-skeleton-block"></i>
+                        </span>
+                        <i class="agent-skeleton-block"></i>
+                      </div>
+                      <div class="agent-skeleton-section-label">
+                        <i class="agent-skeleton-block"></i>
+                      </div>
+                      <div class="agent-skeleton-quota-list">
+                        {#each [0, 1, 2] as quotaSkeleton (quotaSkeleton)}
+                          <div class="agent-skeleton-quota-row">
+                            <div class="agent-skeleton-quota-copy">
+                              <i class="agent-skeleton-block"></i>
+                              <i class="agent-skeleton-block"></i>
+                            </div>
+                            <i class="agent-skeleton-block agent-skeleton-progress"></i>
+                            <i class="agent-skeleton-block agent-skeleton-meta"></i>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  </div>
+                {/if}
                 <div class="provider-heading">
                   <div>
                     {#if logo}
-                      <picture class="provider-logo" data-provider-logo={provider.id}>
-                        <source media="(prefers-color-scheme: light)" srcset={logo.light} />
-                        <source media="(prefers-color-scheme: dark)" srcset={logo.dark} />
-                        <img src={logo.dark} alt="" />
-                      </picture>
+                      <img
+                        class="provider-logo"
+                        data-provider-logo={provider.id}
+                        src={logoSrc(logo)}
+                        alt=""
+                      />
                     {/if}
                     <div>
                       <h2 data-provider-logo={logo ? undefined : provider.id}>
@@ -1281,19 +1498,29 @@
                       </h2>
                       <p
                         class="freshness"
-                        data-status={domainFreshness.status === 'unavailable'
-                          ? 'unavailable'
-                          : 'available'}
+                        data-status={providerUpdating
+                          ? 'updating'
+                          : domainFreshness.status === 'unavailable'
+                            ? 'unavailable'
+                            : 'available'}
+                        role={providerUpdating ? 'status' : undefined}
+                        data-testid={providerUpdating
+                          ? `agent-provider-update-${provider.id}`
+                          : undefined}
                       >
                         <span></span>
-                        {domainFreshness.status === 'fresh'
-                          ? t('updatedNow')
-                          : domainFreshness.lastSuccessAt
-                            ? t('updated')
-                            : t('unavailable')}
-                        {domainFreshness.lastSuccessAt
-                          ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
-                          : ''}
+                        {#if providerUpdating}
+                          {t('updating')}
+                        {:else}
+                          {domainFreshness.status === 'fresh'
+                            ? t('updatedNow')
+                            : domainFreshness.lastSuccessAt
+                              ? t('updated')
+                              : t('unavailable')}
+                          {domainFreshness.lastSuccessAt
+                            ? ` · ${formatReset(domainFreshness.lastSuccessAt)}`
+                            : ''}
+                        {/if}
                       </p>
                     </div>
                   </div>
@@ -1458,10 +1685,10 @@
             {/each}
           </section>
           <QuotaTimelineChart
-            providers={quotaTimelineProviders(overview, connectors)}
+            providers={quotaTimelineProviders(effectiveOverview, connectors)}
             {locale}
             {timeZone}
-            now={Date.parse(overview.generatedAt)}
+            now={Date.parse(effectiveOverview.generatedAt)}
           />
         </div>
       {:else}
@@ -1471,11 +1698,14 @@
           role="tabpanel"
           aria-labelledby="token-model-costs-tab"
         >
-          {#if processing?.modules.pricing.state === 'running' && !workbenchLoading}
-            <p class="module-progress" role="status">{t('updatingModelCosts')}</p>
+          {#if refreshing || processing?.modules.pricing.state === 'running'}
+            <p class="module-progress" role="status" data-testid="model-costs-refresh-status">
+              {t('updatingModelCosts')}
+            </p>
           {/if}
-          {#if overview.workbench}
-            {@const workbench = overview.workbench}
+          {#if effectiveOverview.workbench}
+            {@const overviewTokenEvidence = overviewTokenDisplayEvidence(effectiveOverview)}
+            {@const workbench = effectiveOverview.workbench}
             <section
               class="token-money-workbench"
               data-testid="token-money-workbench"
@@ -1523,46 +1753,21 @@
                 </div>
               </div>
 
-              {#if workbenchLoading}
-                <div
-                  class="workbench-skeleton"
-                  data-testid="workbench-skeleton"
-                  role="status"
-                  aria-label={t('updatingModelCosts')}
-                >
-                  <span class="visually-hidden">{t('updatingModelCosts')}</span>
-                  <div class="skeleton-overview">
-                    <div class="skeleton-summary">
-                      <i class="skeleton-block skeleton-headline"></i>
-                      <i class="skeleton-block skeleton-copy"></i>
-                      <i class="skeleton-block skeleton-copy skeleton-copy-short"></i>
-                      <i class="skeleton-block skeleton-provider"></i>
-                      <i class="skeleton-block skeleton-provider"></i>
-                    </div>
-                    <div class="skeleton-chart">
-                      <i class="skeleton-block skeleton-copy skeleton-copy-short"></i>
-                      <i class="skeleton-block skeleton-graph"></i>
-                    </div>
-                  </div>
-                  <div class="skeleton-totals">
-                    {#each [0, 1, 2, 3, 4, 5] as skeleton (skeleton)}
-                      <i class="skeleton-block"></i>
-                    {/each}
-                  </div>
-                  <div class="skeleton-ranking">
-                    <i class="skeleton-block skeleton-copy skeleton-copy-short"></i>
-                    {#each [0, 1, 2, 3] as skeleton (skeleton)}
-                      <i class="skeleton-block skeleton-row"></i>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
               <section
-                class:workbench-data-hidden={workbenchLoading}
                 class="usage-summary-board"
                 data-testid="usage-summary-board"
                 aria-label={t('usageOverview')}
+                aria-busy={workbenchLoading}
               >
+                {#if workbenchLoading}
+                  <div
+                    class="panel-progress"
+                    role="status"
+                    data-testid="workbench-summary-refresh-status"
+                  >
+                    <span class="visually-hidden">{t('updatingModelCosts')}</span>
+                  </div>
+                {/if}
                 <div class="usage-headline" data-testid="usage-headline">
                   <strong
                     aria-label={selectedTrendMetric === 'tokens'
@@ -1669,10 +1874,19 @@
               </section>
 
               <div
-                class:workbench-data-hidden={workbenchLoading}
                 class="usage-overview-grid"
                 data-testid="usage-analysis-grid"
+                aria-busy={workbenchLoading}
               >
+                {#if workbenchLoading}
+                  <div
+                    class="panel-progress"
+                    role="status"
+                    data-testid="workbench-analysis-refresh-status"
+                  >
+                    <span class="visually-hidden">{t('updatingModelCosts')}</span>
+                  </div>
+                {/if}
                 <section class="usage-summary" aria-labelledby="provider-share-heading">
                   <div class="provider-share-heading">
                     <h3 id="provider-share-heading">{t('providerShare')}</h3>
@@ -1708,11 +1922,20 @@
               </div>
 
               <section
-                class:workbench-data-hidden={workbenchLoading}
                 class="model-ranking"
                 data-testid="usage-breakdown"
                 aria-labelledby="model-ranking-heading"
+                aria-busy={workbenchLoading}
               >
+                {#if workbenchLoading}
+                  <div
+                    class="panel-progress"
+                    role="status"
+                    data-testid="workbench-breakdown-refresh-status"
+                  >
+                    <span class="visually-hidden">{t('updatingModelCosts')}</span>
+                  </div>
+                {/if}
                 <div class="ranking-heading">
                   <div>
                     <h3 id="model-ranking-heading">{t('breakdown')}</h3>
@@ -1729,6 +1952,33 @@
                       on:click={() => (breakdownDimension = 'day')}>{t('day')}</button
                     >
                   </div>
+                  {#if breakdownDimension === 'model'}
+                    <div
+                      class="segmented-control"
+                      role="tablist"
+                      aria-label={t('breakdownView')}
+                      data-testid="breakdown-view-tabs"
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={breakdownView === 'list'}
+                        on:click={() => (breakdownView = 'list')}>{t('list')}</button
+                      >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={breakdownView === 'treemap'}
+                        on:click={() => (breakdownView = 'treemap')}>{t('treemap')}</button
+                      >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={breakdownView === 'trend'}
+                        on:click={() => (breakdownView = 'trend')}>{t('trendStacked')}</button
+                      >
+                    </div>
+                  {/if}
                 </div>
                 <div class="breakdown-header" aria-hidden="true">
                   <span>{breakdownDimension === 'model' ? t('model') : t('day')}</span>
@@ -1737,126 +1987,152 @@
                   <span>{t('tokens')}</span>
                 </div>
                 {#if breakdownDimension === 'model'}
-                  <ol class="ranking-list">
-                    {#each rankedModels(workbench, selectedTrendMetric) as model (model.id)}
-                      {@const modelLogo = providerLogoSources(model.providerId)}
-                      {@const modelCost =
-                        model.retailEquivalent.amount !== null
-                          ? model.retailEquivalent
-                          : (model.reportedEstimate ?? model.retailEquivalent)}
-                      {@const modelCostIsReported =
-                        model.retailEquivalent.amount === null &&
-                        model.reportedEstimate?.amount != null}
-                      {@const modelShare = modelMetricShare(model, selectedTrendMetric)}
-                      <li>
-                        <button
-                          type="button"
-                          data-testid="model-ranking-row"
-                          on:click={(event) => openModelDetail(model.id, event.currentTarget)}
-                          on:keydown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              void openModelDetail(model.id, event.currentTarget);
-                            }
-                          }}
-                        >
-                          <span class="ranking-identity">
-                            {#if modelLogo}
-                              <picture class="ranking-logo" data-provider-logo={model.providerId}>
-                                <source
-                                  media="(prefers-color-scheme: light)"
-                                  srcset={modelLogo.light}
-                                />
-                                <source
-                                  media="(prefers-color-scheme: dark)"
-                                  srcset={modelLogo.dark}
-                                />
-                                <img src={modelLogo.dark} alt="" />
-                              </picture>
-                            {/if}
-                            <span>
-                              <strong>{model.model}</strong>
-                              <small
-                                >{model.providerDisplayName} · {model.billingDomainDisplayName}</small
+                  {#if breakdownView === 'treemap'}
+                    <div class="treemap-wrap" role="tabpanel">
+                      <ModelBreakdownTreemap
+                        models={rankedModels(workbench, selectedTrendMetric)}
+                        metric={selectedTrendMetric}
+                        currency={workbench.comparisonCurrency}
+                        {locale}
+                        {formatUsageMetric}
+                        {formatPercent}
+                        {displayAuthorities}
+                        {formatReset}
+                        onSelect={(modelId) => void openModelDetail(modelId, null)}
+                      />
+                      <p class="treemap-hint">{t('treemapHint')}</p>
+                    </div>
+                  {:else if breakdownView === 'trend'}
+                    <div class="treemap-wrap" role="tabpanel">
+                      <ModelTrendStackedChart
+                        models={rankedModels(workbench, selectedTrendMetric)}
+                        metric={selectedTrendMetric}
+                        currency={workbench.comparisonCurrency}
+                        {locale}
+                        {formatUsageMetric}
+                        onSelect={(modelId) => void openModelDetail(modelId, null)}
+                      />
+                    </div>
+                  {:else}
+                    <div role="tabpanel">
+                      <ol class="ranking-list">
+                        {#each rankedModels(workbench, selectedTrendMetric) as model (model.id)}
+                          {@const modelLogo = providerLogoSources(model.providerId)}
+                          {@const modelCost =
+                            model.retailEquivalent.amount !== null
+                              ? model.retailEquivalent
+                              : (model.reportedEstimate ?? model.retailEquivalent)}
+                          {@const modelCostIsReported =
+                            model.retailEquivalent.amount === null &&
+                            model.reportedEstimate?.amount != null}
+                          {@const modelShare = modelMetricShare(model, selectedTrendMetric)}
+                          <li>
+                            <button
+                              type="button"
+                              data-testid="model-ranking-row"
+                              on:click={(event) => openModelDetail(model.id, event.currentTarget)}
+                              on:keydown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  void openModelDetail(model.id, event.currentTarget);
+                                }
+                              }}
+                            >
+                              <span class="ranking-identity">
+                                {#if modelLogo}
+                                  <img
+                                    class="ranking-logo"
+                                    data-provider-logo={model.providerId}
+                                    src={logoSrc(modelLogo)}
+                                    alt=""
+                                  />
+                                {/if}
+                                <span>
+                                  <strong>{model.model}</strong>
+                                  <small
+                                    >{model.providerDisplayName} · {model.billingDomainDisplayName}</small
+                                  >
+                                  {#if model.includedInHeadline === false}
+                                    <small>{t('separateFromHeadline')}</small>
+                                  {/if}
+                                  <small>
+                                    {t('tokens')}: {displayAuthorities(model.authorities)} ·
+                                    {formatReset(model.lastObservedAt)}
+                                  </small>
+                                  <small>
+                                    {modelCostIsReported
+                                      ? t('providerReportedEstimate')
+                                      : t('apiRetailEquivalent')}: {displayAuthorities(
+                                      modelCost.authorities
+                                    )} · {formatReset(modelCost.observedAt)}
+                                  </small>
+                                </span>
+                              </span>
+                              <span class="ranking-value" data-label={t('cost')}>
+                                <strong>
+                                  {modelCost.amount === null
+                                    ? t('notAvailable')
+                                    : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
+                                </strong>
+                              </span>
+                              <span
+                                class="ranking-value ranking-share-value"
+                                data-label={breakdownShareLabel('model')}
                               >
-                              {#if model.includedInHeadline === false}
-                                <small>{t('separateFromHeadline')}</small>
-                              {/if}
+                                <strong>
+                                  {model.includedInHeadline === false
+                                    ? t('headlineShareNotApplicable')
+                                    : formatPercent(modelShare)}
+                                </strong>
+                                {#if modelShare !== null}
+                                  <span
+                                    class="model-share-track"
+                                    data-testid="model-share-meter"
+                                    role="meter"
+                                    aria-label={`${model.model} ${breakdownShareLabel('model')}`}
+                                    aria-valuemin="0"
+                                    aria-valuemax="100"
+                                    aria-valuenow={Math.round(modelShare * 1000) / 10}
+                                  >
+                                    <i
+                                      style={`width: ${Math.max(2, Math.min(100, modelShare * 100))}%`}
+                                    ></i>
+                                  </span>
+                                {/if}
+                              </span>
+                              <span class="ranking-value" data-label={t('tokens')}>
+                                <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
+                                  >{formatCompactNumber(model.tokenTotals.total)}</strong
+                                >
+                              </span>
+                            </button>
+                          </li>
+                        {/each}
+                      </ol>
+                      {#if workbench.modelRanking.unclassified.length > 0}
+                        <div class="unclassified-usage">
+                          <strong>{t('unclassifiedUsage')}</strong>
+                          {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
+                            <span>
+                              {item.providerDisplayName} · {item.billingDomainDisplayName}
+                              {#if item.includedInHeadline === false}
+                                · {t('separateFromHeadline')}{/if}
+                              <b aria-label={tokenValueLabel(item.tokenTotals.total)}
+                                >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
+                              >
                               <small>
-                                {t('tokens')}: {displayAuthorities(model.authorities)} ·
-                                {formatReset(model.lastObservedAt)}
+                                {item.includedInHeadline !== false
+                                  ? formatPercent(item.tokenShare)
+                                  : t('headlineShareNotApplicable')}
                               </small>
                               <small>
-                                {modelCostIsReported
-                                  ? t('providerReportedEstimate')
-                                  : t('apiRetailEquivalent')}: {displayAuthorities(
-                                  modelCost.authorities
-                                )} · {formatReset(modelCost.observedAt)}
+                                {displayAuthorities(item.authorities)} ·
+                                {formatReset(item.lastObservedAt)}
                               </small>
                             </span>
-                          </span>
-                          <span class="ranking-value" data-label={t('cost')}>
-                            <strong>
-                              {modelCost.amount === null
-                                ? t('notAvailable')
-                                : formatMoney(modelCost.amount, modelCost.comparisonCurrency)}
-                            </strong>
-                          </span>
-                          <span
-                            class="ranking-value ranking-share-value"
-                            data-label={breakdownShareLabel('model')}
-                          >
-                            <strong>
-                              {model.includedInHeadline === false
-                                ? t('headlineShareNotApplicable')
-                                : formatPercent(modelShare)}
-                            </strong>
-                            {#if modelShare !== null}
-                              <span
-                                class="model-share-track"
-                                data-testid="model-share-meter"
-                                role="meter"
-                                aria-label={`${model.model} ${breakdownShareLabel('model')}`}
-                                aria-valuemin="0"
-                                aria-valuemax="100"
-                                aria-valuenow={Math.round(modelShare * 1000) / 10}
-                              >
-                                <i style={`width: ${Math.max(2, Math.min(100, modelShare * 100))}%`}
-                                ></i>
-                              </span>
-                            {/if}
-                          </span>
-                          <span class="ranking-value" data-label={t('tokens')}>
-                            <strong aria-label={tokenValueLabel(model.tokenTotals.total)}
-                              >{formatCompactNumber(model.tokenTotals.total)}</strong
-                            >
-                          </span>
-                        </button>
-                      </li>
-                    {/each}
-                  </ol>
-                  {#if workbench.modelRanking.unclassified.length > 0}
-                    <div class="unclassified-usage">
-                      <strong>{t('unclassifiedUsage')}</strong>
-                      {#each workbench.modelRanking.unclassified as item (`${item.providerId}:${item.billingDomainId}`)}
-                        <span>
-                          {item.providerDisplayName} · {item.billingDomainDisplayName}
-                          {#if item.includedInHeadline === false}
-                            · {t('separateFromHeadline')}{/if}
-                          <b aria-label={tokenValueLabel(item.tokenTotals.total)}
-                            >{formatCompactNumber(item.tokenTotals.total)} {t('tokens')}</b
-                          >
-                          <small>
-                            {item.includedInHeadline !== false
-                              ? formatPercent(item.tokenShare)
-                              : t('headlineShareNotApplicable')}
-                          </small>
-                          <small>
-                            {displayAuthorities(item.authorities)} ·
-                            {formatReset(item.lastObservedAt)}
-                          </small>
-                        </span>
-                      {/each}
+                          {/each}
+                        </div>
+                      {/if}
                     </div>
                   {/if}
                 {:else}
@@ -2278,13 +2554,16 @@
     --border: #dce1e9;
     --border-soft: #e8ebf1;
     --button: #ffffff;
-    --selected: #e8ecff;
-    --selected-text: #273c80;
+    --selected: #5b74e6;
+    --selected-text: #ffffff;
     --primary: #647cf0;
     --progress-track: #e2e6ed;
     --shadow-soft: 0 12px 34px rgba(31, 38, 56, 0.08);
     --shadow-raised: 0 18px 48px rgba(31, 38, 56, 0.12);
     --backdrop: rgba(18, 19, 18, 0.45);
+    --success-bg: #e7f8f0;
+    --success-border: #b4e4cd;
+    --success-text: #178a54;
     --warning-bg: #fff8ed;
     --warning-border: #d9b47d;
     --warning-text: #74400f;
@@ -2412,7 +2691,8 @@
   }
 
   .locale-toggle,
-  .settings-toggle {
+  .settings-toggle,
+  .theme-toggle {
     min-height: 38px;
     padding: 0 13px;
     border: 1px solid #2c3342;
@@ -2424,6 +2704,17 @@
 
   .settings-toggle {
     color: #e8ebf2;
+  }
+
+  .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .theme-icon {
+    font-size: 0.85rem;
+    line-height: 1;
   }
 
   .refresh:hover:not(:disabled) {
@@ -2486,96 +2777,6 @@
     border-radius: 26px;
     background: rgba(14, 17, 24, 0.88);
     box-shadow: var(--shadow-soft);
-  }
-
-  .workbench-skeleton {
-    display: grid;
-    gap: 30px;
-  }
-
-  .workbench-data-hidden {
-    display: none !important;
-  }
-
-  .skeleton-overview {
-    display: grid;
-    grid-template-columns: minmax(230px, 0.36fr) minmax(0, 1fr);
-    gap: 38px;
-    min-height: 310px;
-  }
-
-  .skeleton-summary,
-  .skeleton-chart,
-  .skeleton-ranking {
-    display: grid;
-    align-content: start;
-    gap: 12px;
-  }
-
-  .skeleton-summary {
-    padding: 18px 0 16px 12px;
-  }
-
-  .skeleton-chart {
-    padding-top: 14px;
-  }
-
-  .skeleton-block {
-    display: block;
-    border-radius: 8px;
-    background: linear-gradient(
-      100deg,
-      rgba(122, 136, 164, 0.08) 20%,
-      rgba(122, 136, 164, 0.2) 42%,
-      rgba(122, 136, 164, 0.08) 64%
-    );
-    background-size: 220% 100%;
-    animation: skeleton-shimmer 1.25s ease-in-out infinite;
-  }
-
-  .skeleton-headline {
-    width: min(78%, 240px);
-    height: 54px;
-  }
-
-  .skeleton-copy {
-    width: 68%;
-    height: 12px;
-  }
-
-  .skeleton-copy-short {
-    width: 38%;
-  }
-
-  .skeleton-provider {
-    height: 42px;
-    margin-top: 12px;
-  }
-
-  .skeleton-graph {
-    height: 250px;
-    margin-top: 8px;
-  }
-
-  .skeleton-totals {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 18px;
-    padding: 24px 12px 26px;
-    border-top: 1px solid rgba(122, 136, 164, 0.14);
-    border-bottom: 1px solid rgba(122, 136, 164, 0.14);
-  }
-
-  .skeleton-totals .skeleton-block {
-    height: 48px;
-  }
-
-  .skeleton-ranking {
-    padding: 0 12px;
-  }
-
-  .skeleton-row {
-    height: 54px;
   }
 
   .usage-toolbar {
@@ -2650,12 +2851,14 @@
     font-size: 0.7rem;
   }
 
-  .segmented-control button[aria-pressed='true'] {
+  .segmented-control button[aria-pressed='true'],
+  .segmented-control button[aria-selected='true'] {
     background: #29324b;
     color: #eef2ff;
   }
 
   .usage-overview-grid {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(340px, 0.42fr) minmax(0, 1fr);
     gap: 14px;
@@ -2663,6 +2866,7 @@
   }
 
   .usage-summary-board {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(230px, 0.3fr) minmax(0, 1fr);
     gap: 28px;
@@ -2780,6 +2984,7 @@
   }
 
   .model-ranking {
+    position: relative;
     margin-top: 14px;
     padding: 20px;
     border: 1px solid var(--border-soft);
@@ -2802,6 +3007,21 @@
   .ranking-heading h3 {
     color: #e6eaf2;
     font-size: 0.9rem;
+  }
+
+  .treemap-wrap {
+    margin: 2px 0 14px;
+    padding: 12px;
+    border: 1px solid rgba(122, 136, 164, 0.14);
+    border-radius: 14px;
+    background: var(--surface-inset);
+  }
+
+  .treemap-hint {
+    margin: 8px 2px 0;
+    color: var(--muted);
+    font-size: 0.66rem;
+    line-height: 1.4;
   }
 
   .breakdown-header,
@@ -2868,25 +3088,11 @@
     align-items: center;
   }
 
-  .ranking-identity img {
+  .ranking-logo {
+    display: block;
     width: 30px;
     height: 30px;
     padding: 4px;
-    object-fit: contain;
-  }
-
-  .ranking-logo {
-    display: grid;
-    width: 30px;
-    height: 30px;
-    place-items: center;
-  }
-
-  .ranking-logo img {
-    display: block;
-    width: 100%;
-    height: 100%;
-    padding: 3px;
     object-fit: contain;
   }
 
@@ -3042,6 +3248,49 @@
     font-size: 0.74rem;
   }
 
+  /* The refreshing state rides on the panel's top edge so cached content keeps
+     its exact position: an in-flow notice would push every panel child down
+     while a window switch loads. */
+  .panel-progress {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 2px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+    pointer-events: none;
+  }
+
+  .panel-progress::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 32%;
+    border-radius: inherit;
+    background: var(--primary);
+    animation: panel-progress 1.15s ease-in-out infinite;
+  }
+
+  @keyframes panel-progress {
+    from {
+      transform: translateX(-110%);
+    }
+
+    to {
+      transform: translateX(420%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel-progress::after {
+      width: 100%;
+      animation: none;
+    }
+  }
+
   .module-progress {
     margin: 0 0 14px;
     padding: 10px 12px;
@@ -3126,14 +3375,14 @@
     display: grid;
     gap: 7px;
     padding: 14px;
-    border: 1px solid rgba(73, 208, 151, 0.18);
+    border: 1px solid var(--success-border);
     border-radius: 13px;
-    background: rgba(15, 27, 23, 0.7);
+    background: var(--success-bg);
   }
 
   .diagnostics-grid article.diagnostic-degraded {
-    border-color: rgba(242, 164, 89, 0.3);
-    background: rgba(38, 27, 19, 0.72);
+    border-color: var(--warning-border);
+    background: var(--warning-bg);
   }
 
   .diagnostics-grid article > div {
@@ -3144,9 +3393,8 @@
 
   .diagnostics-grid span,
   .diagnostics-grid small,
-  .diagnostics-grid p,
-  .diagnostics-grid code {
-    color: #929baa;
+  .diagnostics-grid p {
+    color: var(--muted);
     font-size: 0.68rem;
   }
 
@@ -3155,7 +3403,7 @@
   }
 
   .diagnostics-grid code {
-    color: #d7b99c;
+    color: var(--warning-text);
     white-space: normal;
   }
 
@@ -3355,6 +3603,119 @@
       transform 180ms ease;
   }
 
+  .provider-card-loading {
+    min-height: 500px;
+  }
+
+  .provider-card-loading > :not(.agent-card-skeleton-overlay):not(.provider-heading) {
+    visibility: hidden;
+  }
+
+  .agent-card-skeleton-overlay {
+    position: absolute;
+    z-index: 2;
+    inset: 72px 0 0;
+    padding: 18px 26px 26px;
+    background: var(--surface);
+  }
+
+  .agent-card-skeleton-content {
+    width: 100%;
+  }
+
+  .agent-skeleton-block {
+    display: block;
+    min-height: 14px;
+    border-radius: 8px;
+    background: linear-gradient(
+      100deg,
+      rgba(122, 136, 164, 0.08) 20%,
+      rgba(122, 136, 164, 0.2) 42%,
+      rgba(122, 136, 164, 0.08) 64%
+    );
+    background-size: 220% 100%;
+    animation: skeleton-shimmer 1.25s ease-in-out infinite;
+  }
+
+  .agent-skeleton-connection {
+    display: flex;
+    min-height: 50px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--success-border) 55%, var(--border));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--success-bg) 50%, var(--surface));
+  }
+
+  .agent-skeleton-connection span {
+    display: grid;
+    width: 56%;
+    gap: 6px;
+  }
+
+  .agent-skeleton-connection span .agent-skeleton-block:first-child {
+    width: 62%;
+  }
+
+  .agent-skeleton-connection span .agent-skeleton-block:last-child {
+    width: 82%;
+    min-height: 10px;
+  }
+
+  .agent-skeleton-connection > .agent-skeleton-block {
+    width: 72px;
+    min-height: 30px;
+    border-radius: 9px;
+  }
+
+  .agent-skeleton-section-label {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(122, 136, 164, 0.13);
+  }
+
+  .agent-skeleton-section-label .agent-skeleton-block {
+    width: 76px;
+    min-height: 12px;
+  }
+
+  .agent-skeleton-quota-list {
+    margin-top: 18px;
+  }
+
+  .agent-skeleton-quota-row + .agent-skeleton-quota-row {
+    margin-top: 20px;
+  }
+
+  .agent-skeleton-quota-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .agent-skeleton-quota-copy .agent-skeleton-block:first-child {
+    width: 58%;
+  }
+
+  .agent-skeleton-quota-copy .agent-skeleton-block:last-child {
+    width: 24%;
+    min-height: 11px;
+  }
+
+  .agent-skeleton-progress {
+    min-height: 8px;
+    margin: 10px 0 9px;
+    border-radius: 999px;
+  }
+
+  .agent-skeleton-meta {
+    width: 62%;
+    min-height: 10px;
+  }
+
   .provider-card::before {
     position: absolute;
     inset: 0 20px auto;
@@ -3368,6 +3729,12 @@
       border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
       box-shadow: var(--shadow-raised);
       transform: translateY(-2px);
+    }
+
+    .provider-card-loading:hover {
+      border-color: var(--border);
+      box-shadow: var(--shadow-soft);
+      transform: none;
     }
   }
 
@@ -3416,20 +3783,10 @@
   }
 
   .provider-logo {
-    display: grid;
-    place-items: center;
+    display: block;
     width: 46px;
     height: 46px;
     flex: 0 0 46px;
-    padding: 5px;
-    border-radius: 12px;
-    background: transparent;
-  }
-
-  .provider-logo img {
-    display: block;
-    width: 100%;
-    height: 100%;
     object-fit: contain;
   }
 
@@ -3457,19 +3814,25 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #4bd29a;
-    box-shadow: 0 0 10px rgba(75, 210, 154, 0.45);
+    background: var(--success-text);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--success-text) 45%, transparent);
   }
 
   .freshness[data-status='unavailable'] span {
     background: #6e7480;
   }
 
+  .freshness[data-status='updating'] span {
+    background: var(--primary);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 55%, transparent);
+    animation: status-pulse 1s ease-in-out infinite alternate;
+  }
+
   .coverage {
     padding: 6px 10px;
-    border: 1px solid rgba(77, 207, 153, 0.22);
+    border: 1px solid var(--success-border);
     border-radius: 999px;
-    color: #7ee2b7;
+    color: var(--success-text);
     font-size: 0.7rem;
     text-transform: uppercase;
   }
@@ -3557,29 +3920,29 @@
     gap: 12px;
     margin: 18px 0 4px;
     padding: 10px 12px;
-    border: 1px solid rgba(73, 208, 151, 0.18);
+    border: 1px solid var(--success-border);
     border-radius: 14px;
-    background: color-mix(in srgb, #4bd29a 7%, var(--surface-subtle));
+    background: var(--success-bg);
   }
 
   .connected-summary > span {
     display: grid;
     gap: 2px;
-    color: #72ddaf;
+    color: var(--success-text);
     font-size: 0.72rem;
   }
 
   .connected-summary small {
-    color: #859188;
+    color: var(--muted);
   }
 
   .connected-summary button {
     min-height: 30px;
     padding: 0 10px;
-    border: 1px solid #303747;
+    border: 1px solid var(--border);
     border-radius: 9px;
     background: transparent;
-    color: #aeb6c4;
+    color: var(--text);
     cursor: pointer;
     font-size: 0.7rem;
   }
@@ -3806,19 +4169,27 @@
 
   .settings-content {
     display: grid;
-    gap: 18px;
+    gap: 16px;
     padding: 24px 30px 48px;
   }
 
   .settings-content > section {
-    padding: 18px;
-    border: 1px solid rgba(122, 136, 164, 0.17);
-    border-radius: 17px;
-    background: rgba(14, 17, 24, 0.78);
+    padding: 20px;
+    border: 1px solid var(--border-soft);
+    border-radius: 16px;
+    background: var(--surface);
   }
 
   .settings-section-heading {
-    margin-bottom: 14px;
+    display: grid;
+    gap: 6px;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .settings-drawer .settings-content > section {
+    background: var(--surface-subtle);
   }
 
   .settings-section-heading h2,
@@ -3827,7 +4198,6 @@
   }
 
   .settings-section-heading p {
-    margin-top: 6px;
     color: #929baa;
     font-size: 0.74rem;
     line-height: 1.45;
@@ -3895,18 +4265,20 @@
 
   /* Theme surfaces stay neutral so Provider identity comes from official artwork and data. */
   .token-money-workbench,
-  .privacy-section,
-  .monitoring-section,
   .settings-content > section {
     border-color: var(--border);
     background: var(--surface);
+  }
+
+  .settings-drawer .settings-content > section {
+    background: var(--surface-subtle);
   }
 
   .inline-connection,
   .settings-connections article,
   .model-detail-summary span {
     border-color: var(--border-soft);
-    background: var(--surface-subtle);
+    background: var(--surface-inset);
   }
 
   .segmented-control,
@@ -3918,7 +4290,8 @@
 
   .refresh,
   .locale-toggle,
-  .settings-toggle {
+  .settings-toggle,
+  .theme-toggle {
     border-color: var(--border);
     background: var(--button);
     color: var(--text);
@@ -3987,6 +4360,7 @@
   }
 
   .segmented-control button[aria-pressed='true'],
+  .segmented-control button[aria-selected='true'],
   .history-toolbar button[aria-pressed='true'],
   .domain-tabs button[aria-selected='true'] {
     background: var(--selected);
@@ -4030,37 +4404,38 @@
     background: color-mix(in srgb, var(--surface) 94%, transparent);
   }
 
-  @media (prefers-color-scheme: dark) {
-    :global(html) {
-      --page: #090c11;
-      --surface: #12161d;
-      --surface-subtle: #171c25;
-      --surface-inset: #0d1118;
-      --text: #e8ecf3;
-      --text-strong: #ffffff;
-      --muted: #9aa4b4;
-      --border: #2b3441;
-      --border-soft: #222a35;
-      --button: #151a22;
-      --selected: #2b3552;
-      --selected-text: #f2f5ff;
-      --primary: #8398ff;
-      --progress-track: #272e39;
-      --shadow-soft: 0 16px 42px rgba(0, 0, 0, 0.2);
-      --shadow-raised: 0 22px 58px rgba(0, 0, 0, 0.32);
-      --backdrop: rgba(3, 5, 7, 0.7);
-      --warning-bg: #211912;
-      --warning-border: #684722;
-      --warning-text: #f0bd83;
-      --danger-bg: #241416;
-      --danger-border: #71363a;
-      --danger-text: #ffaaa5;
-      --focus: #9bb1ff;
-    }
+  :global(html[data-theme='dark']) {
+    --page: #090c11;
+    --surface: #12161d;
+    --surface-subtle: #171c25;
+    --surface-inset: #0d1118;
+    --text: #e8ecf3;
+    --text-strong: #ffffff;
+    --muted: #9aa4b4;
+    --border: #2b3441;
+    --border-soft: #222a35;
+    --button: #151a22;
+    --selected: #2b3552;
+    --selected-text: #f2f5ff;
+    --primary: #8398ff;
+    --progress-track: #272e39;
+    --shadow-soft: 0 16px 42px rgba(0, 0, 0, 0.2);
+    --shadow-raised: 0 22px 58px rgba(0, 0, 0, 0.32);
+    --backdrop: rgba(3, 5, 7, 0.7);
+    --success-bg: #10241d;
+    --success-border: #1e5c43;
+    --success-text: #64dca8;
+    --warning-bg: #211912;
+    --warning-border: #684722;
+    --warning-text: #f0bd83;
+    --danger-bg: #241416;
+    --danger-border: #71363a;
+    --danger-text: #ffaaa5;
+    --focus: #9bb1ff;
+  }
 
-    :global(body)::before {
-      opacity: 0.78;
-    }
+  :global(html[data-theme='dark']) :global(body)::before {
+    opacity: 0.78;
   }
 
   @media (min-width: 1640px) {
@@ -4070,6 +4445,11 @@
 
     .provider-card {
       padding: 20px;
+    }
+
+    .agent-card-skeleton-overlay {
+      inset-block-start: 66px;
+      padding-inline: 20px;
     }
   }
 
@@ -4091,6 +4471,16 @@
     }
     to {
       background-position: -100% 0;
+    }
+  }
+
+  @keyframes status-pulse {
+    from {
+      opacity: 0.45;
+    }
+
+    to {
+      opacity: 1;
     }
   }
 
@@ -4146,7 +4536,8 @@
 
     .refresh,
     .locale-toggle,
-    .settings-toggle {
+    .settings-toggle,
+    .theme-toggle {
       min-height: 36px;
     }
 
@@ -4174,8 +4565,7 @@
       border-radius: 20px;
     }
 
-    .usage-overview-grid,
-    .skeleton-overview {
+    .usage-overview-grid {
       grid-template-columns: 1fr;
       gap: 16px;
     }
@@ -4206,10 +4596,6 @@
     }
 
     .usage-totals dl {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .skeleton-totals {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
@@ -4285,7 +4671,7 @@
       animation: none !important;
     }
 
-    .skeleton-block {
+    .agent-skeleton-block {
       animation: none !important;
     }
   }

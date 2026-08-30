@@ -5,6 +5,7 @@ import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 
 import type {
+  AgentProviderIndex,
   BalanceRecord,
   BillingHistory,
   BillingDomainOverview,
@@ -1034,6 +1035,36 @@ export class SqliteUsageRepository implements UsageRepository {
       providers: overviews,
       riskSummary
     };
+  }
+
+  getAgentProviderIndex(now: Date): AgentProviderIndex {
+    const providers = this.#database
+      .prepare('SELECT id, display_name FROM providers ORDER BY id')
+      .all() as unknown as Array<Pick<ProviderRow, 'id' | 'display_name'>>;
+    return {
+      generatedAt: now.toISOString(),
+      providers: providers
+        .filter(
+          (provider) =>
+            provider.id !== 'opencode' && (!this.#hideDemoProvider || provider.id !== 'demo')
+        )
+        .map((provider) => ({ id: provider.id, displayName: provider.display_name }))
+    };
+  }
+
+  getProviderOverview(
+    now: Date,
+    providerId: string,
+    query: UsageQuery = {}
+  ): ProviderOverview | null {
+    if (this.#hideDemoProvider && providerId === 'demo') return null;
+    const provider = this.#database
+      .prepare(
+        `SELECT id, display_name, last_success_at, last_error, last_error_code, last_recovery
+         FROM providers WHERE id = ?`
+      )
+      .get(providerId) as unknown as ProviderRow | undefined;
+    return provider ? this.#getProviderOverview(provider, now, query) : null;
   }
 
   saveExchangeRateSnapshot(snapshot: ExchangeRateSnapshot): void {

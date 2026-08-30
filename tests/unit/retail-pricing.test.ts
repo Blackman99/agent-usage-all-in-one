@@ -450,6 +450,50 @@ describe('API retail-equivalent pricing', () => {
     });
   });
 
+  it('publishes OpenCode Go cache writes as free when the provider does not bill them', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'deepseek-cache-write-free',
+          model: 'opencode-go/deepseek-v4-flash-vision-exp',
+          billingDomainId: 'go-subscription',
+          observedAt: '2026-08-27T00:30:00.000Z',
+          inputTokens: 400_000,
+          outputTokens: 100_000,
+          reasoningTokens: 0,
+          cacheReadTokens: 71_000,
+          cacheWriteTokens: 500,
+          tokenSemantics: {
+            reasoning: 'separate',
+            cacheRead: 'separate',
+            cacheWrite: 'separate'
+          }
+        }),
+        { providerId: 'opencode-go', domainId: 'go-subscription', domainName: 'OpenCode Go' }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toEqual({
+      observationId: 'deepseek-cache-write-free',
+      status: 'priced',
+      reason: null,
+      pricedTokens: 571_500
+    });
+    expect(result.costs[0]).toMatchObject({
+      amount: 0.154497,
+      pricedTokens: 571_500,
+      lineItems: expect.arrayContaining([
+        expect.objectContaining({
+          tokenKind: 'cache-write',
+          tokens: 500,
+          ratePerMillion: 0,
+          amount: 0
+        })
+      ])
+    });
+  });
+
   it('pins every supported OpenCode Go model to reviewed repository history', () => {
     const expectedModels = [
       'deepseek-v4-flash',

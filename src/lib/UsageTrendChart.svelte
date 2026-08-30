@@ -7,6 +7,7 @@
 
   import type { HistoryWindow, WorkbenchTrendBucket, WorkbenchTrendSegment } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
+  import { THEME_EVENT } from '$lib/theme.js';
   import {
     MINIMUM_TREND_BUCKETS,
     TREND_AXIS_LABEL_FALLBACK,
@@ -45,7 +46,6 @@
   let chartRoot: HTMLElement | null = null;
   let chart: ECharts | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let colorScheme: MediaQueryList | null = null;
   let trendViewportStart = 0;
   let trendViewportSize: number | null = null;
   let trendHoverIndex: number | null = null;
@@ -227,11 +227,9 @@
     chart.getDom().setAttribute('aria-hidden', 'true');
     resizeObserver = new ResizeObserver(() => chart?.resize());
     resizeObserver.observe(chartEl);
-    colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
-    colorScheme.addEventListener('change', syncChartTheme);
+    window.addEventListener(THEME_EVENT, syncChartTheme);
     return () => {
-      colorScheme?.removeEventListener('change', syncChartTheme);
-      colorScheme = null;
+      window.removeEventListener(THEME_EVENT, syncChartTheme);
       resizeObserver?.disconnect();
       resizeObserver = null;
       chart?.dispose();

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { tick } from 'svelte';
   import { CustomChart } from 'echarts/charts';
   import {
     AriaComponent,
@@ -69,7 +69,7 @@
   $: rangeLabel = formatRange(timeline.range.startMs, timeline.range.endMs);
   $: chartHeight = Math.max(188, 70 + timeline.lanes.length * 48);
   $: chartOption = buildChartOption(timeline, theme, locale, timeZone, mode, now);
-  $: if (chart) void renderChart();
+  $: if (chart) void renderChart(chartOption);
 
   function t(key: MessageKey): string {
     return translate(locale, key);
@@ -372,29 +372,33 @@
     };
   }
 
-  async function renderChart(): Promise<void> {
+  async function renderChart(option: ReturnType<typeof buildChartOption>): Promise<void> {
     if (!chart) return;
-    chart.setOption(chartOption as never, { notMerge: true, lazyUpdate: false });
+    chart.setOption(option as never, { notMerge: true, lazyUpdate: false });
     await tick();
     chart.resize();
   }
 
-  onMount(() => {
-    if (!chartEl) return;
+  function mountChart(node: HTMLDivElement) {
+    chartEl = node;
     syncChartTheme();
-    chart = init(chartEl, undefined, { renderer: 'canvas', useDirtyRect: true });
+    chart = init(node, undefined, { renderer: 'canvas', useDirtyRect: true });
     chart.getDom().setAttribute('aria-hidden', 'true');
     resizeObserver = new ResizeObserver(() => chart?.resize());
-    resizeObserver.observe(chartEl);
+    resizeObserver.observe(node);
     window.addEventListener(THEME_EVENT, syncChartTheme);
-    return () => {
-      window.removeEventListener(THEME_EVENT, syncChartTheme);
-      resizeObserver?.disconnect();
-      resizeObserver = null;
-      chart?.dispose();
-      chart = null;
+    void renderChart(chartOption);
+    return {
+      destroy() {
+        window.removeEventListener(THEME_EVENT, syncChartTheme);
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        chart?.dispose();
+        chart = null;
+        if (chartEl === node) chartEl = null;
+      }
     };
-  });
+  }
 </script>
 
 {#if weeklyTimeline.lanes.length > 0}
@@ -443,6 +447,23 @@
       </div>
     </header>
 
+    <div class="quota-timeline-legend" aria-hidden="true">
+      <ul class="quota-timeline-legend-items">
+        <li class="quota-timeline-legend-item">
+          <span class="quota-timeline-swatch swatch-solid"></span>
+          {t('quotaTimelineCurrent')}
+        </li>
+        <li class="quota-timeline-legend-item">
+          <span class="quota-timeline-swatch swatch-outline"></span>
+          {t('quotaTimelineElapsed')}
+        </li>
+        <li class="quota-timeline-legend-item">
+          <span class="quota-timeline-swatch swatch-dashed"></span>
+          {t('quotaTimelineUpcoming')}
+        </li>
+      </ul>
+    </div>
+
     {#if timeline.lanes.length === 0}
       <p class="quota-timeline-empty" role="status">{t('quotaTimelineEmpty')}</p>
     {:else}
@@ -450,6 +471,7 @@
         <div
           class="quota-timeline-chart"
           bind:this={chartEl}
+          use:mountChart
           style={`height: ${chartHeight}px`}
         ></div>
       </div>
@@ -584,6 +606,60 @@
     place-items: center;
     color: var(--muted);
     font-size: 0.76rem;
+  }
+
+  .quota-timeline-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 28px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--surface-inset);
+  }
+
+  .quota-timeline-legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .quota-timeline-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  .quota-timeline-swatch {
+    display: inline-block;
+    flex: none;
+    width: 38px;
+    height: 12px;
+    border-radius: 6px;
+  }
+
+  .swatch-solid {
+    background: color-mix(in srgb, var(--primary) 60%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 80%, transparent);
+  }
+
+  .swatch-outline {
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+
+  .swatch-dashed {
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--primary) 45%, transparent);
   }
 
   .quota-timeline-data {

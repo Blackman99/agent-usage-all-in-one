@@ -1,84 +1,78 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { PieChart, type PieSeriesOption } from 'echarts/charts';
+  import { TreemapChart, type TreemapSeriesOption } from 'echarts/charts';
   import {
     AriaComponent,
-    LegendComponent,
     TitleComponent,
     TooltipComponent,
     type AriaComponentOption,
-    type LegendComponentOption,
     type TitleComponentOption,
     type TooltipComponentOption
   } from 'echarts/components';
   import { init, use, type ComposeOption, type ECharts } from 'echarts/core';
   import { CanvasRenderer } from 'echarts/renderers';
 
-  import type { DataAuthority, WorkbenchProviderSummary } from '$core/types.js';
+  import type { DataAuthority, WorkbenchModelEntry } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
-  import { THEME_EVENT } from '$lib/theme.js';
   import {
-    buildProviderShareChartOption,
-    buildProviderShareEntries,
-    type ProviderShareMetric,
-    type ProviderShareTheme
-  } from '$lib/provider-share.js';
+    buildModelBreakdownEntries,
+    buildModelBreakdownOption,
+    type ModelBreakdownMetric,
+    type ModelBreakdownTheme
+  } from '$lib/model-breakdown.js';
+  import { THEME_EVENT } from '$lib/theme.js';
   import { trendSegmentColor } from '$lib/usage-trend.js';
 
-  use([PieChart, LegendComponent, TooltipComponent, TitleComponent, AriaComponent, CanvasRenderer]);
+  use([TreemapChart, TooltipComponent, TitleComponent, AriaComponent, CanvasRenderer]);
 
-  type ProviderChartOption = ComposeOption<
-    | PieSeriesOption
-    | LegendComponentOption
-    | TooltipComponentOption
-    | TitleComponentOption
-    | AriaComponentOption
+  type ModelBreakdownChartOption = ComposeOption<
+    TreemapSeriesOption | TooltipComponentOption | TitleComponentOption | AriaComponentOption
   >;
 
-  export let providers: WorkbenchProviderSummary[];
-  export let metric: ProviderShareMetric;
+  export let models: WorkbenchModelEntry[];
+  export let metric: ModelBreakdownMetric;
   export let currency: string;
   export let locale: Locale = detectLocale('');
   export let formatUsageMetric: (
     value: number | null,
     currency: string,
-    metric: ProviderShareMetric
+    metric: ModelBreakdownMetric
   ) => string;
   export let formatPercent: (value: number | null) => string;
   export let displayAuthorities: (authorities: DataAuthority[] | undefined) => string;
   export let formatReset: (value: string | null) => string;
+  export let onSelect: (modelId: string) => void;
 
   let chartEl: HTMLDivElement | null = null;
   let chartRoot: HTMLElement | null = null;
   let chart: ECharts | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let theme: ProviderShareTheme = {
+  let theme: ModelBreakdownTheme = {
     text: '#f4f6fb',
     muted: '#9aa4b4',
     surface: '#171c25',
     border: '#2b3441'
   };
 
-  $: entries = buildProviderShareEntries(
-    providers,
+  $: entries = buildModelBreakdownEntries(
+    models,
     metric,
     trendSegmentColor,
     (value) => formatUsageMetric(value, currency, metric),
     formatPercent,
-    (provider, selectedMetric) => {
-      const authorities =
-        selectedMetric === 'tokens' ? provider.authorities : provider.retailEquivalent.authorities;
-      const observedAt =
-        selectedMetric === 'tokens'
-          ? provider.lastObservedAt
-          : provider.retailEquivalent.observedAt;
-      return `${t('source')}: ${displayAuthorities(authorities)} · ${formatReset(observedAt)}`;
+    (model, selectedMetric) => {
+      if (selectedMetric === 'tokens') {
+        return `${t('source')}: ${displayAuthorities(model.authorities)} · ${formatReset(model.lastObservedAt)}`;
+      }
+      const cost =
+        model.retailEquivalent.amount !== null ? model.retailEquivalent : model.reportedEstimate;
+      return `${t('source')}: ${displayAuthorities(cost.authorities)} · ${formatReset(cost.observedAt)}`;
     }
   );
-  $: chartOption = buildProviderShareChartOption(
+  $: chartOption = buildModelBreakdownOption(
     entries,
     theme,
-    t('notAvailable'),
+    { notAvailable: t('notAvailable'), separateFromHeadline: t('separateFromHeadline') },
     !prefersReducedMotion()
   );
   $: if (chart) void renderChart(chartOption);
@@ -112,14 +106,14 @@
     theme = {
       text: resolvedCssColor(source, '--text-strong', theme.text),
       muted: resolvedCssColor(source, '--muted', theme.muted),
-      surface: resolvedCssColor(source, '--surface-subtle', theme.surface),
+      surface: resolvedCssColor(source, '--surface', theme.surface),
       border: resolvedCssColor(source, '--border', theme.border)
     };
   }
 
-  async function renderChart(option: ReturnType<typeof buildProviderShareChartOption>) {
+  async function renderChart(option: ReturnType<typeof buildModelBreakdownOption>) {
     if (!chart) return;
-    chart.setOption(option as unknown as ProviderChartOption, {
+    chart.setOption(option as unknown as ModelBreakdownChartOption, {
       notMerge: true,
       lazyUpdate: false
     });
@@ -131,7 +125,12 @@
     if (!chartEl) return;
     syncChartTheme();
     chart = init(chartEl, undefined, { renderer: 'canvas', useDirtyRect: true });
-    chart.getDom().setAttribute('aria-hidden', 'true');
+    chart.on('click', (parameters) => {
+      const data = parameters?.data;
+      const modelId =
+        data && typeof data === 'object' ? (data as { modelId?: unknown }).modelId : null;
+      if (typeof modelId === 'string') onSelect(modelId);
+    });
     resizeObserver = new ResizeObserver(() => chart?.resize());
     resizeObserver.observe(chartEl);
     window.addEventListener(THEME_EVENT, syncChartTheme);
@@ -145,61 +144,28 @@
   });
 </script>
 
-<div class="provider-share-chart-root" bind:this={chartRoot}>
+<div class="model-breakdown-treemap-root" bind:this={chartRoot}>
   <div
-    class="provider-share-echarts"
+    class="model-breakdown-echarts"
     bind:this={chartEl}
-    data-testid="provider-share-chart"
+    data-testid="model-breakdown-treemap"
     data-chart-engine="echarts"
+    aria-label={t('modelBreakdownTreemap')}
   ></div>
-  <div class="provider-share-data">
-    <table aria-label={t('providerShare')}>
-      <thead>
-        <tr>
-          <th>{t('providersLabel')}</th>
-          <th>{metric === 'tokens' ? t('tokens') : t('cost')}</th>
-          <th>{metric === 'tokens' ? t('tokenShare') : t('costShare')}</th>
-          <th>{t('providerEvidence')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each entries as entry (entry.key)}
-          <tr>
-            <td>{entry.name} · {entry.billingDomainDisplayName}</td>
-            <td>{entry.formattedValue}</td>
-            <td>{entry.formattedShare}</td>
-            <td>{entry.formattedEvidence}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </div>
 </div>
 
 <style>
-  .provider-share-chart-root {
+  .model-breakdown-treemap-root {
     min-width: 0;
   }
 
-  .provider-share-echarts {
+  .model-breakdown-echarts {
     width: 100%;
-    height: 282px;
-  }
-
-  .provider-share-data {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    border: 0;
-    white-space: nowrap;
+    height: clamp(280px, 36vh, 420px);
   }
 
   @media (max-width: 680px) {
-    .provider-share-echarts {
+    .model-breakdown-echarts {
       height: 300px;
     }
   }

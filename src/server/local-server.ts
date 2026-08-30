@@ -138,6 +138,27 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
         return;
       }
 
+      if (request.method === 'GET' && requestUrl.pathname === '/api/overview/providers') {
+        sendJson(response, 200, await options.application.getAgentProviderIndex());
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/overview/providers/')) {
+        const providerId = decodeURIComponent(
+          requestUrl.pathname.slice('/api/overview/providers/'.length)
+        );
+        const provider = await options.application.getProviderOverview(
+          providerId,
+          parseUsageQuery(requestUrl)
+        );
+        if (!provider) {
+          sendJson(response, 404, { error: 'provider-not-found' });
+          return;
+        }
+        sendJson(response, 200, provider);
+        return;
+      }
+
       if (request.method === 'GET' && requestUrl.pathname === '/api/overview') {
         const query = parseUsageQuery(requestUrl);
         sendJson(response, 200, await options.application.getOverview(query));
@@ -147,6 +168,11 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
       if (request.method === 'POST' && requestUrl.pathname === '/api/refresh') {
         if (authentication === 'browser' && request.headers.origin !== origin) {
           sendJson(response, 403, { error: 'invalid-origin' });
+          return;
+        }
+        if (requestUrl.searchParams.get('background') === 'true') {
+          void options.application.startBackgroundProcessing();
+          sendJson(response, 202, { accepted: true });
           return;
         }
         await options.application.refresh({

@@ -24,25 +24,23 @@ function billingDomainScope(providerId: string, billingDomainId: string): string
   return `${providerId}:${billingDomainId}`;
 }
 
+// Evidence identity deliberately excludes last-success timestamps: a partially
+// successful collection moves them while the same problem persists, and a
+// timestamped signature would rearm recovery after every refresh.
 function refreshableFreshnessSource(
   scope: string,
   status: 'fresh' | 'stale' | 'unavailable',
-  lastSuccessAt: string | null,
   rateLimited: boolean
 ): string[] {
   return !rateLimited && (status === 'stale' || status === 'unavailable')
-    ? [`${scope}:freshness:${status}:${lastSuccessAt ?? 'unknown'}`]
+    ? [`${scope}:freshness:${status}`]
     : [];
 }
 
-function refreshableHealthSource(
-  scope: string,
-  errorCode: string | null,
-  lastSuccessAt: string | null
-): string[] {
+function refreshableHealthSource(scope: string, errorCode: string | null): string[] {
   const category = automaticRefreshCategory(errorCode);
   return category && automaticallyRefreshedCategories.has(category)
-    ? [`${scope}:health:${category}:${lastSuccessAt ?? 'unknown'}`]
+    ? [`${scope}:health:${category}`]
     : [];
 }
 
@@ -92,17 +90,12 @@ export function automaticRecoverySignature(
       ...refreshableFreshnessSource(
         `provider:${provider.id}`,
         provider.freshness.status,
-        provider.freshness.lastSuccessAt,
         providerRateLimited
       )
     ];
     if (!providerRateLimited) {
       providerSources.push(
-        ...refreshableHealthSource(
-          `provider:${provider.id}`,
-          provider.health.errorCode,
-          provider.freshness.lastSuccessAt
-        )
+        ...refreshableHealthSource(`provider:${provider.id}`, provider.health.errorCode)
       );
     }
     const domainSources = provider.billingDomains.flatMap((domain) => {
@@ -116,16 +109,11 @@ export function automaticRecoverySignature(
         ...refreshableFreshnessSource(
           `domain:${provider.id}:${domain.id}`,
           freshness.status,
-          freshness.lastSuccessAt,
           domainRateLimited
         ),
         ...(domainRateLimited
           ? []
-          : refreshableHealthSource(
-              `domain:${provider.id}:${domain.id}`,
-              health.errorCode,
-              freshness.lastSuccessAt
-            ))
+          : refreshableHealthSource(`domain:${provider.id}:${domain.id}`, health.errorCode))
       ];
     });
     return [...providerSources, ...domainSources];
@@ -145,7 +133,7 @@ export function automaticRecoverySignature(
     )
     .map(
       (diagnostic) =>
-        `diagnostic:${diagnostic.id}:${diagnostic.billingDomainId ?? 'provider'}:${diagnostic.category}:${diagnostic.lastSuccessAt ?? 'unknown'}`
+        `diagnostic:${diagnostic.id}:${diagnostic.billingDomainId ?? 'provider'}:${diagnostic.category}`
     );
   const signature = [...new Set([...automaticSources, ...diagnosticSources])].sort();
   return signature.length > 0 ? signature.join('|') : null;
@@ -173,7 +161,14 @@ export function createAutomaticRecoveryController(refresh: () => void | Promise<
         timer = null;
         return;
       }
-      if (refreshing || timer || signature === lastSignature) return;
+      if (timer) return;
+      // A refresh collects every connector, so evidence observed while one is in
+      // flight is already covered by it and must not rearm recovery afterwards.
+      if (refreshing) {
+        lastSignature = signature;
+        return;
+      }
+      if (signature === lastSignature) return;
       lastSignature = signature;
       timer = setTimeout(() => {
         timer = null;

@@ -712,20 +712,26 @@ function priceObservation(
           }
         ].filter((item) => item.tokens > 0)
       : null;
-  if (
+  // A null cache-write rate with no explicit write tiers means the provider does
+  // not bill cache writes at all (for example OpenCode Go DeepSeek V4, which
+  // documents Cached Write as not charged). Treat those tokens as free instead
+  // of refusing the whole observation. Models with tiered cache-write rates stay
+  // ambiguous until the transcript provides the 5-minute / 1-hour split.
+  const cacheWriteFree =
     cacheWriteTokens > 0 &&
+    !exactCacheWriteItems &&
     entry.ratesPerMillion['cache-write'] === null &&
-    !exactCacheWriteItems
-  ) {
-    return unavailable('pricing-tier-ambiguous');
-  }
-  if (cacheWriteTokens > 0 && !exactCacheWriteItems) {
+    !entry.cacheWriteRatesPerMillion;
+  const cacheWriteBillable = cacheWriteTokens > 0 && !exactCacheWriteItems && !cacheWriteFree;
+  if (cacheWriteBillable) {
     billableTokens.push({ tokenKind: 'cache-write', tokens: cacheWriteTokens });
   }
   const nonZero = billableTokens.filter((item) => item.tokens > 0);
   if (nonZero.some((item) => entry.ratesPerMillion[item.tokenKind] === null)) {
     return unavailable(
-      normalized.cacheWriteTokens > 0 ? 'pricing-tier-ambiguous' : 'token-kinds-incomplete'
+      normalized.cacheWriteTokens > 0 && !cacheWriteFree
+        ? 'pricing-tier-ambiguous'
+        : 'token-kinds-incomplete'
     );
   }
   const lineItems: RetailPriceLineItem[] = nonZero.map((item) => {
@@ -743,6 +749,14 @@ function priceObservation(
         amount: preciseMoney((item.tokens * item.ratePerMillion) / 1_000_000)
       }))
     );
+  }
+  if (cacheWriteFree) {
+    lineItems.push({
+      tokenKind: 'cache-write',
+      tokens: cacheWriteTokens,
+      ratePerMillion: 0,
+      amount: 0
+    });
   }
   const pricedTokens = lineItems.reduce((total, item) => total + item.tokens, 0);
   if (pricedTokens !== normalized.recordedTokens) return unavailable('token-kinds-incomplete');

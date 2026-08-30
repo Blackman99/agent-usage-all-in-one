@@ -29,17 +29,47 @@ const freshOverview = {
   ]
 } as unknown as UsageOverview;
 
-function overviewWithHealthError(errorCode: string): UsageOverview {
+function overviewWithHealthError(
+  errorCode: string,
+  lastSuccessAt = '2026-08-28T02:00:00.000Z'
+): UsageOverview {
   return {
     providers: [
       {
         id: 'claude-code',
-        freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
+        freshness: { status: 'fresh', lastSuccessAt },
         health: { status: 'degraded', errorCode },
         billingDomains: []
       }
     ]
   } as unknown as UsageOverview;
+}
+
+function staleOverviewCollectedAt(lastSuccessAt: string): UsageOverview {
+  return {
+    providers: [
+      {
+        id: 'grok',
+        freshness: { status: 'stale', lastSuccessAt },
+        health: { status: 'healthy', errorCode: null },
+        billingDomains: []
+      }
+    ]
+  } as unknown as UsageOverview;
+}
+
+function unavailableDiagnostics(lastSuccessAt: string): DoctorReport {
+  return {
+    connectors: [
+      {
+        id: 'claude-code',
+        providerId: 'claude-code',
+        billingDomainId: 'subscription',
+        category: 'unavailable',
+        lastSuccessAt
+      }
+    ]
+  } as unknown as DoctorReport;
 }
 
 function overviewWithFreshness(
@@ -130,6 +160,60 @@ describe('automatic recovery', () => {
     expect(refresh).toHaveBeenCalledTimes(2);
     expect(isAutomaticallyManagedCategory('rate-limited')).toBe(true);
     expect(isAutomaticallyManagedCategory('unauthorized')).toBe(false);
+  });
+
+  it('does not rearm when the same evidence returns with a newer last success', async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn();
+    const controller = createAutomaticRecoveryController(refresh);
+
+    controller.schedule(
+      overviewWithHealthError('claude-subscription-quota-unavailable'),
+      unavailableDiagnostics('2026-08-29T12:52:56.804Z'),
+      false
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    controller.schedule(
+      overviewWithHealthError('claude-subscription-quota-unavailable', '2026-08-29T13:00:52.793Z'),
+      unavailableDiagnostics('2026-08-29T13:00:52.793Z'),
+      false
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not rearm when a stale provider collects again and stays stale', async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn();
+    const controller = createAutomaticRecoveryController(refresh);
+
+    controller.schedule(staleOverview, null, false);
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    controller.schedule(staleOverviewCollectedAt('2026-08-29T13:00:52.793Z'), null, false);
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts evidence observed during an in-flight refresh as already attempted', async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn();
+    const controller = createAutomaticRecoveryController(refresh);
+
+    controller.schedule(staleOverview, null, false);
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    controller.schedule(staleOverview, staleDiagnostics, true);
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    controller.schedule(staleOverview, staleDiagnostics, false);
+    await vi.runOnlyPendingTimersAsync();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('retries freshness-only unavailable evidence', async () => {

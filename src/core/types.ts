@@ -491,6 +491,11 @@ export interface UsageOverview {
   };
 }
 
+export interface AgentProviderIndex {
+  generatedAt: string;
+  providers: Array<Pick<ProviderOverview, 'id' | 'displayName'>>;
+}
+
 export type WorkbenchCostPurpose = 'actual' | 'reported-estimate' | 'retail-equivalent';
 
 export interface WorkbenchNativeAmount {
@@ -787,6 +792,8 @@ export interface UsageRepository {
   saveSnapshot(snapshot: ConnectorSnapshot, options?: { preserveFailure?: boolean }): void;
   recordFailure(provider: ProviderIdentity, failedAt: string, failure: ConnectorFailure): void;
   getOverview(now: Date, query?: UsageQuery): UsageOverview;
+  getAgentProviderIndex?(now: Date): AgentProviderIndex;
+  getProviderOverview?(now: Date, providerId: string, query?: UsageQuery): ProviderOverview | null;
   saveExchangeRateSnapshot(snapshot: ExchangeRateSnapshot): void;
   getConnectorRuntimeStates(): ConnectorRuntimeState[];
   saveConnectorRuntimeState(state: ConnectorRuntimeState): void;

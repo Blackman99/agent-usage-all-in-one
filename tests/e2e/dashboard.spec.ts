@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 let home: string;
 let launchUrl: string;
@@ -28,6 +28,339 @@ test.afterAll(async () => {
   }
   await new Promise((resolve) => setTimeout(resolve, 100));
   if (home) await rm(home, { force: true, recursive: true });
+});
+
+test('keeps the Agent dashboard shell visible while cached usage loads', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  let releaseOverview = () => {};
+  const delayedOverview = new Promise<void>((resolve) => {
+    releaseOverview = resolve;
+  });
+  await page.route('**/api/overview**', async (route) => {
+    await delayedOverview;
+    await route.continue();
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+
+  const agentPanel = page.getByTestId('agent-usage-panel');
+  await expect(agentPanel).toBeVisible();
+  await expect(page.locator('.section-loading')).toHaveCount(0);
+  for (const provider of [
+    { id: 'codex', name: 'Codex' },
+    { id: 'claude-code', name: 'Claude Code' },
+    { id: 'opencode-go', name: 'OpenCode Go' },
+    { id: 'grok', name: 'Grok' }
+  ]) {
+    await expect(
+      agentPanel.getByRole('heading', { name: provider.name, exact: true })
+    ).toBeVisible();
+    await expect(agentPanel.locator(`[data-provider-logo="${provider.id}"]`)).toBeVisible();
+    const skeleton = page.getByTestId(`agent-provider-skeleton-${provider.id}`);
+    await expect(skeleton).toBeVisible();
+    await expect(skeleton.locator('.agent-skeleton-connection')).toBeVisible();
+    await expect(skeleton.locator('.agent-skeleton-section-label')).toBeVisible();
+    await expect(skeleton.locator('.agent-skeleton-quota-row')).toHaveCount(3);
+    for (const quotaRow of await skeleton.locator('.agent-skeleton-quota-row').all()) {
+      await expect(quotaRow.locator('.agent-skeleton-quota-copy')).toBeVisible();
+      await expect(quotaRow.locator('.agent-skeleton-progress')).toBeVisible();
+      await expect(quotaRow.locator('.agent-skeleton-meta')).toBeVisible();
+    }
+  }
+  const skeletonCardHeights = await agentPanel
+    .locator('.provider-card')
+    .evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().height)));
+  expect(Math.min(...skeletonCardHeights)).toBeGreaterThanOrEqual(500);
+  await expect(page.getByTestId('agent-index-skeleton')).toHaveCount(0);
+  await expect(agentPanel.locator('.agent-skeleton-heading')).toHaveCount(0);
+  await expect(page.getByText('Loading cached agent usage…')).toHaveCount(0);
+
+  releaseOverview();
+  await expect(page.locator('.provider-card').first()).toBeVisible();
+});
+
+test('shows each Agent card as soon as that provider finishes loading', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const fixture = historyOverviewFixture('7d', 700) as {
+    providers: Array<Record<string, unknown>>;
+  };
+  const template = fixture.providers[0];
+  const quotaBucket = {
+    id: 'weekly',
+    billingDomainId: 'api',
+    label: 'Weekly limit',
+    usedPercent: 25,
+    resetsAt: '2026-09-03T17:38:00.000Z',
+    authority: 'official-account',
+    observedAt: '2026-08-29T12:00:00.000Z'
+  };
+  const codex = {
+    ...template,
+    id: 'codex',
+    displayName: 'Codex Fast',
+    quotaBuckets: [quotaBucket],
+    billingDomains: (template.billingDomains as Array<Record<string, unknown>>).map(
+      (domain, index) => (index === 0 ? { ...domain, quotaBuckets: [quotaBucket] } : domain)
+    )
+  };
+  const claude = { ...template, id: 'claude-code', displayName: 'Claude Slow' };
+  let releaseIndex = () => {};
+  const delayedIndex = new Promise<void>((resolve) => {
+    releaseIndex = resolve;
+  });
+  let releaseClaude = () => {};
+  const delayedClaude = new Promise<void>((resolve) => {
+    releaseClaude = resolve;
+  });
+  let legacyOpenCodeRequests = 0;
+  let holdCodexUpdate = false;
+  let releaseCodexUpdate = () => {};
+  const delayedCodexUpdate = new Promise<void>((resolve) => {
+    releaseCodexUpdate = resolve;
+  });
+
+  await page.route('**/api/overview/providers**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/overview/providers') {
+      await delayedIndex;
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: '2026-08-28T02:00:00.000Z',
+          providers: [
+            { id: 'codex', displayName: 'Codex Fast' },
+            { id: 'claude-code', displayName: 'Claude Slow' },
+            { id: 'opencode', displayName: 'OpenCode' }
+          ]
+        })
+      });
+      return;
+    }
+    if (pathname.endsWith('/opencode')) legacyOpenCodeRequests += 1;
+    if (pathname.endsWith('/claude-code')) await delayedClaude;
+    if (pathname.endsWith('/codex') && holdCodexUpdate) await delayedCodexUpdate;
+    if (!pathname.endsWith('/codex') && !pathname.endsWith('/claude-code')) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(pathname.endsWith('/claude-code') ? claude : codex)
+    });
+  });
+  await page.route('**/api/refresh**', async (route) => {
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true })
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+
+  const codexCard = page.locator('.provider-card').filter({ hasText: 'Codex Fast' });
+  await expect(codexCard).toBeVisible();
+  await expect(page.getByTestId('agent-provider-skeleton-codex')).toHaveCount(0);
+  releaseIndex();
+  const claudeLoading = page.getByTestId('agent-provider-skeleton-claude-code');
+  await expect(claudeLoading).toBeVisible();
+  await expect(claudeLoading.locator('xpath=ancestor::article')).toBeVisible();
+  await expect(
+    claudeLoading.locator('xpath=ancestor::article').getByRole('heading', { name: 'Claude Slow' })
+  ).toBeVisible();
+  await expect(page.getByText('Loading cached agent usage…')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'OpenCode', exact: true })).toHaveCount(0);
+  expect(legacyOpenCodeRequests).toBe(0);
+  await expect(page.getByTestId('quota-timeline').locator('canvas')).toBeVisible();
+
+  releaseClaude();
+  await expect(page.getByTestId('agent-provider-skeleton-claude-code')).toHaveCount(0);
+  const claudeCard = page.locator('.provider-card').filter({ hasText: 'Claude Slow' });
+  await expect(claudeCard.getByRole('heading', { name: 'Claude Slow' })).toBeVisible();
+
+  holdCodexUpdate = true;
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByTestId('agent-provider-update-codex')).toHaveText('Updating');
+  await expect(page.getByTestId('agent-provider-skeleton-codex')).toHaveCount(0);
+  await expect(codexCard.getByRole('heading', { name: 'Codex Fast' })).toBeVisible();
+  await expect(page.getByTestId('quota-timeline').locator('canvas')).toBeVisible();
+  releaseCodexUpdate();
+  await expect(page.getByTestId('agent-provider-update-codex')).toHaveCount(0);
+});
+
+test('does not reload an Agent on every processing poll while startup usage work is running', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const fixture = historyOverviewFixture('7d', 700) as {
+    providers: Array<Record<string, unknown>>;
+  };
+  const provider = fixture.providers[0];
+  let providerRequests = 0;
+  let processingRequests = 0;
+  let processingMode: 'polling' | 'ready' = 'polling';
+
+  await page.route('**/api/overview/providers**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/overview/providers') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: '2026-08-28T02:00:00.000Z',
+          providers: [{ id: 'history-agent', displayName: 'History Agent' }]
+        })
+      });
+      return;
+    }
+    if (pathname.endsWith('/history-agent')) {
+      providerRequests += 1;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(provider) });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.route('**/api/processing', async (route) => {
+    processingRequests += 1;
+    const usageState =
+      processingMode === 'ready' ? 'ready' : processingRequests === 1 ? 'pending' : 'running';
+    const module = (state: 'pending' | 'running' | 'ready') => ({
+      state,
+      startedAt: state === 'pending' ? null : '2026-08-28T02:00:00.000Z',
+      completedAt: state === 'ready' ? '2026-08-28T02:00:01.000Z' : null,
+      message: null
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        startedAt: '2026-08-28T02:00:00.000Z',
+        hardRebuild: false,
+        modules: {
+          discovery: module('ready'),
+          usage: module(usageState),
+          pricing: module('ready'),
+          retention: module('ready')
+        }
+      })
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByRole('heading', { name: 'History Agent', exact: true })).toBeVisible();
+  await expect.poll(() => providerRequests).toBe(1);
+  await page.waitForTimeout(2_300);
+  expect(processingRequests).toBeGreaterThanOrEqual(3);
+  expect(providerRequests).toBe(1);
+
+  processingMode = 'ready';
+  processingRequests = 0;
+  providerRequests = 0;
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'History Agent', exact: true })).toBeVisible();
+  await expect.poll(() => providerRequests).toBe(1);
+  await page.waitForTimeout(200);
+  expect(processingRequests).toBe(1);
+  expect(providerRequests).toBe(1);
+});
+
+test('automatically refreshes once for unchanged degraded evidence', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const fixture = historyOverviewFixture('7d', 700) as {
+    providers: Array<Record<string, unknown>>;
+  };
+  const template = fixture.providers[0];
+  let automaticRefreshRequests = 0;
+  let collectionAttempts = 0;
+
+  // Every collection succeeds partially: the last-success timestamps advance
+  // while the same subscription quota stays unavailable.
+  const degradedProvider = () => {
+    collectionAttempts += 1;
+    const lastSuccessAt = new Date(
+      Date.parse('2026-08-29T12:00:00.000Z') + collectionAttempts * 1_000
+    ).toISOString();
+    const health = {
+      status: 'degraded',
+      errorCode: 'unavailable',
+      message: 'History Agent quota is unavailable.',
+      recovery: null
+    };
+    return {
+      ...template,
+      freshness: { status: 'fresh', lastSuccessAt },
+      health,
+      billingDomains: (template.billingDomains as Array<Record<string, unknown>>).map((domain) => ({
+        ...domain,
+        freshness: { status: 'fresh', lastSuccessAt },
+        health
+      }))
+    };
+  };
+
+  await page.route('**/api/refresh**', async (route) => {
+    if (new URL(route.request().url()).searchParams.get('mode') === 'automatic') {
+      automaticRefreshRequests += 1;
+    }
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true })
+    });
+  });
+  await page.route('**/api/doctor', async (route) => {
+    // Connector diagnostics settle after the first overview render.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-29T12:00:00.000Z',
+        connectors: [
+          {
+            id: 'history-agent',
+            providerId: 'history-agent',
+            billingDomainId: 'api',
+            status: 'degraded',
+            category: 'unavailable',
+            message: 'History Agent quota is unavailable.',
+            recovery: null,
+            affectedCoverage: ['quota'],
+            lastAttemptAt: new Date().toISOString(),
+            lastSuccessAt: new Date().toISOString()
+          }
+        ]
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/overview/providers') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: '2026-08-29T12:00:00.000Z',
+          providers: [{ id: 'history-agent', displayName: 'History Agent' }]
+        })
+      });
+      return;
+    }
+    if (pathname.startsWith('/api/overview/providers/')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(degradedProvider())
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ...fixture, providers: [degradedProvider()] })
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByRole('heading', { name: 'History Agent', exact: true })).toBeVisible();
+  await expect.poll(() => automaticRefreshRequests).toBe(1);
+  await page.waitForTimeout(2_000);
+  expect(automaticRefreshRequests).toBe(1);
 });
 
 test('shows persisted provider usage and refreshes from the dashboard', async ({ page }) => {
@@ -326,8 +659,8 @@ test('renders Codex quota without card diagnostics and keeps human actions in se
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Codex' });
   await expect(provider.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible();
-  await expect.poll(() => refreshRequests).toBe(2);
-  await expect.poll(() => refreshResponses).toBe(2);
+  await expect.poll(() => refreshRequests).toBe(1);
+  await expect.poll(() => refreshResponses).toBe(1);
   await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await page.evaluate(
     () =>
@@ -335,7 +668,7 @@ test('renders Codex quota without card diagnostics and keeps human actions in se
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       )
   );
-  expect(refreshRequests).toBe(2);
+  expect(refreshRequests).toBe(1);
   await expect(provider.getByText('Data is stale')).toHaveCount(0);
   await expect(provider.locator('.freshness')).toHaveAttribute('data-status', 'available');
   await expect(provider.locator('.freshness')).toContainText('Updated ·');
@@ -596,8 +929,8 @@ test('keeps Claude All models and Fable-only quota without duplicating local Tok
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Claude Code' });
-  await expect.poll(() => refreshRequests).toBe(2);
-  await expect.poll(() => refreshResponses).toBe(2);
+  await expect.poll(() => refreshRequests).toBe(1);
+  await expect.poll(() => refreshResponses).toBe(1);
   await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await expect(provider.getByText('Week · All models')).toBeVisible();
   await expect(provider.getByText('Week · Fable only')).toBeVisible();
@@ -738,8 +1071,8 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
 
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Grok' });
-  await expect.poll(() => refreshRequests).toBe(2);
-  await expect.poll(() => refreshResponses).toBe(2);
+  await expect.poll(() => refreshRequests).toBe(1);
+  await expect.poll(() => refreshResponses).toBe(1);
   await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   await page.evaluate(
     () =>
@@ -747,7 +1080,7 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
       )
   );
-  expect(refreshRequests).toBe(2);
+  expect(refreshRequests).toBe(1);
   await expect(provider.getByText('Weekly limit')).toBeVisible();
   await expect(provider.getByText('Refresh Grok Build telemetry.')).toHaveCount(0);
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
@@ -871,6 +1204,53 @@ test('does not expose manual telemetry setup when Claude and Grok have no Token 
   await expect(page.getByText(/agent-usage telemetry-env/)).toHaveCount(0);
 });
 
+test('keeps the workbench steady while a window switch refreshes', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  let releaseDelayedWindowRequest = () => {};
+  const delayedWindowRequest = new Promise<void>((resolve) => {
+    releaseDelayedWindowRequest = resolve;
+  });
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-28T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [],
+        providers: []
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    const window = new URL(route.request().url()).searchParams.get('window') ?? '7d';
+    if (window === '30d') await delayedWindowRequest;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture(window, window === '30d' ? 3000 : 700))
+    });
+  });
+
+  await page.setViewportSize({ width: 1680, height: 1000 });
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  await expect(workbench.getByTestId('usage-headline')).toBeVisible();
+  await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
+  const settledBoxes = await workbenchPanelBoxes(page);
+
+  await workbench.getByRole('button', { name: '30d' }).click();
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toBeVisible();
+  // The refreshing state rides on each panel edge: cached content must not move.
+  expect(await workbenchPanelBoxes(page)).toEqual(settledBoxes);
+
+  releaseDelayedWindowRequest();
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
+  expect(await workbenchPanelBoxes(page)).toEqual(settledBoxes);
+});
+
 test('switches 24-hour, 7-day, and 30-day token and cost history without mixing cost kinds', async ({
   page
 }) => {
@@ -947,14 +1327,16 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(providerShareData).toContainText('700 Tokens');
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await workbench.getByRole('button', { name: '24h' }).click();
-  await expect(workbench.getByTestId('workbench-skeleton')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toBeVisible();
   await expect(workbench.getByRole('button', { name: '24h' })).toHaveAttribute(
     'aria-pressed',
     'true'
   );
-  await expect(workbench.getByTestId('usage-headline')).not.toBeVisible();
+  await expect(workbench.getByTestId('usage-headline')).toBeVisible();
   releaseDelayedWindowRequest();
-  await expect(workbench.getByTestId('workbench-skeleton')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
   await expect(workbench.getByTestId('usage-headline')).toContainText('100');
   await workbench.getByRole('button', { name: '7d' }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
@@ -1246,6 +1628,7 @@ test('presents model detail as a compact visual summary instead of long visible 
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({
@@ -1256,6 +1639,20 @@ test('presents model detail as a compact visual summary instead of long visible 
 
   await page.goto(freshLaunch.stdout.trim());
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const ranking = page.getByTestId('usage-breakdown');
+  const breakdownViewTabs = ranking.getByTestId('breakdown-view-tabs');
+  await expect(breakdownViewTabs.getByRole('tab', { name: 'List', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
+  await breakdownViewTabs.getByRole('tab', { name: 'Treemap', exact: true }).click();
+  await expect(ranking.getByTestId('model-breakdown-treemap')).toBeVisible();
+  await expect(ranking.getByTestId('model-ranking-row')).toHaveCount(0);
+  await breakdownViewTabs.getByRole('tab', { name: 'Stacked trend', exact: true }).click();
+  await expect(ranking.getByTestId('model-trend-stacked')).toBeVisible();
+  await expect(ranking.getByTestId('model-breakdown-treemap')).toHaveCount(0);
+  await breakdownViewTabs.getByRole('tab', { name: 'List', exact: true }).click();
+  await expect(ranking.getByTestId('model-ranking-row')).toHaveCount(6);
   const fableRow = page.getByTestId('model-ranking-row').filter({ hasText: 'fable-model' });
   await fableRow.click();
 
@@ -1268,6 +1665,15 @@ test('presents model detail as a compact visual summary instead of long visible 
   await expect(visual).toHaveAttribute('data-chart-engine', 'echarts');
   await expect(visual).toHaveAttribute('aria-label', /Token breakdown/);
   await expect(visual.locator('canvas')).toBeVisible();
+  const desktopCompositionLayout = await modelDetailCompositionLayout(visual.locator('canvas'));
+  expect(
+    desktopCompositionLayout.legendTop,
+    JSON.stringify(desktopCompositionLayout)
+  ).not.toBeNull();
+  expect(
+    desktopCompositionLayout.gap,
+    JSON.stringify(desktopCompositionLayout)
+  ).toBeGreaterThanOrEqual(8);
   await expect(detail).toContainText('Activity overview');
   await expect(detail.getByTestId('model-detail-summary')).toContainText('Recorded total 450');
   await expect(detail.getByTestId('model-detail-summary')).toContainText('API retail equivalent');
@@ -1307,6 +1713,15 @@ test('presents model detail as a compact visual summary instead of long visible 
   await expect
     .poll(() => detail.evaluate((element) => element.scrollWidth - element.clientWidth))
     .toBeLessThanOrEqual(0);
+  const compactCompositionLayout = await modelDetailCompositionLayout(visual.locator('canvas'));
+  expect(
+    compactCompositionLayout.legendTop,
+    JSON.stringify(compactCompositionLayout)
+  ).not.toBeNull();
+  expect(
+    compactCompositionLayout.gap,
+    JSON.stringify(compactCompositionLayout)
+  ).toBeGreaterThanOrEqual(8);
 });
 
 test('opens the model detail shell promptly with a large evidence history', async ({ page }) => {
@@ -1406,15 +1821,16 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     )
     .toBe('none');
   for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
-    const logo = page.locator(`picture[data-provider-logo="${providerId}"]`).first();
+    const logo = page.locator(`img[data-provider-logo="${providerId}"]`).first();
     await expect(logo).toBeVisible();
-    await expect(logo.locator('img')).toHaveAttribute('src', /^\/brands\//);
+    await expect(logo).toHaveAttribute('src', /^\/brands\//);
   }
-  await expect(
-    page.locator('picture[data-provider-logo="opencode-go"] source').first()
-  ).toHaveAttribute('srcset', '/brands/opencode-light.svg');
-  await expect(page.locator('picture[data-provider-logo="grok"] source').first()).toHaveAttribute(
-    'srcset',
+  await expect(page.locator('img[data-provider-logo="opencode-go"]').first()).toHaveAttribute(
+    'src',
+    '/brands/opencode-light.svg'
+  );
+  await expect(page.locator('img[data-provider-logo="grok"]').first()).toHaveAttribute(
+    'src',
     '/brands/grok-dark.svg'
   );
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
@@ -1430,15 +1846,15 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   await page.getByRole('tab', { name: 'Agent usage' }).click();
   expect(
     await page
-      .locator('picture[data-provider-logo="opencode-go"] img')
+      .locator('img[data-provider-logo="opencode-go"]')
       .first()
-      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+      .evaluate((image) => new URL((image as HTMLImageElement).src).pathname)
   ).toBe('/brands/opencode-light.svg');
   expect(
     await page
-      .locator('picture[data-provider-logo="grok"] img')
+      .locator('img[data-provider-logo="grok"]')
       .first()
-      .evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname)
+      .evaluate((image) => new URL((image as HTMLImageElement).src).pathname)
   ).toBe('/brands/grok-dark.svg');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect.poll(gridColumnCount).toBe(2);
@@ -1475,10 +1891,10 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   await expect
     .poll(() =>
       page
-        .locator('picture[data-provider-logo="opencode-go"] img')
+        .locator('img[data-provider-logo="opencode-go"]')
         .first()
         .evaluate((image) => {
-          const source = (image as HTMLImageElement).currentSrc;
+          const source = (image as HTMLImageElement).src;
           return source ? new URL(source).pathname : '';
         })
     )
@@ -1486,10 +1902,10 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   await expect
     .poll(() =>
       page
-        .locator('picture[data-provider-logo="grok"] img')
+        .locator('img[data-provider-logo="grok"]')
         .first()
         .evaluate((image) => {
-          const source = (image as HTMLImageElement).currentSrc;
+          const source = (image as HTMLImageElement).src;
           return source ? new URL(source).pathname : '';
         })
     )
@@ -2742,10 +3158,21 @@ test('keeps provider cards and their final quota rows aligned without forecasts'
         forecastCoverage: 'complete'
       };
     });
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ generatedAt: '2026-08-29T00:00:00.000Z', providers })
-    });
+    const pathname = new URL(route.request().url()).pathname;
+    const providerPrefix = '/api/overview/providers/';
+    const body =
+      pathname === '/api/overview/providers'
+        ? {
+            generatedAt: '2026-08-29T00:00:00.000Z',
+            providers: providers.map(({ id, displayName }) => ({ id, displayName }))
+          }
+        : pathname.startsWith(providerPrefix)
+          ? providers.find(
+              (provider) =>
+                provider.id === decodeURIComponent(pathname.slice(providerPrefix.length))
+            )
+          : { generatedAt: '2026-08-29T00:00:00.000Z', providers };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
 
   await page.setViewportSize({ width: 1680, height: 1000 });
@@ -2770,6 +3197,7 @@ test('compares provider quota reset windows on an interactive homepage timeline'
   page
 }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.route('**/api/connectors', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: '[]' });
   });
@@ -2854,11 +3282,33 @@ test('compares provider quota reset windows on an interactive homepage timeline'
         quotaBuckets,
         tokenTotals: domain.tokenTotals,
         tokenAuthority: null,
-        billingDomains: [domain],
+        billingDomains: specification.id === 'opencode-go' ? [domain] : [],
         forecasts: [],
         forecastCoverage: 'insufficient'
       };
     });
+    const pathname = new URL(route.request().url()).pathname;
+    const providerPrefix = '/api/overview/providers/';
+    if (pathname === '/api/overview/providers') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: '2026-08-29T12:00:00.000Z',
+          providers: providers.map(({ id, displayName }) => ({ id, displayName }))
+        })
+      });
+      return;
+    }
+    if (pathname.startsWith(providerPrefix)) {
+      const providerId = decodeURIComponent(pathname.slice(providerPrefix.length));
+      const provider = providers.find((candidate) => candidate.id === providerId);
+      await route.fulfill({
+        status: provider ? 200 : 404,
+        contentType: 'application/json',
+        body: JSON.stringify(provider ?? {})
+      });
+      return;
+    }
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ generatedAt: '2026-08-29T12:00:00.000Z', providers })
@@ -2878,6 +3328,15 @@ test('compares provider quota reset windows on an interactive homepage timeline'
     })
   ).toBe(true);
   await expect(timeline).toHaveAttribute('data-chart-engine', 'echarts');
+  await expect(
+    page.locator('.provider-card').filter({ hasText: 'Codex' }).getByText('Week', { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.locator('.provider-card').filter({ hasText: 'Claude Code' }).getByText('Week · All models')
+  ).toBeVisible();
+  await expect(
+    page.locator('.provider-card').filter({ hasText: 'Grok' }).getByText('Weekly limit')
+  ).toBeVisible();
   await expect(timeline).toHaveAttribute('data-lane-count', '4');
   await expect(timeline.getByRole('heading', { name: 'Quota timeline' })).toBeVisible();
   await expect(timeline.getByRole('button', { name: 'Weekly' })).toHaveAttribute(
@@ -2885,19 +3344,10 @@ test('compares provider quota reset windows on an interactive homepage timeline'
     'true'
   );
   await expect(timeline.locator('canvas')).toBeVisible();
+  await expect
+    .poll(async () => await quotaTimelineLaneBandCount(timeline.locator('canvas')))
+    .toBe(4);
   await expect(timeline.locator('.quota-timeline-data')).toContainText('Grok');
-
-  const canvas = timeline.locator('canvas');
-  const bounds = await canvas.boundingBox();
-  expect(bounds).not.toBeNull();
-  if (bounds) {
-    const laneCount = Number(await timeline.getAttribute('data-lane-count'));
-    const plotTop = 42;
-    const plotBottom = 14;
-    const firstLaneCenter = plotTop + (bounds.height - plotTop - plotBottom) / laneCount / 2;
-    await page.mouse.move(bounds.x + bounds.width * 0.42, bounds.y + firstLaneCenter);
-    await expect(page.locator('.quota-timeline-tooltip')).toBeVisible();
-  }
 
   const originalRange = await timeline.locator('.quota-timeline-range').textContent();
   await timeline.getByRole('button', { name: 'Previous period' }).click();
@@ -2907,12 +3357,129 @@ test('compares provider quota reset windows on an interactive homepage timeline'
 
   await timeline.getByRole('button', { name: '5 hour' }).click();
   await expect(timeline).toHaveAttribute('data-lane-count', '3');
+  await expect
+    .poll(async () => await quotaTimelineLaneBandCount(timeline.locator('canvas')))
+    .toBe(3);
   await expect(timeline.getByRole('button', { name: '5 hour' })).toHaveAttribute(
     'aria-pressed',
     'true'
   );
   await expect(timeline.locator('.quota-timeline-data')).not.toContainText('Grok');
 });
+
+async function workbenchPanelBoxes(
+  page: Page
+): Promise<Record<string, { x: number; y: number; width: number; height: number }>> {
+  return await page.evaluate(() => {
+    const box = (selector: string) => {
+      const element = document.querySelector(selector);
+      if (!element) throw new Error(`Expected a rendered ${selector}`);
+      const rect = element.getBoundingClientRect();
+      return {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      };
+    };
+    return {
+      headline: box('[data-testid="usage-headline"]'),
+      totals: box('[data-testid="usage-totals"]'),
+      providerShare: box('[data-testid="usage-analysis-grid"] .usage-summary'),
+      trend: box('[data-testid="usage-trend-chart"]'),
+      breakdown: box('[data-testid="usage-breakdown"] .ranking-heading')
+    };
+  });
+}
+
+async function quotaTimelineLaneBandCount(canvas: Locator): Promise<number> {
+  return await canvas.evaluate((element) => {
+    const chartCanvas = element as HTMLCanvasElement;
+    const context = chartCanvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Expected a readable quota timeline canvas');
+    const { width, height } = chartCanvas;
+    const pixels = context.getImageData(0, 0, width, height).data;
+    const plotLeft = Math.floor(width * 0.2);
+    const painted = Math.floor((width - plotLeft) * 0.3);
+    const laneBandMinimumHeight = 8;
+    let bands = 0;
+    let bandHeight = 0;
+    for (let y = 0; y < height; y += 1) {
+      let filled = 0;
+      for (let x = plotLeft; x < width; x += 1) {
+        if (pixels[(y * width + x) * 4 + 3] > 20) filled += 1;
+      }
+      // Lane bars span most of the plot; split lines are one row tall.
+      if (filled > painted) bandHeight += 1;
+      else {
+        if (bandHeight >= laneBandMinimumHeight) bands += 1;
+        bandHeight = 0;
+      }
+    }
+    return bandHeight >= laneBandMinimumHeight ? bands + 1 : bands;
+  });
+}
+
+async function modelDetailCompositionLayout(canvas: Locator): Promise<{
+  width: number;
+  height: number;
+  pieBottom: number;
+  legendTop: number | null;
+  gap: number | null;
+}> {
+  return await canvas.evaluate((element) => {
+    const chartCanvas = element as HTMLCanvasElement;
+    const context = chartCanvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('Expected a readable model-detail canvas');
+    const { width, height } = chartCanvas;
+    const pixels = context.getImageData(0, 0, width, height).data;
+    const compositionColors = new Set([
+      '111,143,247',
+      '225,154,108',
+      '155,124,244',
+      '82,197,164',
+      '224,184,79'
+    ]);
+    const rowCounts = Array.from({ length: height }, () => 0);
+    const compositionRight = Math.floor(width * 0.45);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < compositionRight; x += 1) {
+        const offset = (y * width + x) * 4;
+        if (
+          compositionColors.has(`${pixels[offset]},${pixels[offset + 1]},${pixels[offset + 2]}`)
+        ) {
+          rowCounts[y] += 1;
+        }
+      }
+    }
+    const bands: Array<{ top: number; bottom: number }> = [];
+    for (let row = 0; row < rowCounts.length; row += 1) {
+      if (rowCounts[row] === 0) continue;
+      const previous = bands.at(-1);
+      if (previous && previous.bottom === row - 1) previous.bottom = row;
+      else bands.push({ top: row, bottom: row });
+    }
+    const groups: Array<{ top: number; bottom: number }> = [];
+    for (const band of bands) {
+      const previous = groups.at(-1);
+      if (previous && band.top - previous.bottom <= 4) previous.bottom = band.bottom;
+      else groups.push({ ...band });
+    }
+    const pieGroup = groups.toSorted(
+      (left, right) => right.bottom - right.top - (left.bottom - left.top)
+    )[0];
+    if (!pieGroup) throw new Error('Expected rendered Token composition sectors');
+    const pieBottom = pieGroup.bottom;
+    const legendTop = groups.find((group) => group.top > pieBottom)?.top ?? -1;
+    return {
+      width,
+      height,
+      pieBottom,
+      legendTop: legendTop === -1 ? null : legendTop,
+      gap: legendTop === -1 ? null : legendTop - pieBottom - 1
+    };
+  });
+}
 
 async function runPackagedCli(arguments_: string[]): Promise<{
   exitCode: number | null;

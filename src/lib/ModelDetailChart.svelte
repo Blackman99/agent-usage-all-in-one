@@ -201,7 +201,7 @@
           orient: 'horizontal',
           left: compact ? 12 : '2%',
           right: compact ? 12 : '55%',
-          top: compact ? 230 : 228,
+          ...(compact ? { top: 224 } : { bottom: 12 }),
           data: composition.map((entry) => entry.name),
           textStyle: { color: colors.muted, fontSize: 9 },
           itemWidth: 9,
@@ -285,7 +285,7 @@
         {
           name: label('tokenBreakdown'),
           type: 'pie',
-          center: compact ? ['50%', '31%'] : ['23%', '50%'],
+          center: compact ? ['50%', '27%'] : ['23%', '50%'],
           radius: compact ? ['20%', '34%'] : ['34%', '54%'],
           avoidLabelOverlap: true,
           itemStyle: { borderColor: colors.surface, borderWidth: 3, borderRadius: 4 },

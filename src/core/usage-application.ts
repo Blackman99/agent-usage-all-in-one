@@ -1,4 +1,5 @@
 import type {
+  AgentProviderIndex,
   Connector,
   ConnectorSnapshot,
   ConnectorDiagnostic,
@@ -19,7 +20,8 @@ import type {
   UsageRepository,
   RetentionStatus,
   ProcessingModuleId,
-  ProcessingStatus
+  ProcessingStatus,
+  ProviderOverview
 } from './types.js';
 import type {
   ConfigureConnectorInput,
@@ -611,6 +613,28 @@ export class UsageApplication {
     return this.#repository.getOverview(this.#clock(), query);
   }
 
+  async getAgentProviderIndex(): Promise<AgentProviderIndex> {
+    const now = this.#clock();
+    return (
+      this.#repository.getAgentProviderIndex?.(now) ??
+      pickAgentProviderIndex(this.#repository.getOverview(now))
+    );
+  }
+
+  async getProviderOverview(
+    providerId: string,
+    query: UsageQuery = {}
+  ): Promise<ProviderOverview | null> {
+    const now = this.#clock();
+    return (
+      this.#repository.getProviderOverview?.(now, providerId, query) ??
+      this.#repository
+        .getOverview(now, query)
+        .providers.find((provider) => provider.id === providerId) ??
+      null
+    );
+  }
+
   async exportUsage(request: UsageExportRequest): Promise<UsageExportArtifact> {
     const overview = this.#repository.getOverview(this.#clock(), request);
     const accountIdentifiers = request.includeAccountIdentifiers
@@ -951,4 +975,13 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 
 function notificationLevel(value: string): number {
   return value === '5' ? 2 : value === '20' ? 1 : 0;
+}
+
+function pickAgentProviderIndex(overview: UsageOverview): AgentProviderIndex {
+  return {
+    generatedAt: overview.generatedAt,
+    providers: overview.providers
+      .filter((provider) => provider.id !== 'opencode')
+      .map(({ id, displayName }) => ({ id, displayName }))
+  };
 }
