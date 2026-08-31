@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
-import { createServer as createTcpServer } from 'node:net';
+import { connect as tcpConnect, createServer as createTcpServer } from 'node:net';
 import { join, resolve } from 'node:path';
 
 import { validateLoopbackOrigin } from './dev-origin.mjs';
@@ -158,10 +158,11 @@ function parseDaemonState(value) {
 }
 
 async function daemonIsHealthy(state) {
+  if (!(await portIsListening(state.origin))) return false;
   try {
     const response = await fetch(`${state.origin}/api/health`, {
       headers: { authorization: `Bearer ${state.apiToken}` },
-      signal: AbortSignal.timeout(500)
+      signal: AbortSignal.timeout(5_000)
     });
     return response.ok;
   } catch {
@@ -174,15 +175,34 @@ async function waitForVite(origin, child, signal) {
   while (Date.now() < deadline) {
     if (signal.aborted) throw new Error('Development startup stopped');
     if (child.exitCode !== null) throw new Error(`Vite exited with ${child.exitCode}`);
-    try {
-      const response = await fetch(origin, { signal: AbortSignal.timeout(500) });
-      if (response.ok) return;
-    } catch {
-      // Vite is still starting.
+    if (await portIsListening(origin)) {
+      try {
+        const response = await fetch(origin, { signal: AbortSignal.timeout(5_000) });
+        if (response.ok) return;
+      } catch {
+        // Vite is listening but is not serving the page yet.
+      }
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw new Error('Vite did not become ready');
+}
+
+// Readiness is polled over a plain socket rather than a request that is abandoned half a second
+// later. An aborted request can throw from inside the HTTP client's own socket callbacks, where
+// no `try` around the `await` reaches it, and one such throw ends the whole development run.
+async function portIsListening(origin) {
+  const { hostname, port } = new URL(origin);
+  return await new Promise((resolveListening) => {
+    const socket = tcpConnect({ host: hostname, port: Number(port) });
+    const settle = (listening) => {
+      socket.destroy();
+      resolveListening(listening);
+    };
+    socket.setTimeout(500, () => settle(false));
+    socket.once('connect', () => settle(true));
+    socket.once('error', () => settle(false));
+  });
 }
 
 async function selectDevelopmentPort(input) {
