@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { connect as tcpConnect } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -328,15 +329,34 @@ async function ensureDaemon(home: string): Promise<DaemonState> {
 }
 
 async function isHealthy(state: DaemonState): Promise<boolean> {
+  if (!(await originIsListening(state.origin))) return false;
   try {
     const response = await fetch(`${state.origin}/api/health`, {
       headers: { authorization: `Bearer ${state.apiToken}` },
-      signal: AbortSignal.timeout(500)
+      signal: AbortSignal.timeout(5_000)
     });
     return response.ok;
   } catch {
     return false;
   }
+}
+
+// A daemon that is still starting is looked for over a plain socket rather than with a request
+// abandoned half a second later. Waiting for a cold start asks well over a hundred times, and a
+// request torn down mid-connect can throw from inside Node's own socket callbacks, past the
+// `try` around it, ending the command instead of starting the dashboard.
+async function originIsListening(origin: string): Promise<boolean> {
+  const { hostname, port } = new URL(origin);
+  return await new Promise((resolveListening) => {
+    const socket = tcpConnect({ host: hostname, port: Number(port) });
+    const settle = (listening: boolean) => {
+      socket.destroy();
+      resolveListening(listening);
+    };
+    socket.setTimeout(500, () => settle(false));
+    socket.once('connect', () => settle(true));
+    socket.once('error', () => settle(false));
+  });
 }
 
 function formatOverview(overview: UsageOverview): string {
