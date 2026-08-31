@@ -202,7 +202,7 @@ describe('GrokBuildConnector', () => {
       },
       historyClient: new LocalTranscriptUsageClient({
         provider: 'grok',
-        root: workspace,
+        roots: [workspace],
         clock: () => new Date('2026-08-28T02:00:00.000Z')
       }),
       clock: () => new Date('2026-08-28T02:00:00.000Z')
@@ -235,7 +235,7 @@ describe('GrokBuildConnector', () => {
       })
     ]);
     expect(snapshot.usageReconciliation).toEqual({
-      authoritativeIdPrefix: 'grok-transcript:',
+      authoritativeIdPrefixes: ['grok-transcript:'],
       retiredIdPrefixes: ['grok-otel:', 'grok-headless:']
     });
   });

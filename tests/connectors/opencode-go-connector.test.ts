@@ -47,7 +47,7 @@ describe('OpenCodeGoConnector', () => {
       provider: { id: 'opencode-go', displayName: 'OpenCode Go' },
       billingDomains: [{ id: 'go-subscription', displayName: 'OpenCode Go subscription' }],
       usageReconciliation: {
-        authoritativeIdPrefix: 'opencode-request:',
+        authoritativeIdPrefixes: ['opencode-request:'],
         retiredIdPrefixes: ['opencode-session:']
       },
       quotaBuckets: [
@@ -104,7 +104,7 @@ describe('OpenCodeGoConnector', () => {
     expect(snapshot.quotaBuckets).toEqual([]);
     expect(snapshot.usage).toEqual([]);
     expect(snapshot.usageReconciliation).toEqual({
-      authoritativeIdPrefix: 'opencode-request:',
+      authoritativeIdPrefixes: ['opencode-request:'],
       retiredIdPrefixes: ['opencode-session:']
     });
     expect(snapshot.warnings).toEqual([

@@ -195,7 +195,7 @@ export interface InvoiceRecord {
 }
 
 export interface UsageReconciliationPolicy {
-  authoritativeIdPrefix: string;
+  authoritativeIdPrefixes: string[];
   retiredIdPrefixes: string[];
 }
 

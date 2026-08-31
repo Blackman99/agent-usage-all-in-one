@@ -95,7 +95,7 @@ export class GrokBuildConnector implements Connector {
       ...(history.usage.length > 0 && history.complete
         ? {
             usageReconciliation: {
-              authoritativeIdPrefix: 'grok-transcript:',
+              authoritativeIdPrefixes: ['grok-transcript:'],
               retiredIdPrefixes: ['grok-otel:', 'grok-headless:']
             }
           }

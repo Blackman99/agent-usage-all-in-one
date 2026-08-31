@@ -124,6 +124,11 @@ describe('local transcript source reconciliation', () => {
     );
     const officialUsage = days.map((day) => ({
       ...legacy(`codex:daily:${day}`, 'subscription'),
+      sourceReportedTotalTokens: 100_000,
+      observedAt: `${day}T12:00:00.000Z`
+    }));
+    const remainderUsage = days.map((day) => ({
+      ...accountRemainder(100_000 - 200 * 120, day),
       observedAt: `${day}T12:00:00.000Z`
     }));
     const transcriptUsage = Array.from({ length: 6_000 }, (_, index) => {
@@ -137,7 +142,7 @@ describe('local transcript source reconciliation', () => {
       provider: { id: 'codex', displayName: 'Codex' },
       billingDomains: [{ id: 'subscription', displayName: 'Codex subscription' }],
       quotaBuckets: [],
-      usage: [...officialUsage, ...transcriptUsage],
+      usage: [...officialUsage, ...remainderUsage, ...transcriptUsage],
       costs: [],
       observedAt: '2026-08-01T00:00:00.000Z'
     });
@@ -146,7 +151,10 @@ describe('local transcript source reconciliation', () => {
     const retained = repository.getRetailPricingBackfillSnapshots();
     const elapsedMs = performance.now() - startedAt;
 
-    expect(retained[0].usage).toHaveLength(officialUsage.length);
+    expect(retained[0].usage).toHaveLength(transcriptUsage.length + remainderUsage.length);
+    expect(
+      retained[0].usage.every((observation) => !observation.id.startsWith('codex:daily:'))
+    ).toBe(true);
     expect(elapsedMs).toBeLessThan(1_000);
     repository.close();
   }, 20_000);
@@ -219,7 +227,7 @@ function transcriptSnapshot(
   return {
     ...snapshot(providerId, domainId, known(id, model, domainId)),
     usageReconciliation: {
-      authoritativeIdPrefix: id.slice(0, id.indexOf(':') + 1),
+      authoritativeIdPrefixes: [id.slice(0, id.indexOf(':') + 1)],
       retiredIdPrefixes
     }
   };
@@ -240,9 +248,9 @@ function legacy(id: string, billingDomainId: string): UsageObservation {
   };
 }
 
-function accountRemainder(tokens: number): UsageObservation {
+function accountRemainder(tokens: number, day = '2026-08-28'): UsageObservation {
   return {
-    ...legacy('codex-transcript:account-remainder:2026-08-28', 'subscription'),
+    ...legacy(`codex-transcript:account-remainder:${day}`, 'subscription'),
     sourceReportedTotalTokens: null,
     reconciledRemainderTokens: tokens,
     authority: 'estimate'

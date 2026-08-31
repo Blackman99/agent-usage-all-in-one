@@ -23,7 +23,7 @@ describe('OpenCodeLocalConnector', () => {
       billingDomains: [{ id: 'local-history', displayName: 'Local history' }],
       quotaBuckets: [],
       usageReconciliation: {
-        authoritativeIdPrefix: 'opencode-local-request:',
+        authoritativeIdPrefixes: ['opencode-local-request:'],
         retiredIdPrefixes: []
       },
       usage: [

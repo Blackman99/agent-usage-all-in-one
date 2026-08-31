@@ -140,126 +140,137 @@ be merged.
 
 1. Source priority is official account, then official client, then local
    observation, then estimate.
-2. Values from overlapping sources are reconciled, not added together.
-3. Unknown cost is never represented as zero.
-4. Provider-native quota labels and windows are preserved.
-5. One connector failure cannot make other providers unavailable.
-6. Credentials stay in the system keychain or their owning official client and
+2. Values from overlapping sources are reconciled, not added together. One
+   Provider day is covered by exactly one side: the official account-wide total
+   plus its reconciled remainder while that total still contains the local
+   observations, otherwise those local observations alone. An official total
+   smaller than the local observations recorded for the same day is not a
+   superset of them and never replaces them. A day total is stored only once it
+   is settled and reconciled: a day still running, or one an upstream aggregate
+   has not finished, is not evidence for that day.
+3. Local evidence is read from every location its Provider keeps it in. A
+   Provider that moves finished transcripts into an archive keeps them as
+   evidence, and history that ages out of a live directory is never read as a
+   drop in usage.
+4. Unknown cost is never represented as zero.
+5. Provider-native quota labels and windows are preserved.
+6. One connector failure cannot make other providers unavailable.
+7. Credentials stay in the system keychain or their owning official client and
    never appear in logs, exports, or the usage database.
-7. Every displayed number carries its data authority and observation time.
-8. Each observation contributes exactly one recorded Token total. Category
+8. Every displayed number carries its data authority and observation time.
+9. Each observation contributes exactly one recorded Token total. Category
    fields and source totals are evidence for that total, never additive totals.
-9. Recorded Tokens equal classified plus unclassified Tokens; a source total
-   larger than its categorized fields leaves an explicit unclassified remainder.
-   Partial classification keeps every known category visible; the unclassified
-   remainder never makes those known values unavailable.
-10. `all-models` and unknown-model observations contribute to overall and time
+10. Recorded Tokens equal classified plus unclassified Tokens; a source total
+    larger than its categorized fields leaves an explicit unclassified remainder.
+    Partial classification keeps every known category visible; the unclassified
+    remainder never makes those known values unavailable.
+11. `all-models` and unknown-model observations contribute to overall and time
     summaries but never to per-model rankings.
-11. Migration preserves observation identity, authority, and observed time and
+12. Migration preserves observation identity, authority, and observed time and
     does not invent source totals, model attribution, or time precision.
-12. Account-wide and this-Mac observations retain their scope through history,
+13. Account-wide and this-Mac observations retain their scope through history,
     CLI output, and export; unlike scopes are never presented as interchangeable.
-13. Cumulative telemetry is rejected before persistence unless a Connector has
+14. Cumulative telemetry is rejected before persistence unless a Connector has
     an explicit non-overlapping reconciliation algorithm; it is never summed as
     though it were delta data.
-14. Production Connectors never write the legacy Token-total input. The SQLite
+15. Production Connectors never write the legacy Token-total input. The SQLite
     compatibility column and `legacy-total` derivation remain read-only migration
     evidence so a V1 database can upgrade without losing or duplicating usage.
-15. Retail-equivalent records are derived only from a known Provider, billing
+16. Retail-equivalent records are derived only from a known Provider, billing
     domain, model, non-overlapping Token kinds, context tier, and price effective
     at the observation time. Missing or ambiguous evidence remains unpriced.
-16. Repeating collection, restart, or price derivation for the same observation
+17. Repeating collection, restart, or price derivation for the same observation
     and price version is idempotent. Line items reconcile exactly to the stored
     retail amount and never mutate actual, subscription, or reported estimates.
-17. Unknown retail equivalent is unavailable, never zero. Pricing coverage may
+18. Unknown retail equivalent is unavailable, never zero. Pricing coverage may
     be zero when Tokens were observed but none were eligible for pricing.
-18. Context-sensitive pricing requires observation evidence at the same
+19. Context-sensitive pricing requires observation evidence at the same
     granularity as the Provider rule. Day or billing-period aggregates cannot
     select request-length or time-of-day tiers. Grok Build/SuperGrok and xAI API
     aliases, amounts, and coverage remain isolated by billing domain.
-19. Retained observations may be backfilled with the catalog entry effective at
+20. Retained observations may be backfilled with the catalog entry effective at
     their observation time. Once recorded, a retail price snapshot is immutable;
     a later catalog release adds a new version instead of rewriting history.
-20. Actual, subscription, reported-estimate, and retail-equivalent are mutually
+21. Actual, subscription, reported-estimate, and retail-equivalent are mutually
     exclusive cost purposes. No aggregate combines unlike purposes.
-21. OpenCode Go allowance values belong to quota context. Five-hour, weekly, and
+22. OpenCode Go allowance values belong to quota context. Five-hour, weekly, and
     monthly overlapping allowance values never become time-range cost records.
-22. Fixed subscription cost is billing-domain evidence only. It is never
+23. Fixed subscription cost is billing-domain evidence only. It is never
     allocated to a Token observation, model, session, or daily bucket.
-23. Workbench cost metrics include only actual, reported-estimate, or
+24. Workbench cost metrics include only actual, reported-estimate, or
     retail-equivalent records. Subscription and legacy-unknown evidence never
     enter those metrics or their trends.
-24. A converted workbench amount is available only when every contributing
+25. A converted workbench amount is available only when every contributing
     record has a known native amount and valid conversion. Missing or stale CNY
     evidence cannot hide the original USD or other native amount.
-25. Workbench trend segments retain Provider and billing-domain identity. An
+26. Workbench trend segments retain Provider and billing-domain identity. An
     interval without observations remains a gap, and day or billing-period
     precision remains explicit in visual and accessible output.
-26. Model rankings use Provider, billing domain, and model as their identity.
+27. Model rankings use Provider, billing domain, and model as their identity.
     Equal values are ordered by that stable identity, never by collection order.
-27. Token, cost, and retail-equivalent ranking orders contain the same complete
+28. Token, cost, and retail-equivalent ranking orders contain the same complete
     set of known model identities. Token order includes known unpriced models and
     labels retail equivalent as unavailable. Retail order puts priced models
     first and never represents an unavailable amount as zero.
-28. Headline-included known-model Tokens plus headline-included, separately
+29. Headline-included known-model Tokens plus headline-included, separately
     disclosed unclassified Tokens reconcile to the workbench recorded Token
     total for the selected window. Sibling-domain rows are separately marked and
     excluded from that reconciliation.
-29. Model details present aggregate Token, cost, authority, precision, time, and
+30. Model details present aggregate Token, cost, authority, precision, time, and
     trend summaries without exposing observation or pricing audit tables. The
     underlying observation-level Token evidence and immutable price snapshots
     remain retained in the local domain and export paths without joining model
     names across sources.
-30. A Provider with independent billing domains declares one
+31. A Provider with independent billing domains declares one
     `summaryBillingDomainId`. Provider headlines and workbench scalar metrics
     aggregate only that domain. Sibling-domain Token and cost evidence remains
     separately identified in the model-cost view's trends and rankings, with an
     explicit marker that it is not part of the headline total or its percentage
     denominator. Provider billing-domain tabs remain quota and connection views;
     they do not duplicate Token or cost detail.
-31. Agent usage cards never render technical diagnostic or recovery banners.
+32. Agent usage cards never render technical diagnostic or recovery banners.
     Stale, unavailable, and timeout evidence from freshness, health, or connector
     diagnostics triggers one automatic refresh for that unchanged evidence.
     Repeated identical evidence does not create a refresh loop; a changed or
     recovered state may trigger a later retry. Rate-limited evidence stays under
     the existing Provider backoff and never forces an immediate retry.
-32. Automatically managed stale, unavailable, timeout, and rate-limited
+33. Automatically managed stale, unavailable, timeout, and rate-limited
     diagnostics remain internal. Failures that require a human action, such as
     installing a client, connecting an account, signing in again, or upgrading
     an unsupported integration, remain available only in connection management
     and Settings diagnostics; they never interrupt the usage-first dashboard.
-33. Loopback health and cached reads become available before discovery or data
+34. Loopback health and cached reads become available before discovery or data
     processing. Each processing module reports its own state and failure boundary.
-34. Normal startup reuses versioned, disposable optimization caches. Cache keys
+35. Normal startup reuses versioned, disposable optimization caches. Cache keys
     do not persist personal transcript paths, and cache corruption never changes
     source evidence or prevents a source scan.
-35. A hard rebuild requires explicit user confirmation, runs asynchronously, and
+36. A hard rebuild requires explicit user confirmation, runs asynchronously, and
     may delete only recalculable retail-equivalent evidence. It never deletes or
     relabels actual, subscription, or Provider-reported costs.
-36. OpenCode local history includes every completed local request and retains the
+37. OpenCode local history includes every completed local request and retains the
     source `providerID` as part of model identity. It is never filtered to
     `opencode-go`, attributed to the Go subscription, or added to Go allowance
     values. A successful local scan retires legacy Go-attributed local rows; a
     failed scan retains the last successful snapshot.
-37. A plan subscription is a user declaration. It never becomes a Cost record,
+38. A plan subscription is a user declaration. It never becomes a Cost record,
     never enters workbench cost metrics or trends, and is never allocated to an
     observation, model, session, or day.
-38. Window plan cost is derived at read time from exactly one plan price. It
+39. Window plan cost is derived at read time from exactly one plan price. It
     keeps its native amount and currency, and stays unavailable when the
     comparison conversion is missing or stale rather than falling back to the
     native number.
-39. Plan value ratio divides API retail equivalent by window plan cost for one
+40. Plan value ratio divides API retail equivalent by window plan cost for one
     billing domain; the two purposes are never added. Partial pricing coverage
     makes the ratio an explicit lower bound. An unavailable retail equivalent
     leaves the ratio unavailable and never zero.
-40. Only billing domains with a declared plan price enter the plan value map.
+41. Only billing domains with a declared plan price enter the plan value map.
     Metered billing domains keep their own actual cost, are separately
     identified, and never receive a plan value ratio.
-41. A billing period is derived from one declared renewal date and the plan's own
+42. A billing period is derived from one declared renewal date and the plan's own
     period length, with month-end renewals clamped into shorter months. Without a
     renewal date the period is unknown, never assumed to align with the selected
     window or the calendar month.
-42. Billing-period evidence is collected over each subscription's own period and
+43. Billing-period evidence is collected over each subscription's own period and
     is independent of the selected window. Its elapsed and total days stay
     visible with the result, because a period that has barely started is not a
     poor result and cannot be compared with one that is nearly over.

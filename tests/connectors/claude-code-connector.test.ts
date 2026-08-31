@@ -258,7 +258,7 @@ describe('ClaudeCodeConnector', () => {
       },
       historyClient: new LocalTranscriptUsageClient({
         provider: 'claude-code',
-        root: workspace,
+        roots: [workspace],
         clock: () => new Date('2026-08-28T02:00:00.000Z')
       }),
       clock: () => new Date('2026-08-28T02:00:00.000Z')

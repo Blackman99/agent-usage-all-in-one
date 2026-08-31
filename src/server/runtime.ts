@@ -163,19 +163,22 @@ function localTranscriptClient(
 ): LocalTranscriptUsageClient {
   return new LocalTranscriptUsageClient({
     provider,
-    root: localTranscriptRoot(provider),
+    roots: localTranscriptRoots(provider),
     cachePath: join(applicationHome, 'cache', `${provider}-transcripts.json`)
   });
 }
 
-function localTranscriptRoot(provider: LocalTranscriptProvider): string {
+function localTranscriptRoots(provider: LocalTranscriptProvider): string[] {
   if (provider === 'codex') {
-    return join(resolveHomeOverride(process.env.CODEX_HOME, '.codex'), 'sessions');
+    // Codex moves finished rollouts from `sessions` into `archived_sessions`. Both hold the
+    // same evidence, so reading only the live directory loses local history as it ages out.
+    const home = resolveHomeOverride(process.env.CODEX_HOME, '.codex');
+    return [join(home, 'sessions'), join(home, 'archived_sessions')];
   }
   if (provider === 'claude-code') {
-    return join(resolveHomeOverride(process.env.CLAUDE_CONFIG_DIR, '.claude'), 'projects');
+    return [join(resolveHomeOverride(process.env.CLAUDE_CONFIG_DIR, '.claude'), 'projects')];
   }
-  return join(resolveHomeOverride(process.env.GROK_HOME, '.grok'), 'sessions');
+  return [join(resolveHomeOverride(process.env.GROK_HOME, '.grok'), 'sessions')];
 }
 
 function resolveHomeOverride(value: string | undefined, fallback: string): string {

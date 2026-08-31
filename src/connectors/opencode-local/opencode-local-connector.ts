@@ -37,7 +37,7 @@ export class OpenCodeLocalConnector implements Connector {
         quotaBuckets: [],
         usage: requests.map(mapLocalUsage),
         usageReconciliation: {
-          authoritativeIdPrefix: 'opencode-local-request:',
+          authoritativeIdPrefixes: ['opencode-local-request:'],
           retiredIdPrefixes: []
         },
         costs: requests.flatMap((request) =>

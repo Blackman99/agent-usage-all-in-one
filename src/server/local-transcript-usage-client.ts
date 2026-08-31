@@ -21,7 +21,7 @@ export interface TranscriptUsageClient {
 
 export interface LocalTranscriptUsageClientOptions {
   provider: LocalTranscriptProvider;
-  root: string;
+  roots: string[];
   clock?: () => Date;
   lookbackDays?: number;
   cachePath?: string;
@@ -55,7 +55,7 @@ interface CodexScanState {
 
 export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   readonly #provider: LocalTranscriptProvider;
-  readonly #root: string;
+  readonly #roots: string[];
   readonly #clock: () => Date;
   readonly #lookbackDays: number;
   readonly #cachePath?: string;
@@ -64,7 +64,7 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
 
   constructor(options: LocalTranscriptUsageClientOptions) {
     this.#provider = options.provider;
-    this.#root = options.root;
+    this.#roots = options.roots;
     this.#clock = options.clock ?? (() => new Date());
     this.#lookbackDays = options.lookbackDays ?? 90;
     this.#cachePath = options.cachePath;
@@ -76,7 +76,7 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     await this.#loadCache();
     if (options.mode === 'hard-rebuild') this.#fileCache.clear();
     const cutoff = this.#clock().getTime() - this.#lookbackDays * 24 * 60 * 60 * 1000;
-    const discovered = await listTranscriptFiles(this.#root, cutoff);
+    const discovered = await listTranscriptFiles(this.#roots, cutoff);
     const files = discovered.files;
     let complete = discovered.complete;
     const usage: UsageObservation[] = [];
@@ -514,10 +514,11 @@ function isForkedCodexSession(payload: Record<string, unknown>): boolean {
 }
 
 async function listTranscriptFiles(
-  root: string,
+  roots: string[],
   cutoff: number
 ): Promise<{ files: TranscriptFile[]; complete: boolean }> {
   const files: TranscriptFile[] = [];
+  const visited = new Set<string>();
   let complete = true;
   const walk = async (directory: string, isRoot = false): Promise<void> => {
     let entries;
@@ -532,6 +533,8 @@ async function listTranscriptFiles(
       if (entry.isDirectory()) {
         await walk(path);
       } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        if (visited.has(path)) continue;
+        visited.add(path);
         try {
           const metadata = await stat(path);
           if (metadata.mtimeMs >= cutoff) {
@@ -544,7 +547,8 @@ async function listTranscriptFiles(
       }
     }
   };
-  await walk(root, true);
+  // Overlapping roots stay harmless: a transcript is read once, whichever root reaches it.
+  for (const root of roots) await walk(root, true);
   return { files, complete };
 }
 

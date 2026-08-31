@@ -193,10 +193,12 @@ interface ProviderRow {
 
 function additiveUsagePredicate(alias = ''): string {
   const prefix = alias ? `${alias}.` : '';
-  const codexOfficialDays = `(SELECT billing_domain_id, date(observed_at)
-    FROM usage_observations
-    WHERE provider_id = 'codex' AND id LIKE 'codex:daily:%')`;
-  const codexRemainderDays = `(SELECT billing_domain_id, date(observed_at)
+  // A Codex day the connector could reconcile is stored as both its official account-wide
+  // total and the reconciled remainder that the local transcripts do not account for. The
+  // transcripts plus that remainder already equal the official total, so the official row is
+  // the one that steps aside. Days the connector could not reconcile carry no official row at
+  // all, which is why matching the two ids is enough and no day arithmetic happens here.
+  const codexReconciledRemainderIds = `(SELECT billing_domain_id, id
     FROM usage_observations
     WHERE provider_id = 'codex' AND id LIKE 'codex-transcript:account-remainder:%')`;
   return `NOT (
@@ -210,18 +212,11 @@ function additiveUsagePredicate(alias = ''): string {
     )
     OR (
       ${prefix}provider_id = 'codex'
+      AND ${prefix}id LIKE 'codex:daily:%'
       AND (
-        (
-          ${prefix}id LIKE 'codex:daily:%'
-          AND (${prefix}billing_domain_id, date(${prefix}observed_at)) IN ${codexRemainderDays}
-        )
-        OR (
-          ${prefix}id LIKE 'codex-transcript:%'
-          AND ${prefix}id NOT LIKE 'codex-transcript:account-remainder:%'
-          AND (${prefix}billing_domain_id, date(${prefix}observed_at)) IN ${codexOfficialDays}
-          AND (${prefix}billing_domain_id, date(${prefix}observed_at)) NOT IN ${codexRemainderDays}
-        )
-      )
+        ${prefix}billing_domain_id,
+        'codex-transcript:account-remainder:' || substr(${prefix}id, 13)
+      ) IN ${codexReconciledRemainderIds}
     )
   )`;
 }
@@ -618,7 +613,7 @@ export class SqliteUsageRepository implements UsageRepository {
       const usageReconciliation = snapshot.usageReconciliation;
       if (usageReconciliation) {
         const prefixes = [
-          usageReconciliation.authoritativeIdPrefix,
+          ...usageReconciliation.authoritativeIdPrefixes,
           ...usageReconciliation.retiredIdPrefixes
         ];
         if (prefixes.some((prefix) => prefix.length === 0)) {
@@ -655,13 +650,14 @@ export class SqliteUsageRepository implements UsageRepository {
         for (const prefix of usageReconciliation.retiredIdPrefixes) {
           deleteStoredUsage(prefix, new Set());
         }
-        const authoritativePrefix = usageReconciliation.authoritativeIdPrefix;
-        const incomingAuthoritativeIds = new Set(
-          snapshot.usage
-            .map((observation) => observation.id)
-            .filter((id) => id.startsWith(authoritativePrefix))
-        );
-        deleteStoredUsage(authoritativePrefix, incomingAuthoritativeIds);
+        for (const authoritativePrefix of usageReconciliation.authoritativeIdPrefixes) {
+          const incomingAuthoritativeIds = new Set(
+            snapshot.usage
+              .map((observation) => observation.id)
+              .filter((id) => id.startsWith(authoritativePrefix))
+          );
+          deleteStoredUsage(authoritativePrefix, incomingAuthoritativeIds);
+        }
       }
 
       const usageStatement = this.#database.prepare(

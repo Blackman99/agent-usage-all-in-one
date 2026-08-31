@@ -60,12 +60,14 @@ describe('Codex token application path', () => {
           };
         }
       },
-      () => new Date('2026-08-28T02:00:00.000Z')
+      // Reading as 2026-08-28 closes settles that bucket and puts its start on the inclusive edge
+      // of the 24h window, while the previous day sits just outside it.
+      () => new Date('2026-08-29T00:00:00.000Z')
     );
     const application = new UsageApplication({
       repository,
       connectors: [connector],
-      clock: () => new Date('2026-08-28T02:00:00.000Z')
+      clock: () => new Date('2026-08-29T00:00:00.000Z')
     });
 
     await application.refresh({ userInitiated: true });

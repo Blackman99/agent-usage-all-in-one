@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -29,6 +29,47 @@ afterEach(async () => {
 });
 
 describe('CodexConnector', () => {
+  it('reads archived Codex rollouts alongside the live session directory', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-archived-'));
+    transcriptWorkspaces.push(workspace);
+    const live = join(workspace, 'sessions');
+    const archived = join(workspace, 'archived_sessions');
+    await mkdir(live, { recursive: true });
+    await mkdir(archived, { recursive: true });
+    await writeFile(join(live, 'live.jsonl'), rollout('session-live', 20));
+    await writeFile(join(archived, 'archived.jsonl'), rollout('session-archived', 30));
+
+    const result = await new LocalTranscriptUsageClient({
+      provider: 'codex',
+      roots: [live, archived],
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).readUsage();
+
+    expect(result.complete).toBe(true);
+    expect(result.usage.map((observation) => observation.sessionId).sort()).toEqual([
+      'session-archived',
+      'session-live'
+    ]);
+    expect(result.usage.reduce((total, observation) => total + observation.outputTokens, 0)).toBe(
+      50
+    );
+  });
+
+  it('stays complete when a Codex transcript root does not exist', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-missing-root-'));
+    transcriptWorkspaces.push(workspace);
+    await writeFile(join(workspace, 'live.jsonl'), rollout('session-only', 20));
+
+    const result = await new LocalTranscriptUsageClient({
+      provider: 'codex',
+      roots: [workspace, join(workspace, 'archived_sessions')],
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).readUsage();
+
+    expect(result.complete).toBe(true);
+    expect(result.usage).toHaveLength(1);
+  });
+
   it('persists a path-redacted transcript index and reuses it after restart', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-cache-'));
     transcriptWorkspaces.push(workspace);
@@ -61,7 +102,7 @@ describe('CodexConnector', () => {
     );
     const options = {
       provider: 'codex' as const,
-      root: workspace,
+      roots: [workspace],
       cachePath,
       clock: () => new Date('2026-08-28T02:00:00.000Z')
     };
@@ -141,7 +182,7 @@ describe('CodexConnector', () => {
     };
     const historyClient = new LocalTranscriptUsageClient({
       provider: 'codex',
-      root: workspace,
+      roots: [workspace],
       clock: () => new Date('2026-08-28T02:00:00.000Z')
     });
 
@@ -177,7 +218,7 @@ describe('CodexConnector', () => {
       ])
     );
     expect(snapshot.usageReconciliation).toEqual({
-      authoritativeIdPrefix: 'codex-transcript:',
+      authoritativeIdPrefixes: ['codex-transcript:', 'codex:daily:'],
       retiredIdPrefixes: []
     });
   });
@@ -213,7 +254,7 @@ describe('CodexConnector', () => {
     );
     const historyClient = new LocalTranscriptUsageClient({
       provider: 'codex',
-      root: workspace,
+      roots: [workspace],
       clock: () => new Date('2026-08-28T02:00:00.000Z')
     });
     const connector = new CodexConnector(
@@ -278,11 +319,11 @@ describe('CodexConnector', () => {
           };
         }
       },
-      () => new Date('2026-08-28T02:00:00.000Z'),
+      () => new Date('2026-08-29T00:00:00.000Z'),
       new LocalTranscriptUsageClient({
         provider: 'codex',
-        root: workspace,
-        clock: () => new Date('2026-08-28T02:00:00.000Z')
+        roots: [workspace],
+        clock: () => new Date('2026-08-29T00:00:00.000Z')
       })
     ).collect();
 
@@ -303,6 +344,88 @@ describe('CodexConnector', () => {
         (observation) => observation.id === 'codex-transcript:account-remainder:2026-08-28'
       )
     ).not.toHaveProperty('sourceReportedTotalTokens');
+  });
+
+  it('leaves a Codex day to its local transcripts when they outgrow the official total', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-codex-outgrown-'));
+    transcriptWorkspaces.push(workspace);
+    await writeFile(
+      join(workspace, 'rollout.jsonl'),
+      [
+        JSON.stringify({
+          timestamp: '2026-08-28T00:59:00.000Z',
+          type: 'session_meta',
+          payload: { id: 'session-outgrown' }
+        }),
+        JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+        JSON.stringify({
+          timestamp: '2026-08-28T01:00:00.000Z',
+          type: 'event_msg',
+          payload: {
+            type: 'token_count',
+            info: {
+              last_token_usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 }
+            }
+          }
+        })
+      ].join('\n')
+    );
+    const snapshot = await new CodexConnector(
+      {
+        async readAccount() {
+          return {
+            ...accountPayload,
+            tokenUsage: {
+              ...accountPayload.tokenUsage!,
+              dailyUsageBuckets: [{ startDate: '2026-08-28', tokens: 100 }]
+            }
+          };
+        }
+      },
+      () => new Date('2026-08-29T00:00:00.000Z'),
+      new LocalTranscriptUsageClient({
+        provider: 'codex',
+        roots: [workspace],
+        clock: () => new Date('2026-08-29T00:00:00.000Z')
+      })
+    ).collect();
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({ model: 'gpt-5.6-sol', sourceReportedTotalTokens: 120 })
+    ]);
+    expect(snapshot.usageReconciliation).toEqual({
+      authoritativeIdPrefixes: ['codex-transcript:', 'codex:daily:'],
+      retiredIdPrefixes: []
+    });
+  });
+
+  it('holds back the account day that Codex has not finished aggregating', async () => {
+    const client: CodexAccountClient = {
+      async readAccount() {
+        return {
+          ...accountPayload,
+          tokenUsage: {
+            ...accountPayload.tokenUsage!,
+            dailyUsageBuckets: [
+              { startDate: '2026-08-26', tokens: 400 },
+              { startDate: '2026-08-27', tokens: 1250 }
+            ]
+          }
+        };
+      }
+    };
+    // 2026-08-27 is still running at this instant, so its bucket is necessarily partial.
+    const snapshot = await new CodexConnector(
+      client,
+      () => new Date('2026-08-27T12:00:00.000Z')
+    ).collect();
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        id: 'codex:daily:2026-08-26',
+        observedAt: '2026-08-26T00:00:00.000Z'
+      })
+    ]);
   });
 
   it('fails the local scan closed when Codex reports an impossible total', async () => {
@@ -344,17 +467,13 @@ describe('CodexConnector', () => {
       () => new Date('2026-08-28T02:00:00.000Z'),
       new LocalTranscriptUsageClient({
         provider: 'codex',
-        root: workspace,
+        roots: [workspace],
         clock: () => new Date('2026-08-28T02:00:00.000Z')
       })
     ).collect();
 
-    expect(snapshot.usage).toEqual([
-      expect.objectContaining({
-        id: 'codex:daily:2026-08-28',
-        sourceReportedTotalTokens: 999
-      })
-    ]);
+    expect(snapshot.usage).toEqual([]);
+    expect(snapshot).not.toHaveProperty('usageReconciliation');
     expect(snapshot.warnings).toEqual([
       expect.objectContaining({ code: 'local-transcript-scan-incomplete' })
     ]);
@@ -450,7 +569,7 @@ describe('CodexConnector', () => {
     );
     const historyClient = new LocalTranscriptUsageClient({
       provider: 'codex',
-      root: workspace,
+      roots: [workspace],
       clock: () => new Date('2026-08-28T03:00:00.000Z')
     });
     const snapshot = await new CodexConnector(
@@ -706,4 +825,29 @@ class FakeCodexProcess extends EventEmitter implements CodexAppServerProcess {
           : (this.#options.tokenUsage ?? accountPayload.tokenUsage);
     queueMicrotask(() => this.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`));
   }
+}
+
+function rollout(sessionId: string, outputTokens: number): string {
+  return [
+    JSON.stringify({
+      timestamp: '2026-08-28T00:59:00.000Z',
+      type: 'session_meta',
+      payload: { id: sessionId }
+    }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-sol' } }),
+    JSON.stringify({
+      timestamp: '2026-08-28T01:00:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          last_token_usage: {
+            input_tokens: 100,
+            output_tokens: outputTokens,
+            total_tokens: 100 + outputTokens
+          }
+        }
+      }
+    })
+  ].join('\n');
 }

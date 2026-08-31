@@ -89,7 +89,8 @@ export class CodexConnector implements Connector {
   }
 
   async collect(options: CollectionRequest = { mode: 'incremental' }): Promise<ConnectorSnapshot> {
-    const observedAt = this.#clock().toISOString();
+    const now = this.#clock();
+    const observedAt = now.toISOString();
     const warnings: ConnectorFailure[] = [];
     let payload: CodexAccountPayload | null = null;
     try {
@@ -101,21 +102,19 @@ export class CodexConnector implements Connector {
       ? await this.#historyClient.readUsage(options)
       : { usage: [], costs: [], complete: true };
     const hasLocalHistory = history.usage.length > 0;
-    const accountUsage = mapTokenUsage(payload?.tokenUsage ?? null);
-    const canReconcile = history.complete && accountUsage.length > 0;
-    const reconciledRemainders = canReconcile
-      ? reconcileAccountRemainders(accountUsage, history.usage)
-      : [];
+    const settledDays = settledAccountDays(payload?.tokenUsage ?? null, now.getTime());
+    const canReconcile = history.complete && settledDays.length > 0;
+    const accountUsage = canReconcile ? reconcileAccountDays(settledDays, history.usage) : [];
     if (!history.complete) warnings.push(incompleteTranscriptFailure());
     return {
       provider: { id: 'codex', displayName: 'Codex' },
       billingDomains: [{ id: 'subscription', displayName: 'Codex subscription' }],
       quotaBuckets: payload ? mapQuotaBuckets(payload.rateLimits) : [],
-      usage: [...accountUsage, ...history.usage, ...reconciledRemainders],
+      usage: [...accountUsage, ...history.usage],
       ...(hasLocalHistory && canReconcile
         ? {
             usageReconciliation: {
-              authoritativeIdPrefix: 'codex-transcript:',
+              authoritativeIdPrefixes: ['codex-transcript:', 'codex:daily:'],
               retiredIdPrefixes: []
             }
           }
@@ -127,27 +126,73 @@ export class CodexConnector implements Connector {
   }
 }
 
-function reconcileAccountRemainders(
-  accountUsage: UsageObservation[],
+// The account usage profile is relayed from the Codex backend, which buckets days in UTC and
+// finishes aggregating a day some hours after it ends. A bucket whose UTC day has not closed is
+// always partial, so it is never evidence for that day's total. A bucket that has closed but is
+// still catching up simply reads low, and the outgrown rule below leaves the day to the local
+// transcripts until the account total is at least as large as they are.
+interface SettledAccountDay {
+  day: string;
+  startMs: number;
+  tokens: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function settledAccountDays(
+  response: CodexTokenUsageResponse | null,
+  nowMs: number
+): SettledAccountDay[] {
+  return (response?.dailyUsageBuckets ?? [])
+    .map((bucket) => ({
+      day: bucket.startDate,
+      startMs: Date.parse(`${bucket.startDate}T00:00:00.000Z`),
+      tokens: bucket.tokens
+    }))
+    .filter((day) => Number.isFinite(day.startMs) && day.startMs + DAY_MS <= nowMs);
+}
+
+function reconcileAccountDays(
+  days: SettledAccountDay[],
   localUsage: UsageObservation[]
 ): UsageObservation[] {
-  return accountUsage.flatMap((accountObservation) => {
-    const day = accountObservation.observedAt.slice(0, 10);
-    const accountTotal = normalizeTokenObservation(accountObservation).recordedTokens;
-    const localTotal = localUsage
-      .filter((observation) => observation.observedAt.slice(0, 10) === day)
-      .reduce(
-        (total, observation) => total + normalizeTokenObservation(observation).recordedTokens,
-        0
-      );
-    if (localTotal === 0 || localTotal > accountTotal) return [];
+  const reconciledDays = new Set(days.map((day) => day.day));
+  const localTotals = new Map<string, number>();
+  for (const observation of localUsage) {
+    const day = observation.observedAt.slice(0, 10);
+    if (!reconciledDays.has(day)) continue;
+    const recorded = normalizeTokenObservation(observation).recordedTokens;
+    localTotals.set(day, (localTotals.get(day) ?? 0) + recorded);
+  }
+
+  return days.flatMap((day) => {
+    const localTotal = localTotals.get(day.day) ?? 0;
+    if (localTotal > day.tokens) return [];
+    const observedAt = new Date(day.startMs).toISOString();
+    const accountObservation = {
+      id: `codex:daily:${day.day}`,
+      billingDomainId: 'subscription',
+      model: null,
+      observedAt,
+      sourceReportedTotalTokens: day.tokens,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      modelAttribution: 'unclassified',
+      timePrecision: 'day',
+      usageScope: 'account-wide',
+      authority: 'official-account'
+    } satisfies UsageObservation;
+    if (localTotal === 0) return [accountObservation];
     return [
+      accountObservation,
       {
-        id: `codex-transcript:account-remainder:${day}`,
+        id: `codex-transcript:account-remainder:${day.day}`,
         billingDomainId: 'subscription',
         model: null,
-        observedAt: accountObservation.observedAt,
-        reconciledRemainderTokens: accountTotal - localTotal,
+        observedAt,
+        reconciledRemainderTokens: day.tokens - localTotal,
         inputTokens: 0,
         outputTokens: 0,
         cacheReadTokens: 0,
@@ -216,24 +261,6 @@ function mapQuotaBuckets(response: CodexRateLimitsResponse): QuotaBucket[] {
     }
   }
   return buckets;
-}
-
-function mapTokenUsage(response: CodexTokenUsageResponse | null): UsageObservation[] {
-  return (response?.dailyUsageBuckets ?? []).map((bucket) => ({
-    id: `codex:daily:${bucket.startDate}`,
-    billingDomainId: 'subscription',
-    model: null,
-    observedAt: `${bucket.startDate}T00:00:00.000Z`,
-    sourceReportedTotalTokens: bucket.tokens,
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    modelAttribution: 'unclassified',
-    timePrecision: 'day',
-    usageScope: 'account-wide',
-    authority: 'official-account'
-  }));
 }
 
 function formatWindowLabel(durationMinutes: number | null, fallback: string): string {

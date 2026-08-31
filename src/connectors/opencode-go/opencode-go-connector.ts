@@ -72,7 +72,7 @@ export class OpenCodeGoConnector implements Connector {
       ...(localResult.status === 'fulfilled'
         ? {
             usageReconciliation: {
-              authoritativeIdPrefix: 'opencode-request:',
+              authoritativeIdPrefixes: ['opencode-request:'],
               retiredIdPrefixes: ['opencode-session:']
             }
           }

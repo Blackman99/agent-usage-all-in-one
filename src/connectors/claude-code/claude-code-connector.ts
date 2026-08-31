@@ -53,7 +53,7 @@ export class ClaudeCodeConnector implements Connector {
       ...(history.usage.length > 0 && history.complete
         ? {
             usageReconciliation: {
-              authoritativeIdPrefix: 'claude-transcript:',
+              authoritativeIdPrefixes: ['claude-transcript:'],
               retiredIdPrefixes: ['claude-otel:']
             }
           }
