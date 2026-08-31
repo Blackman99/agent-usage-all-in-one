@@ -1,5 +1,19 @@
 # agent-usage-all-in-one
 
+## 0.4.1
+
+### Patch Changes
+
+- c0e3a25: Read Codex history from `archived_sessions` as well as `sessions`. Codex moves finished
+  rollouts into the archive after a few days, so local evidence used to disappear as it aged:
+  recent days kept their model detail while older ones collapsed into an unclassified
+  reconciled remainder and lost their API retail equivalent.
+- c0e3a25: Store a Codex account day only once it has closed and reconciles against the local
+  transcripts. The account profile finishes aggregating a day some hours after it ends, so its
+  newest bucket is partial; a partial bucket no longer replaces the transcripts it is smaller
+  than, which used to erase a whole day of recorded Tokens while its API retail equivalent
+  still counted.
+
 ## 0.4.0
 
 ### Minor Changes
