@@ -3686,13 +3686,36 @@ async function quotaTimelineLaneBandCount(canvas: Locator): Promise<number> {
   });
 }
 
-async function modelDetailCompositionLayout(canvas: Locator): Promise<{
+interface ModelDetailCompositionLayout {
   width: number;
   height: number;
   pieBottom: number;
   legendTop: number | null;
   gap: number | null;
-}> {
+}
+
+/**
+ * Measure the model-detail composition chart once it has actually painted.
+ *
+ * ECharts repaints on its own frame, so a measurement taken the instant a
+ * viewport change lands can read a canvas that is merely still blank rather
+ * than one without sectors. Retrying keeps the assertion — sectors that never
+ * arrive still fail — without turning a repaint delay into a failure.
+ */
+async function modelDetailCompositionLayout(
+  canvas: Locator
+): Promise<ModelDetailCompositionLayout> {
+  let layout: ModelDetailCompositionLayout | undefined;
+  await expect(async () => {
+    layout = await readModelDetailCompositionLayout(canvas);
+  }).toPass({ timeout: 10_000 });
+  if (!layout) throw new Error('Expected a model-detail composition measurement');
+  return layout;
+}
+
+async function readModelDetailCompositionLayout(
+  canvas: Locator
+): Promise<ModelDetailCompositionLayout> {
   return await canvas.evaluate((element) => {
     const chartCanvas = element as HTMLCanvasElement;
     const context = chartCanvas.getContext('2d', { willReadFrequently: true });
