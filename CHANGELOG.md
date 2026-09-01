@@ -1,5 +1,28 @@
 # agent-usage-all-in-one
 
+## 0.5.0
+
+### Minor Changes
+
+- aaadd6b: Add dsh (DeepSeek Harness) as a Provider, read from its local session logs. Every profile of
+  one dsh home counts, including terminal front ends composed on dsh such as codsh, which keep
+  no usage of their own. dsh reports Tokens and history with no subscription quota, and its
+  billing domains are dsh provider route keys, so a request is attributed to the route that
+  answered it instead of being labelled as DeepSeek spend. Cost is the API retail equivalent at
+  DeepSeek's published peak/off-peak rates. A log that declares an unknown on-disk format
+  version is skipped and named rather than partially trusted, and an unfinished final frame —
+  what a reader sees mid-append — keeps the complete records before it.
+
+### Patch Changes
+
+- 79e1f0c: Look for a starting daemon over a plain socket instead of a request abandoned after half a
+  second. Waiting out a cold start asked well over a hundred times, and Node can throw
+  `setTypeOfService EINVAL` from inside its own socket callbacks when one is torn down at the
+  wrong moment, past the `try` around it, ending the command instead of opening the dashboard.
+- da29cb9: Wait for the development daemon and Vite over a plain socket instead of requests abandoned
+  after half a second. An abandoned request can throw from inside Node's own HTTP client
+  callbacks, past the `try` around it, ending the development run while it was still starting.
+
 ## 0.4.1
 
 ### Patch Changes
