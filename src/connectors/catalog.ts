@@ -72,5 +72,20 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
       provider: { id: 'grok', displayName: 'Grok' },
       billingDomain: { id: 'xai-api', displayName: 'xAI API' }
     }
+  },
+  {
+    id: 'dsh',
+    displayName: 'dsh',
+    command: 'dsh',
+    permissionDescription:
+      'Read local dsh session logs for token history. No credential file is opened.',
+    credentialOwner: 'official-client',
+    experimental: true,
+    expectedCoverage: ['tokens', 'history'],
+    target: {
+      provider: { id: 'dsh', displayName: 'dsh' },
+      billingDomain: { id: 'deepseek-official', displayName: 'DeepSeek API' }
+    },
+    officialCredentialPaths: ['.dsh']
   }
 ];

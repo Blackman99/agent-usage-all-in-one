@@ -44,7 +44,10 @@ const TREND_SEGMENT_COLORS: Record<string, string> = {
   opencode: '#55c89d',
   'opencode-go': '#73d4b2',
   'grok:grok-build-subscription': '#b28cff',
-  'grok:xai-api': '#f07f9a'
+  'grok:xai-api': '#f07f9a',
+  // A warm hue, because the palette above already spends both blues and both
+  // greens: a third blue would read as another OpenAI or OpenCode segment.
+  dsh: '#e3c85c'
 };
 
 export function trendSegmentColor(providerId: string, billingDomainId: string): string {

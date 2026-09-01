@@ -57,7 +57,8 @@
     { id: 'codex', displayName: 'Codex' },
     { id: 'claude-code', displayName: 'Claude Code' },
     { id: 'opencode-go', displayName: 'OpenCode Go' },
-    { id: 'grok', displayName: 'Grok' }
+    { id: 'grok', displayName: 'Grok' },
+    { id: 'dsh', displayName: 'dsh' }
   ];
   const DEFAULT_AGENT_PROVIDER_IDS = new Set(
     DEFAULT_AGENT_PROVIDERS.map((provider) => provider.id)
@@ -793,7 +794,8 @@
       'claude-code': 'claudePermission',
       'opencode-go': 'openCodePermission',
       grok: 'grokPermission',
-      'xai-api': 'xaiPermission'
+      'xai-api': 'xaiPermission',
+      dsh: 'dshPermission'
     };
     const key = keys[connector.id];
     return key ? t(key) : connector.permissionDescription;
@@ -893,6 +895,12 @@
       mixed: 'authorityMixed'
     };
     return t(keys[authority]);
+  }
+
+  // A Provider that meters each request has no allowance to report, so an
+  // absent quota is its shape rather than a gap in what could be read.
+  function quotaMetered(connector: ConnectorStatus | undefined): boolean {
+    return connector ? connector.expectedCoverage.includes('quota') : true;
   }
 
   function coverageLevelLabel(coverage: CoverageLevel): string {
@@ -1168,6 +1176,12 @@
       grok: {
         dark: '/brands/grok-light.svg',
         light: '/brands/grok-dark.svg'
+      },
+      // DeepSeek publishes one monochrome mark, so it keeps a light plate in
+      // both themes the way the OpenAI mark does rather than being recolored.
+      dsh: {
+        dark: '/brands/deepseek.svg',
+        light: '/brands/deepseek.svg'
       }
     };
     return paths[providerId] ?? null;
@@ -1215,7 +1229,8 @@
       codex: 0,
       'claude-code': 1,
       'opencode-go': 2,
-      grok: 3
+      grok: 3,
+      dsh: 4
     };
     return providers.sort(
       (left, right) =>
@@ -1599,7 +1614,11 @@
                         {provider.displayName}
                       </h2>
                       <div class="provider-status">
-                        <div class="coverage">{coverageLevelLabel(domainCoverage.quota)}</div>
+                        <div class="coverage">
+                          {quotaMetered(domainConnector)
+                            ? coverageLevelLabel(domainCoverage.quota)
+                            : t('noQuotaWindow')}
+                        </div>
                         {#if domainConnector?.state === 'connected'}
                           <span
                             class="connection-chip"
@@ -1746,6 +1765,9 @@
                     </details>
                   {/if}
                   <div class="section-label">{t('quota')}</div>
+                  {#if !quotaMetered(connector)}
+                    <p class="quota-absent">{t('noQuotaWindowDetail')}</p>
+                  {/if}
                   <div class="quotas">
                     {#each displayQuotaBuckets(domain.quotaBuckets) as bucket (bucket.id)}
                       <div class="quota-row">
@@ -3628,7 +3650,8 @@
     object-fit: contain;
   }
 
-  .ranking-logo[data-provider-logo='codex'] {
+  .ranking-logo[data-provider-logo='codex'],
+  .ranking-logo[data-provider-logo='dsh'] {
     border-radius: 6px;
     background: #fff;
   }
@@ -4235,7 +4258,10 @@
     object-fit: contain;
   }
 
-  .provider-logo[data-provider-logo='codex'] {
+  /* Monochrome official marks keep a light plate so the reviewed asset stays
+     legible in both themes without being recolored. */
+  .provider-logo[data-provider-logo='codex'],
+  .provider-logo[data-provider-logo='dsh'] {
     padding: 8px;
     background: #fff;
   }
@@ -4326,6 +4352,13 @@
   .section-label {
     margin-top: auto;
     padding-top: 20px;
+  }
+
+  .quota-absent {
+    margin: 0;
+    color: #aab1bf;
+    font-size: 0.76rem;
+    line-height: 1.55;
   }
 
   .quota-row + .quota-row {

@@ -17,6 +17,7 @@ import { CliOpenCodeLocalHistoryClient } from '../connectors/opencode-go/local-o
 import { OfficialOpenCodeGoClient } from '../connectors/opencode-go/official-opencode-go-client.js';
 import { OpenCodeAuthFileReader } from '../connectors/opencode-go/opencode-auth-reader.js';
 import { OpenCodeGoConnector } from '../connectors/opencode-go/opencode-go-connector.js';
+import { DshConnector } from '../connectors/dsh/dsh-connector.js';
 import { GrokBuildConnector } from '../connectors/grok-build/grok-build-connector.js';
 import { parseGrokOtlpMetrics } from '../connectors/grok-build/grok-telemetry.js';
 import { StdioGrokBillingClient } from '../connectors/grok-build/stdio-grok-billing-client.js';
@@ -75,7 +76,8 @@ export async function runDaemon(home: string): Promise<void> {
         billingClient: new StdioGrokBillingClient(),
         historyClient: localTranscriptClient('grok', home)
       }),
-      new XaiApiConnector({ accountClient: new XaiManagementApiClient({ secretStore }) })
+      new XaiApiConnector({ accountClient: new XaiManagementApiClient({ secretStore }) }),
+      new DshConnector({ historyClient: localTranscriptClient('dsh', home) })
     ],
     connectorDefinitions: defaultConnectorDefinitions,
     discoveryProbe: new PathDiscoveryProbe(),
@@ -98,7 +100,7 @@ export async function runDaemon(home: string): Promise<void> {
       }
     }),
     connectorPolicies: Object.fromEntries(
-      ['codex', 'claude-code', 'opencode-go', 'opencode', 'grok', 'xai-api'].map((id) => [
+      ['codex', 'claude-code', 'opencode-go', 'opencode', 'grok', 'xai-api', 'dsh'].map((id) => [
         id,
         { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: id === 'claude-code' ? 25_000 : 20_000 }
       ])
@@ -177,6 +179,11 @@ function localTranscriptRoots(provider: LocalTranscriptProvider): string[] {
   }
   if (provider === 'claude-code') {
     return [join(resolveHomeOverride(process.env.CLAUDE_CONFIG_DIR, '.claude'), 'projects')];
+  }
+  if (provider === 'dsh') {
+    // One dsh home holds every profile's sessions, so a TUI layer composed on
+    // dsh needs no root of its own.
+    return [join(resolveHomeOverride(process.env.DSH_HOME, '.dsh'), 'sessions')];
   }
   return [join(resolveHomeOverride(process.env.GROK_HOME, '.grok'), 'sessions')];
 }

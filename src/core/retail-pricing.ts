@@ -316,6 +316,31 @@ const WEEKDAY_PEAK_RANGES = [
   { startHour: 1, endHour: 4 },
   { startHour: 6, endHour: 10 }
 ];
+const DEEPSEEK_OFFICIAL_SOURCE = {
+  title: 'DeepSeek API pricing',
+  url: 'https://api-docs.deepseek.com/quick_start/pricing',
+  retrievedAt: '2026-09-01'
+};
+/**
+ * DeepSeek's own off-peak rates per million Tokens, read from its published API
+ * pricing table. These are deliberately not shared with the OpenCode Go entries
+ * above: the two happen to agree today, but each price answers to its own
+ * source, so a future reseller markup must not silently move DeepSeek's rates.
+ */
+const DEEPSEEK_OFFICIAL_MODELS: Array<
+  [model: string, input: number, output: number, cacheRead: number]
+> = [
+  ['deepseek-v4-pro', 0.66, 1.98, 0.022],
+  ['deepseek-v4-flash', 0.22, 0.66, 0.007],
+  ['deepseek-v4-flash-vision-exp', 0.22, 0.66, 0.007]
+];
+/**
+ * DeepSeek published the peak/off-peak schedule for 2026-08-16 but documents no
+ * switch instant inside that day, so the interval opens at the first complete
+ * day. An earlier request stays unpriced instead of being priced at rates that
+ * may not have applied to it yet.
+ */
+const DEEPSEEK_OFFICIAL_EFFECTIVE_FROM = '2026-08-17T00:00:00.000Z';
 
 const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
   version: '2026-08-28-grok-4.6-build',
@@ -371,6 +396,10 @@ const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
         ranges: WEEKDAY_PEAK_RANGES,
         match: 'inside'
       })
+    ]),
+    ...DEEPSEEK_OFFICIAL_MODELS.flatMap(([model, input, output, cacheRead]) => [
+      dshDeepSeekEntry(model, 'off-peak', input, output, cacheRead),
+      dshDeepSeekEntry(model, 'peak', input * 2, output * 2, cacheRead * 2)
     ]),
     xaiEntry({
       id: 'xai-grok-build-0.1-short-2026-05-19',
@@ -454,7 +483,7 @@ const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
 };
 
 export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
-  version: '2026-08-29-opencode-local-history',
+  version: '2026-09-01-dsh-deepseek-official',
   entries: [
     ...DIRECT_OFFICIAL_PRICING_CATALOG.entries,
     ...openCodeLocalHistoryEntries(DIRECT_OFFICIAL_PRICING_CATALOG.entries)
@@ -539,6 +568,55 @@ function openCodeGoEntry(
       'cache-write': cacheWrite
     },
     source: { ...OPENCODE_GO_SOURCE, url: history.sourceUrl }
+  };
+}
+
+/**
+ * One DeepSeek API price interval for the dsh Provider.
+ *
+ * dsh answers through provider routes, so its billing domain is the route key
+ * the session log records; `deepseek-official` is the domain DeepSeek's own
+ * published rates apply to. Cache writes carry no rate because DeepSeek's table
+ * bills only cache-hit and cache-miss input.
+ * @param model - DeepSeek model id as the log reports it.
+ * @param tier - which side of the published UTC schedule this interval prices.
+ * @param input - cache-miss input rate per million Tokens.
+ * @param output - output rate per million Tokens.
+ * @param cacheRead - cache-hit input rate per million Tokens.
+ */
+function dshDeepSeekEntry(
+  model: string,
+  tier: 'off-peak' | 'peak',
+  input: number,
+  output: number,
+  cacheRead: number
+): RetailPriceCatalogEntry {
+  const versionDate = DEEPSEEK_OFFICIAL_EFFECTIVE_FROM.slice(0, 10);
+  return {
+    id: `dsh-deepseek-${model}-${tier}-${versionDate}`,
+    priceVersion: `deepseek-official-${versionDate}`,
+    providerId: 'dsh',
+    billingDomainId: 'deepseek-official',
+    canonicalModel: model,
+    aliases: [],
+    currency: 'USD',
+    effectiveFrom: DEEPSEEK_OFFICIAL_EFFECTIVE_FROM,
+    effectiveUntil: null,
+    contextTier: tier === 'peak' ? 'weekday-peak-utc' : 'off-peak-utc',
+    contextRule: {
+      kind: 'utc-schedule',
+      weekdays: [1, 2, 3, 4, 5],
+      ranges: WEEKDAY_PEAK_RANGES,
+      match: tier === 'peak' ? 'inside' : 'outside'
+    },
+    ratesPerMillion: {
+      input,
+      output,
+      reasoning: output,
+      'cache-read': cacheRead,
+      'cache-write': null
+    },
+    source: DEEPSEEK_OFFICIAL_SOURCE
   };
 }
 

@@ -10,6 +10,13 @@ logo requests. A Provider without a reviewed product-specific mark uses plain te
 | OpenCode Go      | `opencode-light.svg` — `4e3c99fad0454b986101eec58843bc63481b1f6569db7779f8c0a49815bef9ad`; `opencode-dark.svg` — `dc77a89df840a7f1665ec6638a89af2a5246a16cd1eb48bb7fa0f326782139b0` | Current square variants from the official [OpenCode brand page](https://opencode.ai/brand)                                                                                                                                     | `prefers-color-scheme` selects the reviewed light/dark pair                           |
 | Grok / xAI API   | `grok-dark.svg` — `a127a7cd42b0450f7d3827a331b0730aab49fd99c3fe920d172475b9ffc83992`; `grok-light.svg` — `b20648e2f111d7fbc91f58b22d1e76e9885b68a163cb5a1010f7f11bf5840491`         | `Grok_Logomark_Dark.svg` and `Grok_Logomark_Light.svg` from the official [SpaceXAI brand package](https://data.x.ai/logos/xAI_Grok_Assets.zip), linked by the [SpaceXAI Brand Guidelines](https://x.ai/legal/brand-guidelines) | The official black mark is used on light surfaces and the white mark on dark surfaces |
 
+| dsh (DeepSeek) | `deepseek.svg` — `a6a972765f694fe01a3cd9a563bce1bfcdb67d57e31d69ee0affd703a1c4f247` | `img/logo.svg` served by the official [DeepSeek API documentation](https://api-docs.deepseek.com/) | One official monochrome asset in both themes, shown on a light plate the way the OpenAI mark is; no runtime recoloring |
+
+DeepSeek publishes no brand or press-kit page, so the audited asset is the mark
+its own documentation site serves, byte-for-byte. It is a single dark path with
+no light counterpart, so it keeps the light plate the OpenAI mark already uses
+instead of being recolored for dark surfaces.
+
 `opencode.svg` is an earlier official dark asset retained only for compatibility
 with already-built clients; new UI surfaces use the audited pair above. If any
 image fails to load, the UI falls back to the plain Provider name and never

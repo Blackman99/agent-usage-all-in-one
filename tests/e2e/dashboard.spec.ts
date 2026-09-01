@@ -51,7 +51,8 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
     { id: 'codex', name: 'Codex' },
     { id: 'claude-code', name: 'Claude Code' },
     { id: 'opencode-go', name: 'OpenCode Go' },
-    { id: 'grok', name: 'Grok' }
+    { id: 'grok', name: 'Grok' },
+    { id: 'dsh', name: 'dsh' }
   ]) {
     await expect(
       agentPanel.getByRole('heading', { name: provider.name, exact: true })
@@ -80,6 +81,15 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
 
   releaseOverview();
   await expect(page.locator('.provider-card').first()).toBeVisible();
+
+  // A Provider that meters each request says so instead of reporting an
+  // allowance it never had as unavailable.
+  const dshCard = agentPanel.locator('.provider-card', {
+    has: page.getByRole('heading', { name: 'dsh', exact: true })
+  });
+  await expect(dshCard.locator('.coverage')).toHaveText('No quota window');
+  await expect(dshCard.locator('.quota-absent')).toContainText('meters each request');
+  await expect(dshCard.locator('.quota-row')).toHaveCount(0);
 });
 
 test('shows each Agent card as soon as that provider finishes loading', async ({ page }) => {
@@ -3394,7 +3404,10 @@ test('keeps provider cards and their final quota rows aligned without forecasts'
 
   await page.setViewportSize({ width: 1680, height: 1000 });
   await page.goto(freshLaunch.stdout.trim());
-  const cards = page.locator('.provider-card');
+  // Every quota-bearing card is compared; dsh keeps a card without quota rows,
+  // because it reports Tokens against a pay-as-you-go route and no allowance.
+  await expect(page.locator('.provider-card')).toHaveCount(5);
+  const cards = page.locator('.provider-card:has(.quota-row)');
   await expect(cards).toHaveCount(4);
   await expect(page.locator('.forecast-list')).toHaveCount(0);
   const geometry = await cards.evaluateAll((elements) =>

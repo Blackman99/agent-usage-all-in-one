@@ -6,13 +6,16 @@ import { createInterface } from 'node:readline';
 
 import type { CollectionRequest, CostRecord, UsageObservation } from '../core/types.js';
 import { normalizeTokenObservation } from '../core/token-normalization.js';
+import { readZstdFramedText } from './zstd-frames.js';
 
-export type LocalTranscriptProvider = 'claude-code' | 'codex' | 'grok';
+export type LocalTranscriptProvider = 'claude-code' | 'codex' | 'grok' | 'dsh';
 
 export interface LocalTranscriptUsageResult {
   usage: UsageObservation[];
   costs: CostRecord[];
   complete: boolean;
+  /** A transcript declared an on-disk format version this reader does not know. */
+  unsupportedFormat?: boolean;
 }
 
 export interface TranscriptUsageClient {
@@ -53,6 +56,28 @@ interface CodexScanState {
   forkCopyAnchorMs: number;
 }
 
+interface DshScanState {
+  sessionId: string;
+  route: string;
+  model: string;
+  unsupportedVersion: boolean;
+}
+
+/**
+ * Billing domain for dsh usage whose route the log does not name.
+ *
+ * dsh billing domains are its own provider route keys, so the domain a request
+ * belongs to is read from the log rather than assumed. This constant only names
+ * the deployment default, which is also the domain the Provider summarizes.
+ */
+export const DSH_PRIMARY_BILLING_DOMAIN_ID = 'deepseek-official';
+/** On-disk session-format version this reader understands. */
+const DSH_SESSION_FORMAT_VERSION = 0;
+/** Compressed dsh session artifact suffix; `compression: 'none'` keeps plain `.jsonl`. */
+const DSH_COMPRESSED_SUFFIX = '.jsonl.zstd';
+/** Lines worth parsing in a dsh log: the header, a route change, or reported usage. */
+const DSH_LINE_HINTS = ['"usage"', '"request/context"', '"type":"session"'];
+
 export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   readonly #provider: LocalTranscriptProvider;
   readonly #roots: string[];
@@ -81,6 +106,7 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     let complete = discovered.complete;
     const usage: UsageObservation[] = [];
     const costs: CostRecord[] = [];
+    let unsupportedFormat = false;
     const seen = new Set<string>();
     const livePaths = new Set(files.map((file) => stableId(file.path)));
     for (const path of this.#fileCache.keys()) {
@@ -90,6 +116,7 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     for (const file of files) {
       const parsedFile = await this.#readFile(file);
       complete &&= parsedFile.complete;
+      unsupportedFormat ||= parsedFile.unsupportedFormat;
       const parsedRecords = parsedFile.records;
       for (const parsed of parsedRecords) {
         if (new Date(parsed.observation.observedAt).getTime() < cutoff) continue;
@@ -115,46 +142,43 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
 
     await this.#persistCache();
 
-    return { usage, costs, complete };
+    return { usage, costs, complete, unsupportedFormat };
   }
 
   async #readFile(
     file: TranscriptFile
-  ): Promise<{ records: ParsedTranscriptRecord[]; complete: boolean }> {
+  ): Promise<{ records: ParsedTranscriptRecord[]; complete: boolean; unsupportedFormat: boolean }> {
     const cacheKey = stableId(file.path);
     const cached = this.#fileCache.get(cacheKey);
     if (cached && cached.size === file.size && cached.mtimeMs === file.mtimeMs) {
-      return { records: cached.records, complete: true };
+      return { records: cached.records, complete: true, unsupportedFormat: false };
     }
     const records: ParsedTranscriptRecord[] = [];
+    const codexState: CodexScanState = {
+      model: '',
+      sessionId: '',
+      lastUsageSignature: null,
+      sawSessionMeta: false,
+      suppressingForkCopies: false,
+      forkCopyAnchorMs: 0
+    };
+    const dshState: DshScanState = {
+      sessionId: '',
+      route: '',
+      model: '',
+      unsupportedVersion: false
+    };
     try {
-      const codexState: CodexScanState = {
-        model: '',
-        sessionId: '',
-        lastUsageSignature: null,
-        sawSessionMeta: false,
-        suppressingForkCopies: false,
-        forkCopyAnchorMs: 0
-      };
-      const lines = createInterface({
-        input: createReadStream(file.path, { encoding: 'utf8' }),
-        crlfDelay: Infinity
-      });
-      for await (const line of lines) {
-        const parsedRecords =
-          this.#provider === 'claude-code'
-            ? line.includes('"usage"')
-              ? compact(parseClaudeTranscriptLine(line))
-              : []
-            : this.#provider === 'codex'
-              ? compact(parseCodexTranscriptLine(line, codexState))
-              : line.includes('"turn_completed"')
-                ? parseGrokTranscriptLine(line)
-                : [];
-        records.push(...parsedRecords);
+      for await (const line of readTranscriptLines(file.path)) {
+        records.push(...this.#parseLine(line, codexState, dshState));
+        // An unknown format version is never partially trusted, and the file
+        // stays uncached so the reported gap does not vanish on the next scan.
+        if (dshState.unsupportedVersion) {
+          return { records: [], complete: false, unsupportedFormat: true };
+        }
       }
     } catch {
-      return { records: cached?.records ?? [], complete: false };
+      return { records: cached?.records ?? [], complete: false, unsupportedFormat: false };
     }
     this.#fileCache.set(cacheKey, {
       ...file,
@@ -162,7 +186,24 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
       records,
       recordsDigest: stableId(JSON.stringify(records))
     });
-    return { records, complete: true };
+    return { records, complete: true, unsupportedFormat: false };
+  }
+
+  #parseLine(
+    line: string,
+    codexState: CodexScanState,
+    dshState: DshScanState
+  ): ParsedTranscriptRecord[] {
+    if (this.#provider === 'claude-code') {
+      return line.includes('"usage"') ? compact(parseClaudeTranscriptLine(line)) : [];
+    }
+    if (this.#provider === 'codex') return compact(parseCodexTranscriptLine(line, codexState));
+    if (this.#provider === 'dsh') {
+      return DSH_LINE_HINTS.some((hint) => line.includes(hint))
+        ? parseDshTranscriptLine(line, dshState)
+        : [];
+    }
+    return line.includes('"turn_completed"') ? parseGrokTranscriptLine(line) : [];
   }
 
   async #loadCache(): Promise<void> {
@@ -532,7 +573,10 @@ async function listTranscriptFiles(
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {
         await walk(path);
-      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      } else if (
+        entry.isFile() &&
+        (entry.name.endsWith('.jsonl') || entry.name.endsWith(DSH_COMPRESSED_SUFFIX))
+      ) {
         if (visited.has(path)) continue;
         visited.add(path);
         try {
@@ -554,6 +598,35 @@ async function listTranscriptFiles(
 
 function isMissingPath(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+/**
+ * Yield the logical lines of one transcript, whichever encoding it uses.
+ *
+ * A dsh session log is a concatenation of independent Zstandard frames rather
+ * than newline-delimited text, so it is decoded frame by frame and split here.
+ * The trailing segment is dropped because it is either the empty string after a
+ * final newline or a line the writer has not finished appending; either way it
+ * is not yet a record. A compressed artifact that yields no frame at all is
+ * treated as unreadable so the caller reports a gap instead of silently
+ * reporting an empty history.
+ * @param path - transcript path.
+ */
+async function* readTranscriptLines(path: string): AsyncGenerator<string> {
+  if (!path.endsWith(DSH_COMPRESSED_SUFFIX)) {
+    yield* createInterface({
+      input: createReadStream(path, { encoding: 'utf8' }),
+      crlfDelay: Infinity
+    });
+    return;
+  }
+  const source = await readFile(path);
+  if (source.byteLength === 0) return;
+  const decoded = await readZstdFramedText(source);
+  if (decoded.frames === 0) throw new Error('No complete Zstandard frame in session log.');
+  const lines = decoded.text.split('\n');
+  lines.pop();
+  yield* lines;
 }
 
 function parseClaudeTranscriptLine(line: string): ParsedTranscriptRecord | null {
@@ -611,6 +684,80 @@ function parseClaudeTranscriptLine(line: string): ParsedTranscriptRecord | null 
     },
     reportedCostUsd: finiteNonNegative(record.costUSD)
   };
+}
+
+/**
+ * Read one line of a dsh session log.
+ *
+ * The log is an append-only event stream whose first line is the immutable
+ * session header. Provider-reported accounting arrives on `assistant/message`
+ * events, whose four token buckets are disjoint with reasoning already inside
+ * the output count. Each message carries the route that answered it, so a
+ * session that switches routes attributes every request to the billing domain
+ * that actually served it; `request/context` supplies the same pair and is kept
+ * as the fallback for a message that omits its source.
+ * @param line - one decoded logical line.
+ * @param state - header and route facts carried across the file's lines.
+ */
+function parseDshTranscriptLine(line: string, state: DshScanState): ParsedTranscriptRecord[] {
+  const record = parseObject(line);
+  if (!record) return [];
+  if (record.type === 'session') {
+    state.sessionId = string(record.id) ?? '';
+    state.unsupportedVersion = record.version !== DSH_SESSION_FORMAT_VERSION;
+    return [];
+  }
+  const data = asObject(record.data);
+  if (!data) return [];
+  if (record.type === 'request/context') {
+    state.route = string(data.provider) ?? state.route;
+    state.model = string(data.model) ?? state.model;
+    return [];
+  }
+  if (record.type !== 'assistant/message') return [];
+  const usage = asObject(data.usage);
+  const observedAtMs = finiteNonNegative(record.time);
+  if (!usage || observedAtMs === null) return [];
+
+  const message = asObject(data.message);
+  const source = asObject(message?.source);
+  const model = string(source?.model) ?? string(state.model);
+  const route = string(source?.provider) ?? string(state.route) ?? DSH_PRIMARY_BILLING_DOMAIN_ID;
+  const sequence = finiteNonNegative(record.seq);
+  const messageIdentity =
+    string(message?.id) ?? (sequence === null ? stableId(line) : `${sequence}`);
+  const dedupeKey = `dsh:${state.sessionId}:${messageIdentity}`;
+
+  return [
+    {
+      dedupeKey,
+      observation: {
+        id: `dsh-transcript:${stableId(dedupeKey)}`,
+        billingDomainId: route,
+        model,
+        sessionId: state.sessionId,
+        observedAt: new Date(observedAtMs).toISOString(),
+        inputTokens: positiveInteger(usage.inputTokens),
+        outputTokens: positiveInteger(usage.outputTokens),
+        reasoningTokens: positiveInteger(usage.reasoningTokens),
+        cacheReadTokens: positiveInteger(usage.cacheReadTokens),
+        cacheWriteTokens: positiveInteger(usage.cacheWriteTokens),
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        },
+        modelAttribution: model ? 'known' : 'unclassified',
+        timePrecision: 'event',
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
+        authority: 'local-observation'
+      },
+      // dsh records provider accounting without money; cost comes from the
+      // versioned API retail equivalent instead of a client-reported estimate.
+      reportedCostUsd: null
+    }
+  ];
 }
 
 function parseObject(value: string): Record<string, unknown> | null {
