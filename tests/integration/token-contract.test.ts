@@ -9,6 +9,8 @@ import { UsageApplication } from '$core/usage-application.js';
 import type { ConnectorSnapshot } from '$core/types.js';
 import { SqliteUsageRepository } from '$server/sqlite-usage-repository.js';
 
+/** The moment the fixture's observations are read at. */
+const NOW = new Date('2026-08-28T03:00:00.000Z');
 const workspaces: string[] = [];
 
 afterEach(async () => {
@@ -24,7 +26,7 @@ describe('expanded token contract', () => {
     const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
     repository.saveSnapshot(tokenSnapshot());
 
-    const overview = repository.getOverview(new Date('2026-08-28T03:00:00.000Z'), {
+    const overview = repository.getOverview(NOW, {
       window: '7d'
     });
     const provider = overview.providers[0];
@@ -50,7 +52,10 @@ describe('expanded token contract', () => {
       'known-source-model'
     ]);
 
-    const application = new UsageApplication({ repository, connectors: [] });
+    // The export resolves its window from the application clock, so it is
+    // pinned to the same moment the overview above was read at: the fixture's
+    // day-precision observation is only inside a 7-day window from there.
+    const application = new UsageApplication({ repository, connectors: [], clock: () => NOW });
     const exported = JSON.parse(
       (await application.exportUsage({ format: 'json', window: '7d', timeZone: 'UTC' })).body
     ) as { version: number; rows: Array<Record<string, unknown>> };
