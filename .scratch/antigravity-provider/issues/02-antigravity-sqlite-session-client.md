@@ -4,12 +4,15 @@
 
 **Blocked by:** 01 — 注册 Antigravity 目录定义与零售等效定价快照.
 
-**Status:** blocked
+**Status:** complete
 
-- [ ] 实现 `AntigravitySqliteUsageClientOptions` 与 `AntigravitySqliteUsageClient` 类。
-- [ ] 解析 `conversation_summaries.db` 读取会话元数据（UUID、修改时间），过滤出在 `lookbackDays` 窗口内的有效会话。
-- [ ] 针对目标 `conversations/<uuid>.db`，使用 SQLite 查询 `gen_metadata` 表。
-- [ ] 利用 `protobufjs` 反序列化 Protobuf 数据包，提取官方上报的精确 Token（输入 Prompt Tokens、输出 Candidates Tokens，若有推理 Token 则独立拆分）。
-- [ ] 对每条记录生成确定性的 dedupeKey（`antigravity:<conversationId>:<idx>`），并通过 `normalizeTokenObservation` 校验。
-- [ ] 实现本地 JSON 缓存（比对文件 mtime），对未修改的 DB 库跳过查询与 Protobuf 解码。
-- [ ] 编写单元测试，使用真实/合成的 SQLite fixture 验证解析准确性、增量缓存有效性与异常损坏库的容错能力。
+- [x] 实现 `AntigravitySqliteUsageClientOptions` 与 `AntigravitySqliteUsageClient` 类。
+- [x] 解析 `conversation_summaries.db` 读取会话元数据（UUID、修改时间），过滤出在 `lookbackDays` 窗口内的有效会话。
+- [x] 针对目标 `conversations/<uuid>.db`，使用 SQLite 查询 `gen_metadata` 表。
+- [x] 利用 `protobufjs` 反序列化 Protobuf 数据包，提取官方上报的精确 Token（输入 Prompt Tokens、输出 Candidates Tokens，若有推理 Token 则独立拆分）。
+- [x] 对每条记录生成确定性的 dedupeKey（`antigravity:<conversationId>:<idx>`），并通过 `normalizeTokenObservation` 校验。
+- [x] 实现本地 JSON 缓存（比对文件 mtime），对未修改的 DB 库跳过查询与 Protobuf 解码。
+- [x] 编写单元测试，使用真实/合成的 SQLite fixture 验证解析准确性、增量缓存有效性与异常损坏库的容错能力。
+
+**Completion:** complete — AntigravitySqliteUsageClient implemented with Protobuf decoding, two-level caching, and verified on both unit test fixtures and live user data.
+
