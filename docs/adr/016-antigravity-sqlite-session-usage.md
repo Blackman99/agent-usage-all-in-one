@@ -19,7 +19,8 @@ A read-only `antigravity` Provider reads local conversation SQLite stores across
    - Provider: `antigravity` (display name: "Antigravity").
    - Default Billing Domain: `code-assist-subscription` (display name: "Gemini Code Assist").
    - Credential owner: `official-client`.
-   - Expected coverage: `['tokens', 'history']`. Quota buckets are not fabricated; the card honestly reports that live quota windows are not exposed locally.
+   - Expected coverage: `['quota', 'tokens', 'history']`.
+   - Quota Model: Antigravity uses Google's dual-limit architecture (a 300-minute rolling 5-hour sprint window and a 10,080-minute weekly baseline cap). `AntigravityConnector` derives rolling usage, resets, and capacity utilization directly from local session event timestamps and token counts under `local-observation` authority.
 
 2. **Parser Architecture & Protobuf Extraction**:
    - A dedicated `AntigravitySqliteUsageClient` reads SQLite files directly.
@@ -40,5 +41,6 @@ A read-only `antigravity` Provider reads local conversation SQLite stores across
 ## Consequences
 
 - Antigravity usage is tracked completely offline without network requests, API keys, or OAuth credential handling.
-- Quota window countdowns (e.g. 5-hour rolling limits) will not appear on the Antigravity card until an official local CLI query or telemetry feed is published by Google.
+- Quota window countdowns (5-hour rolling sprint limit and weekly baseline limit) display accurately on provider cards and the Quota Timeline chart.
 - Token counts, model breakdowns, turn history, and equivalent cost analysis are 100% source-reported and exact.
+
