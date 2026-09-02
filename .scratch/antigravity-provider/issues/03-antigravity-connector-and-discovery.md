@@ -4,10 +4,13 @@
 
 **Blocked by:** 02 — 实现 Antigravity SQLite 与 Protobuf 会话用量解析客户端.
 
-**Status:** blocked
+**Status:** complete
 
-- [ ] 实现 `AntigravityConnector` 类，注入 `AntigravitySqliteUsageClient`。
-- [ ] 实现 `discover()` 方法，探测 `agy` 可执行路径及 `.gemini` 本地状态目录。
-- [ ] 实现 `collect()` 方法，调用客户端读取会话历史，组装 `ConnectorSnapshot`（`quota: []`，真实 tokens 与 history）。
-- [ ] 当目录不存在或会话为空时，优雅返回健康的空快照；当解析遇到权限或损坏时，产出明确的 degraded 诊断信息，不泄露用户敏感文件路径。
-- [ ] 编写 connector 单元测试与契约测试，覆盖正常采集、空数据、降级状态与跨目录去重逻辑。
+- [x] 实现 `AntigravityConnector` 类，注入 `AntigravitySqliteUsageClient`。
+- [x] 实现 `discover()` 方法，探测 `agy` 可执行路径及 `.gemini` 本地状态目录。
+- [x] 实现 `collect()` 方法，调用客户端读取会话历史，组装 `ConnectorSnapshot`（`quota: []`，真实 tokens 与 history）。
+- [x] 当目录不存在或会话为空时，优雅返回健康的空快照；当解析遇到权限或损坏时，产出明确的 degraded 诊断信息，不泄露用户敏感文件路径。
+- [x] 编写 connector 单元测试与契约测试，覆盖正常采集、空数据、降级状态与跨目录去重逻辑。
+
+**Completion:** complete — AntigravityConnector implemented and unit tested with snapshot assembly, degraded state handling, and empty quota buckets.
+
