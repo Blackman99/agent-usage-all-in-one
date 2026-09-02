@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Agent Usage is a macOS-first, fully local usage center for Codex, Claude Code,
-OpenCode, Grok, and dsh. One command opens a dashboard for native quota windows,
+OpenCode, Grok, dsh, and Antigravity. One command opens a dashboard for native quota windows,
 reset times, tokens, model rankings, equivalent API cost, history, and diagnostics.
 It offers advice but never switches agents automatically.
 
@@ -107,15 +107,16 @@ agent-usage clear --yes
 
 ## Provider coverage
 
-| Provider / billing domain | Native quota                                                            | Token history                                                                     | Cost evidence                                                                          |
-| ------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Codex                     | Official account buckets when available                                 | Local rollouts with account-day reconciliation                                    | API retail equivalent                                                                  |
-| Claude Code               | Experimental official-client usage, including All models and Fable only | Local session transcripts; optional OTLP supplement                               | Client estimate and API retail equivalent                                              |
-| OpenCode Go               | Official account-wide five-hour, weekly, and monthly windows            | Kept separate from local history                                                  | Quota context only                                                                     |
-| OpenCode · local history  | No subscription quota                                                   | All completed local requests across configured Providers                          | Client-reported estimate; API retail equivalent when eligible                          |
-| Grok Build / SuperGrok    | Experimental shared subscription allowance                              | Local `updates.jsonl`; optional OTLP supplement                                   | Client estimate and API retail equivalent, including recognized Grok 4.6 Build aliases |
-| Grok · xAI API            | No subscription quota                                                   | Official Management API aggregation                                               | Actual USD amounts, balance, limit, and invoice when available                         |
-| dsh · DeepSeek API        | No subscription quota                                                   | Local dsh session logs across every profile, including front ends composed on dsh | API retail equivalent at DeepSeek published peak/off-peak rates                        |
+| Provider / billing domain        | Native quota                                                                                                                          | Token history                                                                             | Cost evidence                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Codex                            | Official account buckets when available                                                                                               | Local rollouts with account-day reconciliation                                            | API retail equivalent                                                                  |
+| Claude Code                      | Experimental official-client usage, including All models and Fable only                                                               | Local session transcripts; optional OTLP supplement                                       | Client estimate and API retail equivalent                                              |
+| OpenCode Go                      | Official account-wide five-hour, weekly, and monthly windows                                                                          | Kept separate from local history                                                          | Quota context only                                                                     |
+| OpenCode · local history         | No subscription quota                                                                                                                 | All completed local requests across configured Providers                                  | Client-reported estimate; API retail equivalent when eligible                          |
+| Grok Build / SuperGrok           | Experimental shared subscription allowance                                                                                            | Local `updates.jsonl`; optional OTLP supplement                                           | Client estimate and API retail equivalent, including recognized Grok 4.6 Build aliases |
+| Grok · xAI API                   | No subscription quota                                                                                                                 | Official Management API aggregation                                                       | Actual USD amounts, balance, limit, and invoice when available                         |
+| dsh · DeepSeek API               | No subscription quota                                                                                                                 | Local dsh session logs across every profile, including front ends composed on dsh         | API retail equivalent at DeepSeek published peak/off-peak rates                        |
+| Antigravity · Gemini Code Assist | Official-client 5-hour sprint window and weekly baseline limit from live language server RPC, with local session observation fallback | Local conversation SQLite databases (~/.gemini/antigravity-cli and ~/.gemini/antigravity) | API retail equivalent at published Google Gemini and third-party model rates           |
 
 Every value retains its authority and observation time. Account-wide and this-Mac
 evidence remain visibly distinct.
@@ -131,7 +132,7 @@ All usage data remains local. JSON and CSV exports omit account identifiers,
 session IDs, cookies, OAuth tokens, and secret values by default. Raw observations
 are retained for 90 days, then transactionally compacted into UTC daily aggregates.
 Clearing local usage never deletes credentials owned by Codex, Claude Code,
-OpenCode, Grok, or dsh.
+OpenCode, Grok, dsh, or Antigravity.
 
 ## Verification
 

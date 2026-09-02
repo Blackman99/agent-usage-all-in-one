@@ -622,6 +622,59 @@ describe('API retail-equivalent pricing', () => {
       reason: 'model-unrecognized'
     });
   });
+
+  it('prices Antigravity Gemini 3.7 Flash and Claude Sonnet observations with source attribution', () => {
+    const geminiObs = observation({
+      id: 'agy-gemini',
+      model: 'gemini-3.7-flash-high',
+      billingDomainId: 'code-assist-subscription',
+      inputTokens: 1_000_000,
+      outputTokens: 500_000,
+      cacheReadTokens: 200_000
+    });
+    const claudeObs = observation({
+      id: 'agy-claude',
+      model: 'claude-sonnet-4-6',
+      billingDomainId: 'code-assist-subscription',
+      inputTokens: 100_000,
+      outputTokens: 20_000,
+      cacheReadTokens: 10_000
+    });
+
+    const geminiResult = deriveRetailEquivalentCosts(
+      snapshot(geminiObs, {
+        providerId: 'antigravity',
+        domainId: 'code-assist-subscription',
+        domainName: 'Gemini Code Assist'
+      }),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(geminiResult.decisions[0]).toEqual({
+      observationId: 'agy-gemini',
+      status: 'priced',
+      reason: null,
+      pricedTokens: 1_700_000
+    });
+    expect(geminiResult.costs[0]?.amount).toBeCloseTo(0.1 + 0.2 + 0.005, 4);
+
+    const claudeResult = deriveRetailEquivalentCosts(
+      snapshot(claudeObs, {
+        providerId: 'antigravity',
+        domainId: 'code-assist-subscription',
+        domainName: 'Gemini Code Assist'
+      }),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(claudeResult.decisions[0]).toEqual({
+      observationId: 'agy-claude',
+      status: 'priced',
+      reason: null,
+      pricedTokens: 130_000
+    });
+    expect(claudeResult.costs[0]?.amount).toBeCloseTo(0.3 + 0.3 + 0.003, 4);
+  });
 });
 
 function observation(overrides: Partial<UsageObservation> = {}): UsageObservation {

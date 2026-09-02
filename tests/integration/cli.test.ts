@@ -235,7 +235,8 @@ describe('agent-usage CLI', () => {
       'opencode-go',
       'grok',
       'xai-api',
-      'dsh'
+      'dsh',
+      'antigravity'
     ]);
 
     const monitoring = await runCli(['--home', home, 'monitoring', '--json']);

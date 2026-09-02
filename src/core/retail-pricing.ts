@@ -342,6 +342,47 @@ const DEEPSEEK_OFFICIAL_MODELS: Array<
  */
 const DEEPSEEK_OFFICIAL_EFFECTIVE_FROM = '2026-08-17T00:00:00.000Z';
 
+const GOOGLE_ANTIGRAVITY_SOURCE = {
+  title: 'Google Gemini API pricing',
+  url: 'https://ai.google.dev/pricing',
+  retrievedAt: '2026-09-02'
+};
+
+const GOOGLE_ANTIGRAVITY_EFFECTIVE_FROM = '2026-01-01T00:00:00.000Z';
+
+function antigravityEntry(options: {
+  id: string;
+  model: string;
+  aliases: string[];
+  input: number;
+  output: number;
+  cacheRead?: number | null;
+  source?: { title: string; url: string; retrievedAt: string };
+}): RetailPriceCatalogEntry {
+  const versionDate = '2026-09-02';
+  return {
+    id: options.id,
+    priceVersion: `antigravity-${versionDate}`,
+    providerId: 'antigravity',
+    billingDomainId: 'code-assist-subscription',
+    canonicalModel: options.model,
+    aliases: options.aliases,
+    currency: 'USD',
+    effectiveFrom: GOOGLE_ANTIGRAVITY_EFFECTIVE_FROM,
+    effectiveUntil: null,
+    contextTier: 'standard-api',
+    contextRule: { kind: 'fixed' },
+    ratesPerMillion: {
+      input: options.input,
+      output: options.output,
+      reasoning: options.output,
+      'cache-read': options.cacheRead ?? null,
+      'cache-write': null
+    },
+    source: options.source ?? GOOGLE_ANTIGRAVITY_SOURCE
+  };
+}
+
 const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
   version: '2026-08-28-grok-4.6-build',
   entries: [
@@ -478,12 +519,93 @@ const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
       output: 12,
       cacheRead: 1,
       contextRule: { kind: 'prompt-tokens', minimumExclusive: 200_000 }
+    }),
+    antigravityEntry({
+      id: 'antigravity-gemini-3.7-flash-2026-09-02',
+      model: 'gemini-3.7-flash',
+      aliases: [
+        'gemini-3.7-flash-high',
+        'gemini-3.7-flash-medium',
+        'gemini-3.7-flash-low',
+        'gemini-3p7-flash-exp-d',
+        'gemini-3.7-flash-exp',
+        'Gemini 3.7 Flash (High)',
+        'Gemini 3.7 Flash (Medium)',
+        'Gemini 3.7 Flash (Low)'
+      ],
+      input: 0.1,
+      output: 0.4,
+      cacheRead: 0.025
+    }),
+    antigravityEntry({
+      id: 'antigravity-gemini-3.6-flash-2026-09-02',
+      model: 'gemini-3.6-flash',
+      aliases: [
+        'gemini-3.6-flash-high',
+        'gemini-3.6-flash-medium',
+        'gemini-3.6-flash-low',
+        'Gemini 3.6 Flash (High)',
+        'Gemini 3.6 Flash (Medium)',
+        'Gemini 3.6 Flash (Low)'
+      ],
+      input: 0.1,
+      output: 0.4,
+      cacheRead: 0.025
+    }),
+    antigravityEntry({
+      id: 'antigravity-gemini-3.1-pro-2026-09-02',
+      model: 'gemini-3.1-pro',
+      aliases: [
+        'gemini-3.1-pro-high',
+        'gemini-3.1-pro-low',
+        'gemini-3p1-pro-exp',
+        'Gemini 3.1 Pro (High)',
+        'Gemini 3.1 Pro (Low)'
+      ],
+      input: 1.25,
+      output: 5.0,
+      cacheRead: 0.3125
+    }),
+    antigravityEntry({
+      id: 'antigravity-claude-sonnet-4-6-2026-09-02',
+      model: 'claude-sonnet-4-6',
+      aliases: ['claude-sonnet-4-6-thinking', 'Claude Sonnet 4.6 (Thinking)'],
+      input: 3.0,
+      output: 15.0,
+      cacheRead: 0.3,
+      source: {
+        title: 'Anthropic Claude API pricing',
+        url: 'https://platform.claude.com/docs/en/about-claude/pricing',
+        retrievedAt: '2026-09-02'
+      }
+    }),
+    antigravityEntry({
+      id: 'antigravity-claude-opus-4-6-2026-09-02',
+      model: 'claude-opus-4-6-thinking',
+      aliases: ['claude-opus-4-6', 'Claude Opus 4.6 (Thinking)'],
+      input: 15.0,
+      output: 75.0,
+      cacheRead: 1.5,
+      source: {
+        title: 'Anthropic Claude API pricing',
+        url: 'https://platform.claude.com/docs/en/about-claude/pricing',
+        retrievedAt: '2026-09-02'
+      }
+    }),
+    antigravityEntry({
+      id: 'antigravity-gpt-oss-120b-2026-09-02',
+      model: 'gpt-oss-120b-medium',
+      aliases: ['gpt-oss-120b', 'GPT-OSS 120B (Medium)'],
+      input: 0.15,
+      output: 0.6,
+      cacheRead: 0.05
     })
   ]
 };
 
 export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
-  version: '2026-09-01-dsh-deepseek-official',
+  version: '2026-09-02-antigravity',
+
   entries: [
     ...DIRECT_OFFICIAL_PRICING_CATALOG.entries,
     ...openCodeLocalHistoryEntries(DIRECT_OFFICIAL_PRICING_CATALOG.entries)
@@ -693,6 +815,9 @@ function openCodeLocalModelPrefix(entry: RetailPriceCatalogEntry): string | null
   if (entry.providerId === 'grok' && entry.billingDomainId === 'xai-api') return 'xai';
   if (entry.providerId === 'opencode-go' && entry.billingDomainId === 'go-subscription') {
     return 'opencode-go';
+  }
+  if (entry.providerId === 'antigravity' && entry.billingDomainId === 'code-assist-subscription') {
+    return 'google';
   }
   return null;
 }
