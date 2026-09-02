@@ -4,23 +4,39 @@ import type {
   Connector,
   ConnectorFailure,
   ConnectorSnapshot,
+  QuotaBucket,
   UsageObservation
 } from '../../core/types.js';
 import type { AntigravitySqliteUsageClient } from '../../server/antigravity-sqlite-usage-client.js';
 
 export const ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID = 'code-assist-subscription';
 
+export interface AntigravityQuotaLimits {
+  rolling5hTokens?: number;
+  weeklyTokens?: number;
+}
+
+export const DEFAULT_ANTIGRAVITY_QUOTA_LIMITS: Required<AntigravityQuotaLimits> = {
+  rolling5hTokens: 15_000_000,
+  weeklyTokens: 100_000_000
+};
+
 export interface AntigravityConnectorOptions {
   historyClient: AntigravitySqliteUsageClient;
   clock?: () => Date;
+  quotaLimits?: AntigravityQuotaLimits;
 }
 
 /**
  * Antigravity usage read from local conversation SQLite databases.
  *
- * Google Antigravity publishes no local CLI quota query surface, so the
- * Provider contributes token evidence, turn history, and versioned API
- * retail equivalent from local SQLite generation records.
+ * Google Antigravity uses a dual-limit capacity model:
+ * - 5-Hour rolling sprint window
+ * - Weekly baseline quota limit
+ *
+ * When an official client does not expose a live cloud quota API,
+ * AntigravityConnector computes the rolling 5-hour and 7-day usage
+ * and window resets from source-reported session observations.
  */
 export class AntigravityConnector implements Connector {
   readonly id = 'antigravity';
@@ -28,14 +44,22 @@ export class AntigravityConnector implements Connector {
   readonly consentId = 'antigravity';
   readonly #historyClient: AntigravitySqliteUsageClient;
   readonly #clock: () => Date;
+  readonly #quotaLimits: Required<AntigravityQuotaLimits>;
 
   constructor(options: AntigravityConnectorOptions) {
     this.#historyClient = options.historyClient;
     this.#clock = options.clock ?? (() => new Date());
+    this.#quotaLimits = {
+      rolling5hTokens:
+        options.quotaLimits?.rolling5hTokens ?? DEFAULT_ANTIGRAVITY_QUOTA_LIMITS.rolling5hTokens,
+      weeklyTokens:
+        options.quotaLimits?.weeklyTokens ?? DEFAULT_ANTIGRAVITY_QUOTA_LIMITS.weeklyTokens
+    };
   }
 
   async collect(options: CollectionRequest = { mode: 'incremental' }): Promise<ConnectorSnapshot> {
     const observedAt = this.#clock().toISOString();
+    const nowMs = this.#clock().getTime();
     const warnings: ConnectorFailure[] = [];
     let history: Awaited<ReturnType<AntigravitySqliteUsageClient['readUsage']>> | null = null;
 
@@ -45,17 +69,17 @@ export class AntigravityConnector implements Connector {
       warnings.push(safeFailure());
     }
 
-
     if (history && !history.complete) {
       warnings.push(incompleteSessionScanFailure());
     }
 
     const usage = history?.usage ?? [];
+    const quotaBuckets = buildAntigravityQuotaBuckets(usage, nowMs, this.#quotaLimits);
 
     return {
       provider: { id: this.id, displayName: this.displayName },
       billingDomains: billingDomains(usage),
-      quotaBuckets: [],
+      quotaBuckets,
       usage,
       ...(usage.length > 0 && history?.complete
         ? {
@@ -70,6 +94,80 @@ export class AntigravityConnector implements Connector {
       observedAt
     };
   }
+}
+
+export function buildAntigravityQuotaBuckets(
+  usage: UsageObservation[],
+  nowMs: number,
+  limits: Required<AntigravityQuotaLimits> = DEFAULT_ANTIGRAVITY_QUOTA_LIMITS
+): QuotaBucket[] {
+  const fiveHoursMs = 300 * 60 * 1000;
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+  const cutoff5h = nowMs - fiveHoursMs;
+  const cutoff7d = nowMs - sevenDaysMs;
+
+  const obs5h: UsageObservation[] = [];
+  const obs7d: UsageObservation[] = [];
+
+  for (const obs of usage) {
+    const t = new Date(obs.observedAt).getTime();
+    if (t >= cutoff5h) obs5h.push(obs);
+    if (t >= cutoff7d) obs7d.push(obs);
+  }
+
+  // 5-hour rolling sprint window
+  const tokens5h = obs5h.reduce(
+    (acc, obs) => acc + obs.inputTokens + obs.outputTokens + obs.cacheReadTokens,
+    0
+  );
+  const usedPercent5h = Math.min(100, Math.round((tokens5h / limits.rolling5hTokens) * 100));
+
+  let resetsAt5h: string;
+  if (obs5h.length > 0) {
+    const oldestMs = Math.min(...obs5h.map((o) => new Date(o.observedAt).getTime()));
+    resetsAt5h = new Date(oldestMs + fiveHoursMs).toISOString();
+  } else {
+    resetsAt5h = new Date(nowMs + fiveHoursMs).toISOString();
+  }
+
+  // Weekly baseline quota window
+  const tokens7d = obs7d.reduce(
+    (acc, obs) => acc + obs.inputTokens + obs.outputTokens + obs.cacheReadTokens,
+    0
+  );
+  const usedPercent7d = Math.min(100, Math.round((tokens7d / limits.weeklyTokens) * 100));
+
+  let resetsAt7d: string;
+  if (obs7d.length > 0) {
+    const oldestMs = Math.min(...obs7d.map((o) => new Date(o.observedAt).getTime()));
+    resetsAt7d = new Date(oldestMs + sevenDaysMs).toISOString();
+  } else {
+    resetsAt7d = new Date(nowMs + sevenDaysMs).toISOString();
+  }
+
+  return [
+    {
+      id: '5-hour',
+      billingDomainId: ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID,
+      label: '5 hour',
+      usedPercent: usedPercent5h,
+      windowDurationMinutes: 300,
+      resetsAt: resetsAt5h,
+      authority: 'local-observation',
+      scope: 'local-only'
+    },
+    {
+      id: 'weekly',
+      billingDomainId: ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID,
+      label: 'Week',
+      usedPercent: usedPercent7d,
+      windowDurationMinutes: 10_080,
+      resetsAt: resetsAt7d,
+      authority: 'local-observation',
+      scope: 'local-only'
+    }
+  ];
 }
 
 function billingDomains(usage: UsageObservation[]): BillingDomain[] {
@@ -100,6 +198,3 @@ function safeFailure(): ConnectorFailure {
       'Check read permissions for ~/.gemini/antigravity-cli and ~/.gemini/antigravity directories.'
   };
 }
-
-
-

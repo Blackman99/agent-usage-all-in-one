@@ -96,11 +96,12 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
       'Read local Antigravity conversation session databases for token history. No credential file is opened.',
     credentialOwner: 'official-client',
     experimental: true,
-    expectedCoverage: ['tokens', 'history'],
+    expectedCoverage: ['quota', 'tokens', 'history'],
     target: {
       provider: { id: 'antigravity', displayName: 'Antigravity' },
       billingDomain: { id: 'code-assist-subscription', displayName: 'Gemini Code Assist' }
     },
+
     officialCredentialPaths: ['.gemini/antigravity-cli', '.gemini/antigravity']
   }
 ];

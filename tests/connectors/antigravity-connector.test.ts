@@ -45,7 +45,8 @@ function observation(id: string, model: string): UsageObservation {
 }
 
 describe('AntigravityConnector', () => {
-  it('publishes local Antigravity usage with tokens and empty quota buckets', async () => {
+  it('publishes local Antigravity usage with tokens, 5-hour, and weekly quota buckets', async () => {
+
     const connector = new AntigravityConnector({
       historyClient: mockClient({
         usage: [observation('conv-1:0', 'gemini-3.7-flash')]
@@ -60,7 +61,20 @@ describe('AntigravityConnector', () => {
       billingDomains: [
         { id: ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID, displayName: 'Gemini Code Assist' }
       ],
-      quotaBuckets: [],
+      quotaBuckets: [
+        {
+          id: '5-hour',
+          label: '5 hour',
+          windowDurationMinutes: 300,
+          authority: 'local-observation'
+        },
+        {
+          id: 'weekly',
+          label: 'Week',
+          windowDurationMinutes: 10_080,
+          authority: 'local-observation'
+        }
+      ],
       usageReconciliation: {
         authoritativeIdPrefixes: ['antigravity:'],
         retiredIdPrefixes: []
@@ -70,6 +84,7 @@ describe('AntigravityConnector', () => {
     expect(snapshot.usage).toHaveLength(1);
     expect(snapshot.warnings).toEqual([]);
   });
+
 
   it('reports safe degraded failure when SQLite read throws', async () => {
     const failingClient = {

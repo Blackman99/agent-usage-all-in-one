@@ -120,8 +120,19 @@ describe('Antigravity token application', () => {
       const provider = overview.providers.find((candidate) => candidate.id === 'antigravity');
 
       expect(provider).toBeDefined();
-      expect(provider?.summaryBillingDomainId).toBe('code-assist-subscription');
-      expect(provider?.quotaBuckets).toEqual([]);
+      expect(provider?.quotaBuckets).toMatchObject([
+        {
+          id: '5-hour',
+          label: '5 hour',
+          windowDurationMinutes: 300
+        },
+        {
+          id: 'weekly',
+          label: 'Week',
+          windowDurationMinutes: 10_080
+        }
+      ]);
+
 
       const domain = provider?.billingDomains.find((entry) => entry.id === 'code-assist-subscription');
       expect(domain?.tokenTotals).toMatchObject({
