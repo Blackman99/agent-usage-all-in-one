@@ -83,9 +83,7 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
   await expect(page.locator('.provider-card').first()).toBeVisible();
 
   // dsh has no quota concept and does not display an agent usage card.
-  await expect(
-    agentPanel.getByRole('heading', { name: 'dsh', exact: true })
-  ).toHaveCount(0);
+  await expect(agentPanel.getByRole('heading', { name: 'dsh', exact: true })).toHaveCount(0);
 });
 
 test('shows each Agent card as soon as that provider finishes loading', async ({ page }) => {

@@ -77,11 +77,9 @@ describe('quota bucket lifecycle', () => {
       .getOverview(NOW)
       .providers.find((provider) => provider.id === 'antigravity')!.billingDomains[0];
 
-    expect(domain.quotaBuckets.map((entry) => entry.id).sort()).toEqual([
-      'gemini-5h',
-      'gemini-weekly',
-      'official-weekly'
-    ].sort());
+    expect(domain.quotaBuckets.map((entry) => entry.id).sort()).toEqual(
+      ['gemini-5h', 'gemini-weekly', 'official-weekly'].sort()
+    );
     migrated.close();
   });
 });

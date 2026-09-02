@@ -118,7 +118,10 @@ export class AntigravityQuotaClient {
     return this.discoverCandidates().ports;
   }
 
-  private async queryPort(port: number, csrfToken: string | null = null): Promise<QuotaBucket[] | null> {
+  private async queryPort(
+    port: number,
+    csrfToken: string | null = null
+  ): Promise<QuotaBucket[] | null> {
     try {
       const url = `http://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`;
       const response = await this.#fetchFn(url, {
