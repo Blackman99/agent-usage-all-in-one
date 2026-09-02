@@ -9,8 +9,10 @@ import { createRequire } from 'node:module';
 import { AntigravityConnector } from '../../src/connectors/antigravity/antigravity-connector.js';
 import { defaultConnectorDefinitions } from '../../src/connectors/catalog.js';
 import { UsageApplication } from '../../src/core/usage-application.js';
+import { AntigravityQuotaClient } from '../../src/server/antigravity-quota-client.js';
 import { AntigravitySqliteUsageClient } from '../../src/server/antigravity-sqlite-usage-client.js';
 import { SqliteUsageRepository } from '../../src/server/sqlite-usage-repository.js';
+
 
 const { DatabaseSync } = createRequire(import.meta.url)(
   'node:sqlite'
@@ -110,7 +112,14 @@ describe('Antigravity token application', () => {
 
       const application = new UsageApplication({
         repository,
-        connectors: [new AntigravityConnector({ historyClient: client, clock: () => NOW })],
+        connectors: [
+          new AntigravityConnector({
+            historyClient: client,
+            quotaClient: new AntigravityQuotaClient({ ports: [] }),
+            clock: () => NOW
+          })
+        ],
+
         connectorDefinitions: defaultConnectorDefinitions,
         clock: () => NOW
       });
@@ -122,16 +131,17 @@ describe('Antigravity token application', () => {
       expect(provider).toBeDefined();
       expect(provider?.quotaBuckets).toMatchObject([
         {
-          id: '5-hour',
+          id: 'gemini-5h',
           label: '5 hour',
           windowDurationMinutes: 300
         },
         {
-          id: 'weekly',
+          id: 'gemini-weekly',
           label: 'Week',
           windowDurationMinutes: 10_080
         }
       ]);
+
 
 
       const domain = provider?.billingDomains.find((entry) => entry.id === 'code-assist-subscription');

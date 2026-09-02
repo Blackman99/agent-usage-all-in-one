@@ -8,6 +8,7 @@ import type {
   UsageObservation
 } from '../../core/types.js';
 import type { AntigravitySqliteUsageClient } from '../../server/antigravity-sqlite-usage-client.js';
+import { AntigravityQuotaClient } from '../../server/antigravity-quota-client.js';
 
 export const ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID = 'code-assist-subscription';
 
@@ -23,6 +24,7 @@ export const DEFAULT_ANTIGRAVITY_QUOTA_LIMITS: Required<AntigravityQuotaLimits> 
 
 export interface AntigravityConnectorOptions {
   historyClient: AntigravitySqliteUsageClient;
+  quotaClient?: AntigravityQuotaClient;
   clock?: () => Date;
   quotaLimits?: AntigravityQuotaLimits;
 }
@@ -43,11 +45,13 @@ export class AntigravityConnector implements Connector {
   readonly displayName = 'Antigravity';
   readonly consentId = 'antigravity';
   readonly #historyClient: AntigravitySqliteUsageClient;
+  readonly #quotaClient: AntigravityQuotaClient;
   readonly #clock: () => Date;
   readonly #quotaLimits: Required<AntigravityQuotaLimits>;
 
   constructor(options: AntigravityConnectorOptions) {
     this.#historyClient = options.historyClient;
+    this.#quotaClient = options.quotaClient ?? new AntigravityQuotaClient();
     this.#clock = options.clock ?? (() => new Date());
     this.#quotaLimits = {
       rolling5hTokens:
@@ -74,7 +78,21 @@ export class AntigravityConnector implements Connector {
     }
 
     const usage = history?.usage ?? [];
-    const quotaBuckets = buildAntigravityQuotaBuckets(usage, nowMs, this.#quotaLimits);
+    let quotaBuckets: QuotaBucket[] = [];
+
+    try {
+      const liveQuota = await this.#quotaClient.readQuota();
+      if (liveQuota && liveQuota.length > 0) {
+        quotaBuckets = liveQuota;
+      }
+    } catch {
+      // Degrade gracefully to local observation buckets
+    }
+
+    if (quotaBuckets.length === 0) {
+      quotaBuckets = buildAntigravityQuotaBuckets(usage, nowMs, this.#quotaLimits);
+    }
+
 
     return {
       provider: { id: this.id, displayName: this.displayName },
@@ -148,7 +166,7 @@ export function buildAntigravityQuotaBuckets(
 
   return [
     {
-      id: '5-hour',
+      id: 'gemini-5h',
       billingDomainId: ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID,
       label: '5 hour',
       usedPercent: usedPercent5h,
@@ -158,7 +176,7 @@ export function buildAntigravityQuotaBuckets(
       scope: 'local-only'
     },
     {
-      id: 'weekly',
+      id: 'gemini-weekly',
       billingDomainId: ANTIGRAVITY_PRIMARY_BILLING_DOMAIN_ID,
       label: 'Week',
       usedPercent: usedPercent7d,
@@ -167,6 +185,7 @@ export function buildAntigravityQuotaBuckets(
       authority: 'local-observation',
       scope: 'local-only'
     }
+
   ];
 }
 
