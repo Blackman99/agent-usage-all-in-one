@@ -4,9 +4,12 @@
 
 **Blocked by:** None.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] 在 `src/connectors/catalog.ts` 中定义 `antigravity` ConnectorDefinition，包括 displayName、command (`agy`)、officialCredentialPaths (`.gemini/antigravity-cli`, `.gemini/antigravity`) 以及 expectedCoverage (`['tokens', 'history']`)。
-- [ ] 在 `src/core/retail-pricing.ts` 中注册 `antigravity` + `code-assist-subscription` 定价模型快照，确保对 Gemini 系列及 Claude Sonnet 等模型有确定的输入/输出/推理 Token 单价。
-- [ ] 确保未识别模型能安全回退至未分类状态，不破坏整体定价计算流水线。
-- [ ] 编写并运行单元测试 `tests/unit/core/retail-pricing.test.ts` 与 catalog 测试，验证价格解析准确性。
+- [x] 在 `src/connectors/catalog.ts` 中定义 `antigravity` ConnectorDefinition，包括 displayName、command (`agy`)、officialCredentialPaths (`.gemini/antigravity-cli`, `.gemini/antigravity`) 以及 expectedCoverage (`['tokens', 'history']`)。
+- [x] 在 `src/core/retail-pricing.ts` 中注册 `antigravity` + `code-assist-subscription` 定价模型快照，确保对 Gemini 系列及 Claude Sonnet 等模型有确定的输入/输出/推理 Token 单价。
+- [x] 确保未识别模型能安全回退至未分类状态，不破坏整体定价计算流水线。
+- [x] 编写并运行单元测试 `tests/unit/core/retail-pricing.test.ts` 与 catalog 测试，验证价格解析准确性。
+
+**Completion:** complete — Catalog definition and multi-model retail pricing snapshots added for Antigravity, unit tests passing.
+

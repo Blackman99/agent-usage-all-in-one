@@ -87,5 +87,21 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
       billingDomain: { id: 'deepseek-official', displayName: 'DeepSeek API' }
     },
     officialCredentialPaths: ['.dsh']
+  },
+  {
+    id: 'antigravity',
+    displayName: 'Antigravity',
+    command: 'agy',
+    permissionDescription:
+      'Read local Antigravity conversation session databases for token history. No credential file is opened.',
+    credentialOwner: 'official-client',
+    experimental: true,
+    expectedCoverage: ['tokens', 'history'],
+    target: {
+      provider: { id: 'antigravity', displayName: 'Antigravity' },
+      billingDomain: { id: 'code-assist-subscription', displayName: 'Gemini Code Assist' }
+    },
+    officialCredentialPaths: ['.gemini/antigravity-cli', '.gemini/antigravity']
   }
 ];
+
