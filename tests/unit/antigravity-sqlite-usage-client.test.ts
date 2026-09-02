@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import protobuf from 'protobufjs';
-import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
+
 
 import {
   AntigravitySqliteUsageClient,

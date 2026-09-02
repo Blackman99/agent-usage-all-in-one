@@ -18,7 +18,11 @@ import { OfficialOpenCodeGoClient } from '../connectors/opencode-go/official-ope
 import { OpenCodeAuthFileReader } from '../connectors/opencode-go/opencode-auth-reader.js';
 import { OpenCodeGoConnector } from '../connectors/opencode-go/opencode-go-connector.js';
 import { DshConnector } from '../connectors/dsh/dsh-connector.js';
+import { AntigravityConnector } from '../connectors/antigravity/antigravity-connector.js';
+import { AntigravitySqliteUsageClient } from './antigravity-sqlite-usage-client.js';
 import { GrokBuildConnector } from '../connectors/grok-build/grok-build-connector.js';
+
+
 import { parseGrokOtlpMetrics } from '../connectors/grok-build/grok-telemetry.js';
 import { StdioGrokBillingClient } from '../connectors/grok-build/stdio-grok-billing-client.js';
 import {
@@ -77,7 +81,16 @@ export async function runDaemon(home: string): Promise<void> {
         historyClient: localTranscriptClient('grok', home)
       }),
       new XaiApiConnector({ accountClient: new XaiManagementApiClient({ secretStore }) }),
-      new DshConnector({ historyClient: localTranscriptClient('dsh', home) })
+      new DshConnector({ historyClient: localTranscriptClient('dsh', home) }),
+      new AntigravityConnector({
+        historyClient: new AntigravitySqliteUsageClient({
+          roots: [
+            join(homedir(), '.gemini/antigravity-cli'),
+            join(homedir(), '.gemini/antigravity')
+          ],
+          cachePath: join(home, 'antigravity-usage-cache.json')
+        })
+      })
     ],
     connectorDefinitions: defaultConnectorDefinitions,
     discoveryProbe: new PathDiscoveryProbe(),
@@ -100,11 +113,12 @@ export async function runDaemon(home: string): Promise<void> {
       }
     }),
     connectorPolicies: Object.fromEntries(
-      ['codex', 'claude-code', 'opencode-go', 'opencode', 'grok', 'xai-api', 'dsh'].map((id) => [
+      ['codex', 'claude-code', 'opencode-go', 'opencode', 'grok', 'xai-api', 'dsh', 'antigravity'].map((id) => [
         id,
         { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: id === 'claude-code' ? 25_000 : 20_000 }
       ])
     ),
+
     telemetryIngestors: [
       {
         id: 'claude-code',

@@ -58,8 +58,10 @@
     { id: 'claude-code', displayName: 'Claude Code' },
     { id: 'opencode-go', displayName: 'OpenCode Go' },
     { id: 'grok', displayName: 'Grok' },
-    { id: 'dsh', displayName: 'dsh' }
+    { id: 'dsh', displayName: 'dsh' },
+    { id: 'antigravity', displayName: 'Antigravity' }
   ];
+
   const DEFAULT_AGENT_PROVIDER_IDS = new Set(
     DEFAULT_AGENT_PROVIDERS.map((provider) => provider.id)
   );
@@ -1182,9 +1184,14 @@
       dsh: {
         dark: '/brands/deepseek.svg',
         light: '/brands/deepseek.svg'
+      },
+      antigravity: {
+        dark: '/brands/antigravity.svg',
+        light: '/brands/antigravity.svg'
       }
     };
     return paths[providerId] ?? null;
+
   }
 
   // The resolved theme is an argument so the markup re-renders the mark when the

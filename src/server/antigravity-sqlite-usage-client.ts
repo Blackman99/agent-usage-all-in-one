@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, rename, stat, writeFile, mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
+
 import protobuf from 'protobufjs';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 
@@ -358,8 +359,9 @@ export function decodeGenMetadata(buf: Buffer): {
 } {
   let rawModel = 'unknown';
   let inputTokens = 0;
-  let outputTokens = 0;
+  const outputTokens = 0;
   let cacheReadTokens = 0;
+
 
   try {
     const r = protobuf.Reader.create(buf);

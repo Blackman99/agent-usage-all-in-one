@@ -41,9 +41,10 @@ export class AntigravityConnector implements Connector {
 
     try {
       history = await this.#historyClient.readUsage(options);
-    } catch (error) {
-      warnings.push(safeFailure(error));
+    } catch {
+      warnings.push(safeFailure());
     }
+
 
     if (history && !history.complete) {
       warnings.push(incompleteSessionScanFailure());
@@ -91,7 +92,7 @@ function incompleteSessionScanFailure(): ConnectorFailure {
   };
 }
 
-function safeFailure(error: unknown): ConnectorFailure {
+function safeFailure(): ConnectorFailure {
   return {
     code: 'antigravity-sqlite-read-failed',
     message: 'Failed to read local Antigravity conversation stores.',
@@ -99,4 +100,6 @@ function safeFailure(error: unknown): ConnectorFailure {
       'Check read permissions for ~/.gemini/antigravity-cli and ~/.gemini/antigravity directories.'
   };
 }
+
+
 
