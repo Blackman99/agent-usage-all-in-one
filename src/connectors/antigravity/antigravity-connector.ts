@@ -32,13 +32,9 @@ export interface AntigravityConnectorOptions {
 /**
  * Antigravity usage read from local conversation SQLite databases.
  *
- * Google Antigravity uses a dual-limit capacity model:
- * - 5-Hour rolling sprint window
- * - Weekly baseline quota limit
- *
- * When an official client does not expose a live cloud quota API,
- * AntigravityConnector computes the rolling 5-hour and 7-day usage
- * and window resets from source-reported session observations.
+ * Google Antigravity uses a dual-limit capacity model: a 5-hour rolling sprint
+ * window and a weekly baseline limit. When official live quota is unavailable or
+ * unwindowed, rolling 5-hour and weekly usage are derived from session observations.
  */
 export class AntigravityConnector implements Connector {
   readonly id = 'antigravity';
@@ -83,14 +79,22 @@ export class AntigravityConnector implements Connector {
     try {
       const liveQuota = await this.#quotaClient.readQuota();
       if (liveQuota && liveQuota.length > 0) {
-        quotaBuckets = liveQuota;
+        quotaBuckets = [...liveQuota];
       }
     } catch {
       // Degrade gracefully to local observation buckets
     }
 
-    if (quotaBuckets.length === 0) {
-      quotaBuckets = buildAntigravityQuotaBuckets(usage, nowMs, this.#quotaLimits);
+    const localBuckets = buildAntigravityQuotaBuckets(usage, nowMs, this.#quotaLimits);
+    const has5h = quotaBuckets.some((b) => b.label === '5 hour' || b.id === 'gemini-5h');
+    const hasWeekly = quotaBuckets.some((b) => b.label === 'Week' || b.id === 'gemini-weekly');
+
+    if (!has5h || !hasWeekly) {
+      for (const localBucket of localBuckets) {
+        if (!quotaBuckets.some((b) => b.id === localBucket.id || b.label === localBucket.label)) {
+          quotaBuckets.push(localBucket);
+        }
+      }
     }
 
     return {

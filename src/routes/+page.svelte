@@ -8,8 +8,6 @@
     DataAuthority,
     BillingHistory,
     DoctorReport,
-    HistoryModelObservation,
-    HistoryModelPriceEvidence,
     HistoryWindow,
     MonitoringSettings,
     PlanBillingPeriod,
@@ -18,7 +16,6 @@
     ProviderOverview,
     QuotaBucket,
     RetentionStatus,
-    TokenTotals,
     UsageOverview
   } from '$core/types.js';
   import type {
@@ -58,7 +55,6 @@
     { id: 'claude-code', displayName: 'Claude Code' },
     { id: 'opencode-go', displayName: 'OpenCode Go' },
     { id: 'grok', displayName: 'Grok' },
-    { id: 'dsh', displayName: 'dsh' },
     { id: 'antigravity', displayName: 'Antigravity' }
   ];
 
@@ -270,7 +266,9 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const index = (await response.json()) as AgentProviderIndex;
       if (destroyed) return;
-      const visibleProviders = index.providers.filter((provider) => provider.id !== 'opencode');
+      const visibleProviders = index.providers.filter(
+        (provider) => provider.id !== 'opencode' && provider.id !== 'dsh'
+      );
       const visibleProvidersById = new Map(
         visibleProviders.map((provider) => [provider.id, provider])
       );
@@ -924,79 +922,16 @@
         : t('unknown');
   }
 
-  function nonOverlappingComposition(
-    observations: HistoryModelObservation[],
-    fallback: TokenTotals
-  ): TokenTotals {
-    if (observations.length === 0) {
-      return {
-        ...fallback,
-        total: fallback.input + fallback.output + fallback.cacheRead + fallback.cacheWrite
-      };
-    }
-    const totals: TokenTotals = {
-      total: 0,
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cacheRead: 0,
-      cacheWrite: 0
-    };
-    for (const observation of observations) {
-      totals.input += observation.tokenTotals.input;
-      totals.output += observation.tokenTotals.output;
-      if (observation.tokenSemantics.reasoning === 'separate') {
-        totals.reasoning += observation.tokenTotals.reasoning;
-      }
-      if (observation.tokenSemantics.cacheRead === 'separate') {
-        totals.cacheRead += observation.tokenTotals.cacheRead;
-      }
-      if (observation.tokenSemantics.cacheWrite === 'separate') {
-        totals.cacheWrite += observation.tokenTotals.cacheWrite;
-      }
-    }
-    totals.total =
-      totals.input + totals.output + totals.reasoning + totals.cacheRead + totals.cacheWrite;
-    return totals;
-  }
-
-  function uniquePriceSnapshots(priceEvidence: HistoryModelPriceEvidence[]) {
-    const seen = Object.create(null) as Record<string, boolean>;
-    return priceEvidence.flatMap((evidence) => {
-      const snapshot = evidence.priceSnapshot;
-      if (!snapshot || seen[snapshot.id]) return [];
-      seen[snapshot.id] = true;
-      return [snapshot];
-    });
-  }
-
   function modelTrendEvidence(
     model: UsageOverview['workbench']['modelRanking']['entries'][number]
   ) {
-    const recordedTokens = model.trend.map(() => 0);
-    for (const observation of model.observations) {
-      let low = 0;
-      let high = model.trend.length - 1;
-      while (low <= high) {
-        const middle = Math.floor((low + high) / 2);
-        const bucket = model.trend[middle];
-        if (observation.observedAt < bucket.start) {
-          high = middle - 1;
-        } else if (observation.observedAt >= bucket.end) {
-          low = middle + 1;
-        } else {
-          recordedTokens[middle] += observation.recordedTokens;
-          break;
-        }
-      }
-    }
-    return model.trend.map((bucket, index) => {
+    return model.trend.map((bucket) => {
       const selectedCost =
         bucket.retailEquivalent.status !== 'unavailable' && bucket.retailEquivalent.amount !== null
           ? bucket.retailEquivalent
           : (bucket.reportedEstimate ?? bucket.retailEquivalent);
       return {
-        recordedTokens: bucket.gap ? null : recordedTokens[index],
+        recordedTokens: bucket.gap ? null : (bucket.recordedTokens ?? 0),
         costAmount: selectedCost.amount,
         costCurrency: selectedCost.comparisonCurrency
       };
@@ -1041,6 +976,7 @@
         tokenEvidence: provider.tokenEvidence,
         tokenAuthority: provider.tokenAuthority,
         costs: [],
+        lastCostObservedAt: null,
         balances: [],
         invoices: [],
         history: fallbackHistory(
@@ -1057,7 +993,7 @@
 
   function fallbackHistory(
     tokenTotals: ProviderOverview['tokenTotals'],
-    costs: BillingDomainOverview['costs'],
+    costs: NonNullable<BillingDomainOverview['costs']>,
     tokenAuthority: BillingDomainOverview['tokenAuthority'],
     tokenEvidence: ProviderOverview['tokenEvidence'] = emptyTokenEvidence()
   ): BillingHistory {
@@ -1205,7 +1141,7 @@
     indexedProviders: AgentProviderIndex['providers'] = []
   ): ProviderOverview[] {
     const providers = currentOverview.providers
-      .filter((provider) => provider.id !== 'opencode')
+      .filter((provider) => provider.id !== 'opencode' && provider.id !== 'dsh')
       .map((provider) => ({
         ...provider,
         // A Provider payload that arrives without billing domains must not take
@@ -1214,6 +1150,7 @@
       }));
     for (const connector of connectionStatuses) {
       const { provider: targetProvider, billingDomain: targetDomain } = connector.target;
+      if (targetProvider.id === 'opencode' || targetProvider.id === 'dsh') continue;
       let provider = providers.find((candidate) => candidate.id === targetProvider.id);
       if (!provider) {
         provider = emptyProvider(targetProvider.id, targetProvider.displayName);
@@ -1224,6 +1161,7 @@
       }
     }
     for (const indexedProvider of indexedProviders) {
+      if (indexedProvider.id === 'opencode' || indexedProvider.id === 'dsh') continue;
       const provider = providers.find((candidate) => candidate.id === indexedProvider.id);
       if (!provider) {
         providers.push(emptyProvider(indexedProvider.id, indexedProvider.displayName));
@@ -1235,8 +1173,7 @@
       codex: 0,
       'claude-code': 1,
       'opencode-go': 2,
-      grok: 3,
-      dsh: 4
+      grok: 3
     };
     return providers.sort(
       (left, right) =>
@@ -1245,20 +1182,44 @@
     );
   }
 
-  function displayQuotaBuckets(buckets: QuotaBucket[]): QuotaBucket[] {
-    const displayPriority = (bucket: QuotaBucket): number => {
-      if (/\b5\s*hours?\b/i.test(bucket.label)) return 0;
-      if (/\b(?:week|weekly)\b/i.test(bucket.label)) return 1;
-      if (/\b(?:month|monthly)\b/i.test(bucket.label)) return 2;
-      return 3;
-    };
+  // A quota window belongs to a model group, and a label states the two in either
+  // order: `Claude / GPT · Week` leads with the group, `Week · All models` with the
+  // window, and a Provider's own default group states no group at all. Removing the
+  // window segments leaves the group, which is what the rows are grouped by.
+  function quotaWindowPriority(label: string): number {
+    if (/\b5\s*hours?\b/i.test(label)) return 0;
+    if (/\b(?:week|weekly)\b/i.test(label)) return 1;
+    if (/\b(?:month|monthly)\b/i.test(label)) return 2;
+    return 3;
+  }
 
-    return buckets
+  function quotaModelGroup(label: string): string {
+    return label
+      .split(' · ')
+      .filter((segment) => quotaWindowPriority(segment) === 3)
+      .join(' · ');
+  }
+
+  // Every window of one model group stays together, shortest window first, so a
+  // Provider that reports separate allowances never interleaves them.
+  function displayQuotaBuckets(buckets: QuotaBucket[]): QuotaBucket[] {
+    const byWindow = buckets
       .map((bucket, sourceIndex) => ({ bucket, sourceIndex }))
       .sort(
         (left, right) =>
-          displayPriority(left.bucket) - displayPriority(right.bucket) ||
+          quotaWindowPriority(left.bucket.label) - quotaWindowPriority(right.bucket.label) ||
           left.sourceIndex - right.sourceIndex
+      );
+    const groupOrder: string[] = [];
+    for (const { bucket } of byWindow) {
+      const group = quotaModelGroup(bucket.label);
+      if (!groupOrder.includes(group)) groupOrder.push(group);
+    }
+    return byWindow
+      .sort(
+        (left, right) =>
+          groupOrder.indexOf(quotaModelGroup(left.bucket.label)) -
+          groupOrder.indexOf(quotaModelGroup(right.bucket.label))
       )
       .map(({ bucket }) => bucket);
   }
@@ -1333,6 +1294,7 @@
       tokenEvidence: emptyTokenEvidence(),
       tokenAuthority: null,
       costs: [],
+      lastCostObservedAt: null,
       balances: [],
       invoices: [],
       history: fallbackHistory(tokenTotals, [], null),
@@ -1773,6 +1735,8 @@
                   <div class="section-label">{t('quota')}</div>
                   {#if !quotaMetered(connector)}
                     <p class="quota-absent">{t('noQuotaWindowDetail')}</p>
+                  {:else if domain.quotaBuckets.length === 0}
+                    <p class="quota-absent">{t('noQuotaReported')}</p>
                   {/if}
                   <div class="quotas">
                     {#each displayQuotaBuckets(domain.quotaBuckets) as bucket (bucket.id)}
@@ -2718,8 +2682,8 @@
       model.retailEquivalent.status !== 'unavailable'
         ? model.retailEquivalent
         : model.reportedEstimate}
-    {@const priceSnapshots = uniquePriceSnapshots(model.priceEvidence)}
-    {@const compositionTotals = nonOverlappingComposition(model.observations, model.tokenTotals)}
+    {@const priceSnapshots = model.priceSnapshots}
+    {@const compositionTotals = model.composition}
     {@const trendEvidence = modelTrendEvidence(model)}
     <div class="model-detail-backdrop" role="presentation">
       <div

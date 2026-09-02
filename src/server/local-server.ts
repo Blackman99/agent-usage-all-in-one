@@ -331,8 +331,7 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
 
       sendJson(response, 404, { error: 'not-found' });
     } catch (error) {
-      const message = publicErrorMessage(error);
-      sendJson(response, 500, { error: 'internal-error', message });
+      respondWithFailure(response, error);
     }
   });
 
@@ -483,12 +482,33 @@ function secureToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
+// The body is encoded before the first byte of the response is written. A payload that
+// cannot be encoded then fails while the failure path can still answer with a status,
+// instead of leaving a started response that only accepts an unrecoverable second write.
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
+  const payload = JSON.stringify(body);
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store'
   });
-  response.end(JSON.stringify(body));
+  response.end(payload);
+}
+
+// A request must never end the daemon. Once a response has started, its status is already
+// on the wire and a second write throws, so the only remaining signal is an aborted body.
+function respondWithFailure(response: ServerResponse, error: unknown): void {
+  const message = publicErrorMessage(error);
+  if (response.headersSent || response.writableEnded) {
+    process.stderr.write(`Agent Usage: a started response failed to finish: ${message}\n`);
+    response.destroy();
+    return;
+  }
+  try {
+    sendJson(response, 500, { error: 'internal-error', message });
+  } catch {
+    process.stderr.write(`Agent Usage: a request failed without a reportable reason.\n`);
+    response.destroy();
+  }
 }
 
 function sendOtlpProtobuf(response: ServerResponse, status: number): void {

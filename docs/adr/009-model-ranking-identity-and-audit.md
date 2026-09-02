@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted — 2026-08-28. The Top 5 display limit is superseded by ADR 013.
+Accepted — 2026-08-28. The Top 5 display limit is superseded by ADR 013. Audit
+row delivery was revised on 2026-09-02: the aggregates are precomputed and the
+rows became an explicit audit-evidence query.
 
 ## Context
 
@@ -33,10 +35,20 @@ Unknown, absent, and `all-models` identifiers are aggregated per Provider and
 billing domain into a separate unclassified section. They contribute to the
 workbench total but never occupy a Top 5 place.
 
-The model-detail read model retains the original observations, Token categories,
-source-reported and derived totals, authority, time precision, observation time,
-retail line items, and immutable price snapshots. Its trend uses the same
-selected window as the workbench and retains gaps.
+The model-detail read model retains the Token categories, source-reported and
+derived totals, authority, time precision, observation time, and immutable price
+snapshots. Its trend uses the same selected window as the workbench, reports its
+own recorded Tokens per interval, and retains gaps.
+
+Per-observation and per-cost audit rows are not part of that read model. A
+ranking entry carries the aggregates the model detail displays — the
+non-overlapping Token composition and the distinct price snapshots behind its
+retail equivalent — computed where the rows are already in hand. The rows
+themselves travel only on an explicit audit-evidence query, which the export path
+uses. A displayed response therefore stays proportional to what it displays
+rather than to the retained history: a 30-day window over three months of local
+usage produced a response the JSON encoder could not even represent, and the
+Dashboard only ever reduced those rows to the aggregates above.
 
 ## Consequences
 
@@ -48,3 +60,7 @@ selected window as the workbench and retains gaps.
 - Known model totals plus unclassified totals reconcile to recorded Tokens.
 - UI drawers can explain the displayed result without a second data fetch or a
   model-name-only join.
+- Observation-level auditing stays possible through the export path, which is
+  where a reader who wants every row already goes.
+- A read model whose size tracks the display cannot be broken by how much history
+  a user has retained.

@@ -101,7 +101,7 @@ export function buildUsageExport(
         calculatedAt: null
       };
       const modelObservations = history.models.flatMap((model) =>
-        model.observations.map((observation) => ({
+        (model.observations ?? []).map((observation) => ({
           model: model.model,
           observation
         }))
@@ -154,14 +154,14 @@ export function buildUsageExport(
       });
       const observationsById = new Map([
         ...history.models.flatMap((model) =>
-          model.observations.map((observation) => [observation.id, observation] as const)
+          (model.observations ?? []).map((observation) => [observation.id, observation] as const)
         ),
         ...(history.unclassified.observations ?? []).map(
           (observation) => [observation.id, observation] as const
         )
       ]);
       const costRows = history.costs.map((cost) => {
-        const authorities = domain.costs
+        const authorities = (domain.costs ?? [])
           .filter(
             (candidate) =>
               candidate.kind === cost.kind &&
@@ -218,7 +218,7 @@ export function buildUsageExport(
           calculatedAt: null
         };
       });
-      const costObservationRows = domain.costs
+      const costObservationRows = (domain.costs ?? [])
         .filter((cost) => cost.observedAt >= history.start && cost.observedAt < history.end)
         .map((cost) => {
           const snapshot = cost.priceSnapshot ?? null;

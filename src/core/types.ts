@@ -157,6 +157,12 @@ export interface UsageQuery {
   window?: HistoryWindow;
   timeZone?: string;
   comparisonCurrency?: string;
+  /**
+   * Retain per-observation and per-cost audit rows in the read model. Exports need
+   * every row; the Dashboard reads only the aggregates derived from them, so the
+   * default keeps a response proportional to the display instead of to the history.
+   */
+  auditEvidence?: boolean;
 }
 
 export interface ExchangeRateSnapshot {
@@ -278,7 +284,13 @@ export interface BillingDomainOverview extends BillingDomain {
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
   tokenAuthority: DataAuthority | 'mixed' | null;
-  costs: CostRecord[];
+  /**
+   * Every retained cost record for this billing domain. Audit evidence: present only
+   * when the query asked for it. `history.costs` carries the windowed summary the
+   * Dashboard reads, and `lastCostObservedAt` its freshness.
+   */
+  costs?: CostRecord[];
+  lastCostObservedAt: string | null;
   balances: BalanceRecord[];
   invoices: InvoiceRecord[];
   history: BillingHistory;
@@ -290,8 +302,8 @@ export interface HistoryModel {
   model: string;
   tokenTotals: TokenTotals;
   tokenEvidence: TokenEvidence;
-  observations: HistoryModelObservation[];
-  priceEvidence: HistoryModelPriceEvidence[];
+  observations?: HistoryModelObservation[];
+  priceEvidence?: HistoryModelPriceEvidence[];
 }
 
 export interface HistoryModelObservation {
@@ -618,6 +630,7 @@ export interface WorkbenchModelTrendBucket {
   label: string;
   gap: boolean;
   tokenTotals: TokenTotals;
+  recordedTokens: number;
   authorities?: DataAuthority[];
   lastObservedAt?: string | null;
   retailEquivalent: Pick<
@@ -649,8 +662,13 @@ export interface WorkbenchModelEntry {
   reportedShare: number | null;
   authorities: DataAuthority[];
   lastObservedAt: string | null;
-  observations: HistoryModelObservation[];
-  priceEvidence: HistoryModelPriceEvidence[];
+  /**
+   * Token categories added up without double counting a total that already contains
+   * them. Derived from the model's observations and their Token semantics.
+   */
+  composition: TokenTotals;
+  /** Every distinct immutable price snapshot behind this entry's retail equivalent. */
+  priceSnapshots: PriceSnapshotReference[];
   trend: WorkbenchModelTrendBucket[];
 }
 

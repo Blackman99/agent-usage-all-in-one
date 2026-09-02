@@ -103,7 +103,7 @@ describe('AntigravityConnector', () => {
   });
 
   it('falls back to local calculation when live quota is unavailable', async () => {
-    const fallbackQuotaClient = {
+    const unreachableQuotaClient = {
       async readQuota() {
         return null;
       }
@@ -114,7 +114,7 @@ describe('AntigravityConnector', () => {
         usage: [observation('conv-1:0', 'gemini-3.7-flash')]
       }),
       quotaClient:
-        fallbackQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
+        unreachableQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
       clock: () => OBSERVED_AT
     });
 
@@ -139,13 +139,48 @@ describe('AntigravityConnector', () => {
           authority: 'local-observation'
         }
       ],
-
       usageReconciliation: {
         authoritativeIdPrefixes: ['antigravity:'],
         retiredIdPrefixes: []
       },
       observedAt: OBSERVED_AT.toISOString()
     });
+    expect(snapshot.usage).toHaveLength(1);
+    expect(snapshot.warnings).toEqual([]);
+  });
+
+  it('falls back to local calculation when reading the live language server throws', async () => {
+    const throwingQuotaClient = {
+      async readQuota() {
+        throw new Error('ECONNREFUSED');
+      }
+    };
+
+    const connector = new AntigravityConnector({
+      historyClient: mockClient({
+        usage: [observation('conv-1:0', 'gemini-3.7-flash')]
+      }),
+      quotaClient:
+        throwingQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
+      clock: () => OBSERVED_AT
+    });
+
+    const snapshot = await connector.collect();
+
+    expect(snapshot.quotaBuckets).toMatchObject([
+      {
+        id: 'gemini-5h',
+        label: '5 hour',
+        windowDurationMinutes: 300,
+        authority: 'local-observation'
+      },
+      {
+        id: 'gemini-weekly',
+        label: 'Week',
+        windowDurationMinutes: 10_080,
+        authority: 'local-observation'
+      }
+    ]);
     expect(snapshot.usage).toHaveLength(1);
     expect(snapshot.warnings).toEqual([]);
   });

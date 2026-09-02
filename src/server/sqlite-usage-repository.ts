@@ -18,6 +18,7 @@ import type {
   ExchangeRateSnapshot,
   HistoryCost,
   HistoryModelObservation,
+  HistoryModelPriceEvidence,
   HistoryWindow,
   MonitoringSettings,
   PlanBillingPeriod,
@@ -37,6 +38,7 @@ import type {
   TokenSemantics,
   TokenTimePrecision,
   TokenTotalDerivation,
+  TokenTotals,
   TokenUsageScope,
   UsageOverview,
   UsageQuery,
@@ -566,6 +568,29 @@ export class SqliteUsageRepository implements UsageRepository {
            limit_currency = excluded.limit_currency,
            fallback_status = excluded.fallback_status`
       );
+      // A collection that reports quota states the complete set of windows for the
+      // billing domains it reports them for. Merging by bucket id instead left a
+      // window the source had stopped reporting on the card forever, beside the
+      // windows that replaced it. A collection reporting no quota at all changes
+      // nothing, so a source that is briefly unreadable keeps its last windows.
+      const reportedQuotaDomains = [
+        ...new Set(snapshot.quotaBuckets.map((bucket) => bucket.billingDomainId))
+      ];
+      if (reportedQuotaDomains.length > 0) {
+        const retiredQuotaStatement = this.#database.prepare(
+          `DELETE FROM quota_buckets
+           WHERE provider_id = ? AND billing_domain_id = ? AND id NOT IN (${snapshot.quotaBuckets
+             .map(() => '?')
+             .join(', ')})`
+        );
+        for (const billingDomainId of reportedQuotaDomains) {
+          retiredQuotaStatement.run(
+            snapshot.provider.id,
+            billingDomainId,
+            ...snapshot.quotaBuckets.map((bucket) => bucket.id)
+          );
+        }
+      }
       for (const bucket of snapshot.quotaBuckets) {
         quotaStatement.run(
           snapshot.provider.id,
@@ -1034,7 +1059,7 @@ export class SqliteUsageRepository implements UsageRepository {
     );
     const riskSummary = buildRiskSummary(overviews);
     const planSubscriptions = this.getPlanSubscriptions();
-    return {
+    const overview: UsageOverview = {
       generatedAt: now.toISOString(),
       globalSummary: buildGlobalSummary(overviews, riskSummary, now, query),
       workbench: buildTokenMoneyWorkbench(
@@ -1047,6 +1072,8 @@ export class SqliteUsageRepository implements UsageRepository {
       providers: overviews,
       riskSummary
     };
+    if (!query.auditEvidence) dropAuditEvidence(overviews);
+    return overview;
   }
 
   getAgentProviderIndex(now: Date): AgentProviderIndex {
@@ -1058,7 +1085,9 @@ export class SqliteUsageRepository implements UsageRepository {
       providers: providers
         .filter(
           (provider) =>
-            provider.id !== 'opencode' && (!this.#hideDemoProvider || provider.id !== 'demo')
+            provider.id !== 'opencode' &&
+            provider.id !== 'dsh' &&
+            (!this.#hideDemoProvider || provider.id !== 'demo')
         )
         .map((provider) => ({ id: provider.id, displayName: provider.display_name }))
     };
@@ -1076,7 +1105,10 @@ export class SqliteUsageRepository implements UsageRepository {
          FROM providers WHERE id = ?`
       )
       .get(providerId) as unknown as ProviderRow | undefined;
-    return provider ? this.#getProviderOverview(provider, now, query) : null;
+    if (!provider) return null;
+    const overview = this.#getProviderOverview(provider, now, query);
+    if (!query.auditEvidence) dropAuditEvidence([overview]);
+    return overview;
   }
 
   saveExchangeRateSnapshot(snapshot: ExchangeRateSnapshot): void {
@@ -1605,9 +1637,13 @@ export class SqliteUsageRepository implements UsageRepository {
          WHERE provider_id = ? AND billing_domain_id = ? AND ${additiveUsagePredicate()}`
       )
       .get(providerId, domain.id) as unknown as TokenRow;
-    const costs = this.#database
-      .prepare(
-        `SELECT id, source_id, billing_domain_id, observed_at, kind, amount, currency, authority,
+    // The whole ledger is audit evidence and is read only when a caller asked for it.
+    // A Dashboard response reads the windowed summary in `history.costs` instead, so
+    // reading and mapping every retained cost record would be work nobody displays.
+    const costs = query.auditEvidence
+      ? (this.#database
+          .prepare(
+            `SELECT id, source_id, billing_domain_id, observed_at, kind, amount, currency, authority,
                 price_snapshot_id, price_snapshot_version, price_snapshot_source,
                 price_snapshot_canonical_model, price_snapshot_effective_at,
                 price_snapshot_effective_until, price_snapshot_currency,
@@ -1615,8 +1651,18 @@ export class SqliteUsageRepository implements UsageRepository {
                 price_snapshot_context_tier, model, usage_observation_id, priced_tokens,
                 line_items_json, calculated_at
          FROM cost_records WHERE provider_id = ? AND billing_domain_id = ? ORDER BY observed_at DESC, id`
-      )
-      .all(providerId, domain.id) as unknown as CostRow[];
+          )
+          .all(providerId, domain.id) as unknown as CostRow[])
+      : null;
+    const lastCostObservedAt =
+      (
+        this.#database
+          .prepare(
+            `SELECT MAX(observed_at) AS observed_at FROM cost_records
+             WHERE provider_id = ? AND billing_domain_id = ?`
+          )
+          .get(providerId, domain.id) as unknown as { observed_at: string | null }
+      ).observed_at ?? null;
     const balances = this.#database
       .prepare(
         `SELECT id, source_id, billing_domain_id, observed_at, kind, amount, currency, authority
@@ -1629,7 +1675,16 @@ export class SqliteUsageRepository implements UsageRepository {
          FROM invoice_records WHERE provider_id = ? AND billing_domain_id = ? ORDER BY created_at DESC, id`
       )
       .all(providerId, domain.id) as unknown as InvoiceRow[];
-    const actualCostCount = costs.filter((cost) => cost.kind === 'actual').length;
+    const actualCostCount = Number(
+      (
+        this.#database
+          .prepare(
+            `SELECT COUNT(*) AS count FROM cost_records
+             WHERE provider_id = ? AND billing_domain_id = ? AND kind = 'actual'`
+          )
+          .get(providerId, domain.id) as unknown as { count: number }
+      ).count
+    );
     const nonAdditiveTokenCount = this.#database
       .prepare(
         `SELECT COUNT(*) AS count FROM usage_observations
@@ -1661,22 +1716,27 @@ export class SqliteUsageRepository implements UsageRepository {
       tokenTotals: mapTokenTotals(tokens),
       tokenEvidence: mapTokenEvidence(tokens),
       tokenAuthority: tokenAuthority(tokens.authorities),
-      costs: costs.map((row) => ({
-        id: row.id,
-        sourceId: row.source_id,
-        billingDomainId: row.billing_domain_id,
-        observedAt: row.observed_at,
-        kind: row.kind,
-        amount: row.amount,
-        currency: row.currency,
-        authority: row.authority,
-        priceSnapshot: priceSnapshotFromRow(row),
-        model: row.model,
-        usageObservationId: row.usage_observation_id,
-        pricedTokens: row.priced_tokens,
-        lineItems: parseLineItems(row.line_items_json),
-        calculatedAt: row.calculated_at
-      })),
+      ...(costs
+        ? {
+            costs: costs.map((row) => ({
+              id: row.id,
+              sourceId: row.source_id,
+              billingDomainId: row.billing_domain_id,
+              observedAt: row.observed_at,
+              kind: row.kind,
+              amount: row.amount,
+              currency: row.currency,
+              authority: row.authority,
+              priceSnapshot: priceSnapshotFromRow(row),
+              model: row.model,
+              usageObservationId: row.usage_observation_id,
+              pricedTokens: row.priced_tokens,
+              lineItems: parseLineItems(row.line_items_json),
+              calculatedAt: row.calculated_at
+            }))
+          }
+        : {}),
+      lastCostObservedAt,
       balances: balances.map((row) => ({
         id: row.id,
         sourceId: row.source_id,
@@ -2549,9 +2609,9 @@ export class SqliteUsageRepository implements UsageRepository {
       .prepare('PRAGMA table_info(quota_buckets)')
       .all() as unknown as Array<{ name: string }>;
     for (const [name, type] of [
+      ['window_duration_minutes', 'INTEGER'],
       ['scope', 'TEXT'],
       ['status', 'TEXT'],
-      ['window_duration_minutes', 'INTEGER'],
       ['limit_amount', 'REAL'],
       ['limit_currency', 'TEXT'],
       ['fallback_status', 'TEXT']
@@ -2826,7 +2886,7 @@ function buildGlobalSummary(
     for (const observedAt of [
       domain.history.lastObservedAt,
       ...domain.quotaBuckets.map((bucket) => bucket.observedAt ?? null),
-      ...domain.costs.map((cost) => cost.observedAt),
+      domain.lastCostObservedAt,
       ...domain.balances.map((balance) => balance.observedAt),
       ...domain.invoices.map((invoice) => invoice.createdAt)
     ]) {
@@ -3274,26 +3334,30 @@ function buildWorkbenchModelRanking(
   const entries = histories.flatMap(({ provider, domain, history, includedInHeadline }) =>
     history.models.map((model) => {
       const retailEquivalent = buildWorkbenchMetric(
-        model.priceEvidence,
+        model.priceEvidence ?? [],
         'retail-equivalent',
         comparisonCurrency,
         model.tokenEvidence.recordedTokens,
         history.exchangeRates
       );
       const reportedEstimate = buildWorkbenchMetric(
-        model.priceEvidence,
+        model.priceEvidence ?? [],
         'reported-estimate',
         comparisonCurrency,
         model.tokenEvidence.recordedTokens,
         history.exchangeRates
       );
+      const observations = model.observations ?? [];
+      const priceEvidence = model.priceEvidence ?? [];
       const authorities = [
-        ...new Set(model.observations.map((observation) => observation.authority))
+        ...new Set(observations.map((observation) => observation.authority))
       ].sort();
       const lastObservedAt =
-        [...model.observations].sort((left, right) =>
-          right.observedAt.localeCompare(left.observedAt)
-        )[0]?.observedAt ?? null;
+        observations.reduce<string | null>(
+          (latest, observation) =>
+            latest === null || observation.observedAt > latest ? observation.observedAt : latest,
+          null
+        ) ?? null;
       return {
         id: modelRankingId(provider.id, domain.id, model.model),
         providerId: provider.id,
@@ -3330,30 +3394,30 @@ function buildWorkbenchModelRanking(
             : null,
         authorities,
         lastObservedAt,
-        observations: model.observations,
-        priceEvidence: model.priceEvidence,
+        composition: nonOverlappingComposition(observations, model.tokenTotals),
+        priceSnapshots: distinctPriceSnapshots(priceEvidence),
         trend: buckets.map((bucket) => {
-          const observations = model.observations.filter(
+          const bucketObservations = observations.filter(
             (observation) =>
               observation.observedAt >= bucket.start && observation.observedAt < bucket.end
           );
-          const priceEvidence = model.priceEvidence.filter(
+          const bucketPriceEvidence = priceEvidence.filter(
             (cost) =>
               (cost.observedAt ?? '') >= bucket.start && (cost.observedAt ?? '') < bucket.end
           );
-          const tokenTotals = observations.reduce(
+          const tokenTotals = bucketObservations.reduce(
             (total, observation) => addTokenTotals(total, observation.tokenTotals),
             zeroTokenTotals()
           );
           const intervalRetail = buildWorkbenchMetric(
-            priceEvidence,
+            bucketPriceEvidence,
             'retail-equivalent',
             comparisonCurrency,
             tokenTotals.total,
             history.exchangeRates
           );
           const intervalReported = buildWorkbenchMetric(
-            priceEvidence,
+            bucketPriceEvidence,
             'reported-estimate',
             comparisonCurrency,
             tokenTotals.total,
@@ -3363,15 +3427,23 @@ function buildWorkbenchModelRanking(
             start: bucket.start,
             end: bucket.end,
             label: bucket.label,
-            gap: observations.length === 0,
+            gap: bucketObservations.length === 0,
             tokenTotals,
+            recordedTokens: bucketObservations.reduce(
+              (total, observation) => total + observation.recordedTokens,
+              0
+            ),
             authorities: [
-              ...new Set(observations.map((observation) => observation.authority))
+              ...new Set(bucketObservations.map((observation) => observation.authority))
             ].sort(),
             lastObservedAt:
-              [...observations].sort((left, right) =>
-                right.observedAt.localeCompare(left.observedAt)
-              )[0]?.observedAt ?? null,
+              bucketObservations.reduce<string | null>(
+                (latest, observation) =>
+                  latest === null || observation.observedAt > latest
+                    ? observation.observedAt
+                    : latest,
+                null
+              ) ?? null,
             retailEquivalent: {
               status: intervalRetail.status,
               amount: intervalRetail.amount,
@@ -3461,6 +3533,66 @@ function buildWorkbenchModelRanking(
     entries: byTokens,
     unclassified
   };
+}
+
+// Adding every Token category would double count a source that already folds reasoning
+// or cache Tokens into its own total, so only categories the source reports separately
+// contribute. Without observations the model total is the only honest answer.
+// Audit rows exist so the workbench can bucket and price each observation. Once the read
+// model is built only an export still needs them, and a response that carries them grows
+// with the whole retained history instead of with what the Dashboard displays.
+function dropAuditEvidence(providers: ProviderOverview[]): void {
+  for (const provider of providers) {
+    for (const domain of provider.billingDomains) {
+      for (const model of domain.history.models) {
+        delete model.observations;
+        delete model.priceEvidence;
+      }
+      delete domain.history.unclassified.observations;
+    }
+  }
+}
+
+function nonOverlappingComposition(
+  observations: HistoryModelObservation[],
+  fallback: TokenTotals
+): TokenTotals {
+  if (observations.length === 0) {
+    return {
+      ...fallback,
+      total: fallback.input + fallback.output + fallback.cacheRead + fallback.cacheWrite
+    };
+  }
+  const totals = zeroTokenTotals();
+  for (const observation of observations) {
+    totals.input += observation.tokenTotals.input;
+    totals.output += observation.tokenTotals.output;
+    if (observation.tokenSemantics.reasoning === 'separate') {
+      totals.reasoning += observation.tokenTotals.reasoning;
+    }
+    if (observation.tokenSemantics.cacheRead === 'separate') {
+      totals.cacheRead += observation.tokenTotals.cacheRead;
+    }
+    if (observation.tokenSemantics.cacheWrite === 'separate') {
+      totals.cacheWrite += observation.tokenTotals.cacheWrite;
+    }
+  }
+  totals.total =
+    totals.input + totals.output + totals.reasoning + totals.cacheRead + totals.cacheWrite;
+  return totals;
+}
+
+// Price snapshots are immutable and shared by every cost record priced against them,
+// so the drawer needs each one once rather than once per priced observation.
+function distinctPriceSnapshots(
+  priceEvidence: HistoryModelPriceEvidence[]
+): PriceSnapshotReference[] {
+  const snapshots = new Map<string, PriceSnapshotReference>();
+  for (const evidence of priceEvidence) {
+    const snapshot = evidence.priceSnapshot;
+    if (snapshot && !snapshots.has(snapshot.id)) snapshots.set(snapshot.id, snapshot);
+  }
+  return [...snapshots.values()];
 }
 
 function modelRankingId(providerId: string, billingDomainId: string, model: string): string {
@@ -3619,9 +3751,7 @@ function addUnclassifiedUsage(
   }
 }
 
-function mapHistoryModelObservation(
-  row: UsageHistoryRow
-): BillingDomainOverview['history']['models'][number]['observations'][number] {
+function mapHistoryModelObservation(row: UsageHistoryRow): HistoryModelObservation {
   return {
     id: row.id,
     model: row.model === '__unclassified__' ? null : row.model,
@@ -3663,9 +3793,7 @@ function cacheWriteTokenBreakdownFromRow(
       };
 }
 
-function mapUnclassifiedObservation(
-  row: UsageHistoryRow
-): BillingDomainOverview['history']['models'][number]['observations'][number] {
+function mapUnclassifiedObservation(row: UsageHistoryRow): HistoryModelObservation {
   return {
     id: row.id,
     model: row.model === '__unclassified__' ? null : row.model,

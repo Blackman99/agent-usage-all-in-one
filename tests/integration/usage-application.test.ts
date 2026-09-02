@@ -512,7 +512,7 @@ describe('UsageApplication', () => {
       lastSuccessAt: null
     });
 
-    const overview = repository.getOverview(new Date(xaiObservedAt));
+    const overview = repository.getOverview(new Date(xaiObservedAt), { auditEvidence: true });
     expect(overview.providers[0].billingDomains).toMatchObject([
       {
         id: 'grok-build-subscription',

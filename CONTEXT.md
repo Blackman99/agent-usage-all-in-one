@@ -20,8 +20,12 @@ which keep no usage of their own; it reports Tokens and history with no quota
 window, and its billing domains are dsh provider route keys, with
 `deepseek-official` as the deployment default and summary domain. Antigravity
 (Google Antigravity) is one Provider covering both CLI and IDE/desktop profiles;
-it reports source-recorded Tokens, turn history, and dual-limit quota windows (5-hour rolling sprint window and weekly baseline limit) via live language server RPC with local observation fallback, and
-its primary billing domain is `code-assist-subscription`.
+it reports source-recorded Tokens, turn history, and dual-limit quota windows
+(5-hour rolling sprint window and weekly baseline limit) from the official
+client's live language server RPC. Only that client states either allowance, so
+an unreachable language server leaves quota unavailable while Tokens, history,
+and equivalent cost stay exact. Its primary billing domain is
+`code-assist-subscription`.
 
 ## Ubiquitous language
 
@@ -160,7 +164,12 @@ its primary billing domain is `code-assist-subscription`.
    evidence, and history that ages out of a live directory is never read as a
    drop in usage.
 4. Unknown cost is never represented as zero.
-5. Provider-native quota labels and windows are preserved.
+5. Provider-native quota labels and windows are preserved. A quota percentage
+   requires an allowance the Provider itself states; it is never derived against
+   a capacity Agent Usage assumed. An unavailable allowance leaves the window
+   unavailable rather than showing a percentage of a guess. A window a Provider
+   has stopped reporting is retired instead of remaining beside the windows that
+   replaced it.
 6. One connector failure cannot make other providers unavailable.
 7. Credentials stay in the system keychain or their owning official client and
    never appear in logs, exports, or the usage database.
@@ -225,9 +234,13 @@ its primary billing domain is `code-assist-subscription`.
     excluded from that reconciliation.
 30. Model details present aggregate Token, cost, authority, precision, time, and
     trend summaries without exposing observation or pricing audit tables. The
-    underlying observation-level Token evidence and immutable price snapshots
-    remain retained in the local domain and export paths without joining model
-    names across sources.
+    displayed read model carries those aggregates already computed — the
+    non-overlapping Token composition, the distinct price snapshots, and the
+    recorded Tokens of each trend interval. Observation-level Token evidence and
+    individual cost records remain retained in the local domain and travel only
+    on an explicit audit-evidence query, which the export path uses. A displayed
+    response is therefore sized by what it displays, never by how much history is
+    retained, and no path joins model names across sources.
 31. A Provider with independent billing domains declares one
     `summaryBillingDomainId`. Provider headlines and workbench scalar metrics
     aggregate only that domain. Sibling-domain Token and cost evidence remains

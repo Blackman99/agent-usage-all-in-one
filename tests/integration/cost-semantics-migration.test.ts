@@ -26,8 +26,11 @@ describe('cost purpose expand-contract migration', () => {
     legacyWriter.close();
 
     const migrated = new SqliteUsageRepository(databasePath);
-    const domain = migrated.getOverview(NOW, { window: '24h', comparisonCurrency: 'USD' })
-      .providers[0].billingDomains[0];
+    const domain = migrated.getOverview(NOW, {
+      window: '24h',
+      comparisonCurrency: 'USD',
+      auditEvidence: true
+    }).providers[0].billingDomains[0];
 
     expect(domain.history.costs.map((cost) => cost.kind).sort()).toEqual([
       'actual',
@@ -48,13 +51,15 @@ describe('cost purpose expand-contract migration', () => {
     expect(domain.history.costs.some((cost) => cost.kind === ('estimate' as never))).toBe(false);
     expect(domain.history.costs.reduce((sum, cost) => sum + (cost.amount ?? 0), 0)).toBe(20);
     expect(domain.history.days[0].costs.map((cost) => cost.kind)).not.toContain('subscription');
-    expect(domain.costs.find((cost) => cost.kind === 'subscription')).toMatchObject({
+    expect(domain.costs?.find((cost) => cost.kind === 'subscription')).toMatchObject({
       model: null,
       usageObservationId: null,
       pricedTokens: null,
       lineItems: []
     });
-    expect(domain.costs.some((cost) => cost.id.startsWith('opencode-quota-estimate:'))).toBe(false);
+    expect(domain.costs?.some((cost) => cost.id.startsWith('opencode-quota-estimate:'))).toBe(
+      false
+    );
     migrated.close();
 
     const restarted = new SqliteUsageRepository(databasePath);

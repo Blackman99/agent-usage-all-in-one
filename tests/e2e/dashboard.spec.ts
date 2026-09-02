@@ -52,7 +52,6 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
     { id: 'claude-code', name: 'Claude Code' },
     { id: 'opencode-go', name: 'OpenCode Go' },
     { id: 'grok', name: 'Grok' },
-    { id: 'dsh', name: 'dsh' },
     { id: 'antigravity', name: 'Antigravity' }
   ]) {
     await expect(
@@ -83,14 +82,10 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
   releaseOverview();
   await expect(page.locator('.provider-card').first()).toBeVisible();
 
-  // A Provider that meters each request says so instead of reporting an
-  // allowance it never had as unavailable.
-  const dshCard = agentPanel.locator('.provider-card', {
-    has: page.getByRole('heading', { name: 'dsh', exact: true })
-  });
-  await expect(dshCard.locator('.coverage')).toHaveText('No quota window');
-  await expect(dshCard.locator('.quota-absent')).toContainText('meters each request');
-  await expect(dshCard.locator('.quota-row')).toHaveCount(0);
+  // dsh has no quota concept and does not display an agent usage card.
+  await expect(
+    agentPanel.getByRole('heading', { name: 'dsh', exact: true })
+  ).toHaveCount(0);
 });
 
 test('shows each Agent card as soon as that provider finishes loading', async ({ page }) => {
@@ -956,6 +951,172 @@ test('keeps Claude All models and Fable-only quota without duplicating local Tok
   await expectProviderHasNoTokenDetail(provider);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(page.getByTestId('settings-diagnostic-claude-code')).toHaveCount(0);
+});
+
+test('groups every Antigravity quota window under its own model group', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    const quotaBucket = (
+      id: string,
+      label: string,
+      usedPercent: number,
+      windowDurationMinutes: number,
+      resetsAt: string,
+      authority: string
+    ) => ({
+      id,
+      billingDomainId: 'code-assist-subscription',
+      label,
+      usedPercent,
+      windowDurationMinutes,
+      resetsAt,
+      authority,
+      scope: authority === 'official-client' ? 'account-wide' : 'local-only',
+      status: 'ok',
+      limitAmount: null,
+      limitCurrency: null,
+      fallbackStatus: 'unknown'
+    });
+    await fulfillOverview(route, {
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      providers: [
+        withTokenDomain(
+          {
+            id: 'antigravity',
+            displayName: 'Antigravity',
+            freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
+            health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+            coverage: {
+              quota: 'complete',
+              tokens: 'complete',
+              actualCost: 'unavailable',
+              history: 'complete'
+            },
+            // The official quota call reports the third-party group first and the
+            // windows of both groups interleaved, exactly as the client returns them.
+            quotaBuckets: [
+              quotaBucket(
+                'third-party-5h',
+                'Claude / GPT · 5 hour',
+                53,
+                300,
+                '2026-08-28T06:55:00.000Z',
+                'official-client'
+              ),
+              quotaBucket(
+                'gemini-5h',
+                '5 hour',
+                0,
+                300,
+                '2026-08-28T07:34:00.000Z',
+                'local-observation'
+              ),
+              quotaBucket(
+                'third-party-weekly',
+                'Claude / GPT · Week',
+                18,
+                10_080,
+                '2026-09-04T01:55:00.000Z',
+                'official-client'
+              ),
+              quotaBucket(
+                'gemini-weekly',
+                'Week',
+                61,
+                10_080,
+                '2026-09-02T05:06:00.000Z',
+                'local-observation'
+              )
+            ],
+            tokenTotals: {
+              total: 25_000,
+              input: 20_000,
+              output: 0,
+              reasoning: 0,
+              cacheRead: 5_000,
+              cacheWrite: 0
+            },
+            tokenEvidence: tokenEvidenceFixture(
+              { total: 25_000 },
+              {
+                totalDerivations: ['categorized'],
+                timePrecisions: ['event'],
+                usageScopes: ['this-mac']
+              }
+            ),
+            tokenAuthority: 'local-observation'
+          },
+          'code-assist-subscription',
+          'Gemini Code Assist',
+          '2026-08-28T01:59:00.000Z'
+        )
+      ]
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  const provider = page.locator('.provider-card').filter({ hasText: 'Antigravity' });
+  await expect(provider.locator('.quota-copy strong')).toHaveText([
+    'Claude / GPT · 5 hour',
+    'Claude / GPT · Week',
+    '5 hour',
+    'Week'
+  ]);
+});
+
+test('says an Antigravity quota window is unreported rather than showing a derived percentage', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/overview**', async (route) => {
+    await fulfillOverview(route, {
+      generatedAt: '2026-08-28T02:00:00.000Z',
+      providers: [
+        withTokenDomain(
+          {
+            id: 'antigravity',
+            displayName: 'Antigravity',
+            freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T02:00:00.000Z' },
+            health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+            coverage: {
+              quota: 'unavailable',
+              tokens: 'complete',
+              actualCost: 'unavailable',
+              history: 'complete'
+            },
+            quotaBuckets: [],
+            tokenTotals: {
+              total: 60_696_074,
+              input: 55_000_000,
+              output: 696_074,
+              reasoning: 0,
+              cacheRead: 5_000_000,
+              cacheWrite: 0
+            },
+            tokenEvidence: tokenEvidenceFixture(
+              { total: 60_696_074 },
+              {
+                totalDerivations: ['categorized'],
+                timePrecisions: ['event'],
+                usageScopes: ['this-mac']
+              }
+            ),
+            tokenAuthority: 'local-observation'
+          },
+          'code-assist-subscription',
+          'Gemini Code Assist',
+          '2026-08-28T01:59:00.000Z'
+        )
+      ]
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  const provider = page.locator('.provider-card').filter({ hasText: 'Antigravity' });
+  await expect(provider.locator('.quota-row')).toHaveCount(0);
+  await expect(provider.locator('.quota-absent')).toContainText('No quota window reported yet');
+  // Spending 60,696,074 Tokens against an unknown allowance is not a percentage.
+  await expect(provider.locator('.quota-absent')).not.toContainText('%');
 });
 
 test('renders Grok shared weekly quota without duplicating telemetry or inventing a five-hour bucket', async ({
@@ -1880,39 +2041,37 @@ test('presents model detail as a compact visual summary instead of long visible 
   ).toBeGreaterThanOrEqual(8);
 });
 
-test('opens the model detail shell promptly with a large evidence history', async ({ page }) => {
+test('opens the model detail shell promptly with a large model ranking', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   const fixture = historyOverviewFixture('30d', 2900, 'USD') as {
     workbench: {
       modelRanking: {
-        entries: Array<{
-          model: string;
-          observations: Array<{ id: string; observedAt: string; [key: string]: unknown }>;
-          priceEvidence: Array<{ id: string; [key: string]: unknown }>;
-          tokenEvidence: { observationCount: number };
-        }>;
+        byTokens: string[];
+        byCost: string[];
+        byRetailEquivalent: string[];
+        entries: Array<{ id: string; model: string; tokenEvidence: { observationCount: number } }>;
       };
     };
   };
-  const model = fixture.workbench.modelRanking.entries.find(
-    (entry) => entry.model === 'fable-model'
-  );
-  if (!model?.observations[0] || !model.priceEvidence[0]) {
-    throw new Error('Expected the performance fixture to include model audit evidence');
+  const ranking = fixture.workbench.modelRanking;
+  const model = ranking.entries.find((entry) => entry.model === 'fable-model');
+  if (!model) {
+    throw new Error('Expected the performance fixture to include a model ranking entry');
   }
-  const observation = model.observations[0];
-  const price = model.priceEvidence[0];
-  model.observations = Array.from({ length: 12_000 }, (_, index) => ({
-    ...observation,
-    id: `large-observation-${index}`,
-    observedAt: '2026-08-01T00:30:00.000Z'
+  // Audit rows no longer travel with the read model, so the drawer's cost now scales
+  // with the number of ranked models rather than with the retained history.
+  const filler = ranking.entries.find((entry) => entry.model === 'model-five')!;
+  const fillers = Array.from({ length: 600 }, (_, index) => ({
+    ...filler,
+    id: `codex::subscription::filler-model-${index}`,
+    model: `filler-model-${index}`
   }));
-  model.priceEvidence = Array.from({ length: 4_000 }, (_, index) => ({
-    ...price,
-    id: `large-price-${index}`,
-    usageObservationId: `large-observation-${index}`
-  }));
-  model.tokenEvidence.observationCount = model.observations.length;
+  ranking.entries = [...ranking.entries, ...fillers];
+  const fillerIds = fillers.map((entry) => entry.id);
+  ranking.byTokens = [...ranking.byTokens, ...fillerIds];
+  ranking.byCost = [...ranking.byCost, ...fillerIds];
+  ranking.byRetailEquivalent = [...ranking.byRetailEquivalent, ...fillerIds];
+  model.tokenEvidence.observationCount = 12_000;
 
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(fixture) });
@@ -2968,67 +3127,25 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
         retailShare: amount === null ? null : amount / 9,
         authorities: ['local-observation'],
         lastObservedAt: '2026-08-28T00:30:00.000Z',
-        observations: [
-          {
-            id: `${model}-observation`,
-            observedAt: '2026-08-28T00:30:00.000Z',
-            authority: 'local-observation',
-            timePrecision: 'event',
-            sourceReportedTotalTokens: model === 'fable-model' ? 450 : tokens,
-            recordedTokens: model === 'fable-model' ? 450 : tokens,
-            classifiedTokens: tokens,
-            unclassifiedTokens: model === 'fable-model' ? 50 : 0,
-            usageScope: 'this-mac',
-            aggregationTemporality: 'delta',
-            tokenSemantics: {
-              reasoning: 'included-in-output',
-              cacheRead: 'separate',
-              cacheWrite: 'separate'
-            },
-            totalDerivation: 'source-reported',
-            tokenTotals
-          }
-        ],
-        priceEvidence:
+        composition: tokenTotals,
+        priceSnapshots:
           model === 'fable-model'
             ? [
                 {
-                  id: 'fable-retail',
-                  kind: 'retail-equivalent',
+                  id: 'fable-price',
+                  version: '2026-08-01',
+                  source: 'Official fixture pricing',
+                  canonicalModel: 'fable-model',
+                  effectiveAt: '2026-08-01T00:00:00.000Z',
+                  effectiveUntil: null,
                   currency: 'USD',
-                  amount: 4,
-                  convertedAmount,
-                  comparisonCurrency: currency,
-                  conversionUnavailableReason: null,
-                  priceSnapshots: [],
-                  authorities: ['estimate'],
-                  observedAt: '2026-08-28T00:30:00.000Z',
-                  records: 1,
-                  knownRecords: 1,
-                  usageObservationId: 'fable-model-observation',
-                  pricedTokens: 400,
-                  lineItems: [
-                    { tokenKind: 'input', tokens: 320, ratePerMillion: 10000, amount: 3.2 },
-                    { tokenKind: 'output', tokens: 80, ratePerMillion: 10000, amount: 0.8 }
-                  ],
-                  priceSnapshot: {
-                    id: 'fable-price',
-                    version: '2026-08-01',
-                    source: 'Official fixture pricing',
-                    canonicalModel: 'fable-model',
-                    effectiveAt: '2026-08-01T00:00:00.000Z',
-                    effectiveUntil: null,
-                    currency: 'USD',
-                    ratesPerMillion: {
-                      input: 10_000,
-                      output: 10_000,
-                      reasoning: null,
-                      'cache-read': null,
-                      'cache-write': null
-                    }
-                  },
-                  authority: 'estimate',
-                  calculatedAt: '2026-08-28T00:31:00.000Z'
+                  ratesPerMillion: {
+                    input: 10_000,
+                    output: 10_000,
+                    reasoning: null,
+                    'cache-read': null,
+                    'cache-write': null
+                  }
                 }
               ]
             : [],
@@ -3041,6 +3158,7 @@ function modelRankingFixture(currency: string, bucketCount: number): unknown {
           lastObservedAt: index === 0 ? '2026-08-28T00:30:00.000Z' : null,
           tokenTotals:
             index === 0 ? tokenTotals : { ...tokenTotals, total: 0, input: 0, output: 0 },
+          recordedTokens: index === 0 ? (model === 'fable-model' ? 450 : tokens) : 0,
           retailEquivalent: {
             status: index === 0 && amount !== null ? 'available' : 'unavailable',
             amount: index === 0 ? convertedAmount : null,
@@ -3405,8 +3523,7 @@ test('keeps provider cards and their final quota rows aligned without forecasts'
 
   await page.setViewportSize({ width: 1680, height: 1000 });
   await page.goto(freshLaunch.stdout.trim());
-  // Every quota-bearing card is compared; dsh keeps a card without quota rows,
-  // because it reports Tokens against a pay-as-you-go route and no allowance.
+  // Every quota-bearing card is compared; dsh has no quota card, while antigravity stays in the default set.
   await expect(page.locator('.provider-card')).toHaveCount(5);
   const cards = page.locator('.provider-card:has(.quota-row)');
   await expect(cards).toHaveCount(4);

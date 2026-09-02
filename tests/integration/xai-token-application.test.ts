@@ -35,7 +35,8 @@ describe('xAI token application path', () => {
     const restarted = application(restartedRepository);
     await restarted.refresh({ userInitiated: true });
 
-    const oneDay = (await restarted.getOverview({ window: '24h' })).providers[0];
+    const oneDay = (await restarted.getOverview({ window: '24h', auditEvidence: true }))
+      .providers[0];
     const oneDayDomain = oneDay.billingDomains[0];
     expect(oneDay.id).toBe('grok');
     expect(oneDay.billingDomains.map((domain) => domain.id)).toEqual(['xai-api']);
@@ -57,7 +58,8 @@ describe('xAI token application path', () => {
       expect.objectContaining({ kind: 'actual', currency: 'USD', amount: 2.5 })
     ]);
 
-    const thirtyDays = (await restarted.getOverview({ window: '30d' })).providers[0];
+    const thirtyDays = (await restarted.getOverview({ window: '30d', auditEvidence: true }))
+      .providers[0];
     const xai = thirtyDays.billingDomains[0];
     expect(xai.tokenTotals).toMatchObject({
       total: 1_742,

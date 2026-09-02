@@ -47,6 +47,35 @@ describe('local HTTP server', () => {
     expect(overviewCalls).toBe(0);
   });
 
+  it('answers a request whose payload cannot be encoded and stays available', async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const application = {
+      async getOverview() {
+        return circular;
+      },
+      async getAgentProviderIndex() {
+        return { generatedAt: '2026-08-28T02:00:00.000Z', providers: [] };
+      }
+    } as unknown as UsageApplication;
+    const server = await startLocalServer({ application, apiToken: 'encode-token' });
+    servers.push(server);
+
+    const failed = await fetch(`${server.origin}/api/overview`, {
+      headers: { authorization: 'Bearer encode-token' }
+    });
+
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toMatchObject({ error: 'internal-error' });
+
+    // The process that could not encode one response must still serve the next.
+    const next = await fetch(`${server.origin}/api/overview/providers`, {
+      headers: { authorization: 'Bearer encode-token' }
+    });
+    expect(next.status).toBe(200);
+    expect(await next.json()).toMatchObject({ providers: [] });
+  });
+
   it('reports background processing and accepts a confirmed hard rebuild without waiting', async () => {
     let resolveRebuild!: () => void;
     const rebuildFinished = new Promise<void>((resolve) => {
@@ -603,12 +632,6 @@ describe('local HTTP server', () => {
           billingDomains: [
             {
               id: 'subscription',
-              costs: [
-                {
-                  sourceId: 'claude-otel:1787878800000000000:claude-fable-5',
-                  amount: 0.42
-                }
-              ],
               history: {
                 tokenTotals: { total: 575 },
                 days: [{ day: '2026-08-28', tokenTotals: { total: 575 } }],

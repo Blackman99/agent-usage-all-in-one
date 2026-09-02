@@ -776,7 +776,12 @@ export class UsageApplication {
   }
 
   async exportUsage(request: UsageExportRequest): Promise<UsageExportArtifact> {
-    const overview = this.#repository.getOverview(this.#clock(), request);
+    // An export is the audit artefact: it reports every observation and cost record
+    // behind the totals, not only the aggregates the Dashboard renders.
+    const overview = this.#repository.getOverview(this.#clock(), {
+      ...request,
+      auditEvidence: true
+    });
     const accountIdentifiers = request.includeAccountIdentifiers
       ? this.#repository.getProviderAccountIdentifiers()
       : {};
@@ -1121,7 +1126,7 @@ function pickAgentProviderIndex(overview: UsageOverview): AgentProviderIndex {
   return {
     generatedAt: overview.generatedAt,
     providers: overview.providers
-      .filter((provider) => provider.id !== 'opencode')
+      .filter((provider) => provider.id !== 'opencode' && provider.id !== 'dsh')
       .map(({ id, displayName }) => ({ id, displayName }))
   };
 }

@@ -100,27 +100,12 @@ describe('model ranking read model', () => {
         totalDerivations: ['source-reported'],
         timePrecisions: ['event']
       },
-      observations: [
+      composition: { total: 400, input: 320, output: 80, reasoning: 0 },
+      priceSnapshots: [
         {
-          id: 'claude-fable',
-          sourceReportedTotalTokens: 400,
-          recordedTokens: 400,
-          totalDerivation: 'source-reported'
-        }
-      ],
-      priceEvidence: [
-        {
-          usageObservationId: 'claude-fable',
-          pricedTokens: 400,
-          lineItems: [
-            { tokenKind: 'input', tokens: 320, ratePerMillion: 10_000, amount: 3.2 },
-            { tokenKind: 'output', tokens: 80, ratePerMillion: 10_000, amount: 0.8 }
-          ],
-          priceSnapshot: {
-            version: '2026-08-01',
-            source: 'Official fixture pricing',
-            effectiveAt: '2026-08-01T00:00:00.000Z'
-          }
+          version: '2026-08-01',
+          source: 'Official fixture pricing',
+          effectiveAt: '2026-08-01T00:00:00.000Z'
         }
       ]
     });
@@ -128,9 +113,98 @@ describe('model ranking read model', () => {
     expect(fable?.trend.some((bucket) => bucket.gap)).toBe(true);
     expect(fable?.trend.find((bucket) => !bucket.gap)).toMatchObject({
       tokenTotals: { total: 400 },
+      recordedTokens: 400,
       retailEquivalent: { status: 'available', amount: 4 }
     });
 
+    repository.close();
+  });
+
+  it('keeps every audit row reachable through an audit-evidence query', async () => {
+    const repository = await fixture();
+    const query = { window: '24h', timeZone: 'UTC', comparisonCurrency: 'USD' } as const;
+    const displayed = repository
+      .getOverview(NOW, query)
+      .providers.find((provider) => provider.id === 'claude-code')!.billingDomains[0];
+    const audited = repository
+      .getOverview(NOW, { ...query, auditEvidence: true })
+      .providers.find((provider) => provider.id === 'claude-code')!.billingDomains[0];
+
+    expect(displayed.costs).toBeUndefined();
+    expect(displayed.history.models[0].observations).toBeUndefined();
+    expect(displayed.history.models[0].priceEvidence).toBeUndefined();
+
+    const fable = audited.history.models.find((model) => model.model === 'fable-model')!;
+    expect(audited.costs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ usageObservationId: 'claude-fable' })])
+    );
+    expect(fable.observations).toEqual([
+      expect.objectContaining({
+        id: 'claude-fable',
+        sourceReportedTotalTokens: 400,
+        recordedTokens: 400,
+        totalDerivation: 'source-reported'
+      })
+    ]);
+    expect(fable.priceEvidence).toEqual([
+      expect.objectContaining({
+        usageObservationId: 'claude-fable',
+        pricedTokens: 400,
+        lineItems: [
+          { tokenKind: 'input', tokens: 320, ratePerMillion: 10_000, amount: 3.2 },
+          { tokenKind: 'output', tokens: 80, ratePerMillion: 10_000, amount: 0.8 }
+        ],
+        priceSnapshot: expect.objectContaining({
+          version: '2026-08-01',
+          source: 'Official fixture pricing',
+          effectiveAt: '2026-08-01T00:00:00.000Z'
+        })
+      })
+    ]);
+    repository.close();
+  });
+
+  it('keeps the displayed read model sized by the display, not by the retained history', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-model-ranking-size-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const observations: UsageObservation[] = [];
+    const costs: CostRecord[] = [];
+    for (let index = 0; index < 3_000; index += 1) {
+      const observedAt = new Date(NOW.getTime() - (index + 1) * 60_000).toISOString();
+      const id = `bulk-${index}`;
+      observations.push({
+        ...usage(id, 'subscription', 'bulk-model', 1_000, observedAt),
+        sourceReportedTotalTokens: 1_000
+      });
+      costs.push({
+        ...retailCost('bulk', 'subscription', 'bulk-model', id, 1_000, 0.01),
+        id: `bulk-retail-${index}`,
+        observedAt
+      });
+    }
+    repository.saveSnapshot(
+      snapshot('codex', 'Codex', 'subscription', 'Subscription', observations, costs)
+    );
+
+    const displayed = repository.getOverview(NOW, { window: '30d', timeZone: 'UTC' });
+    const entry = displayed.workbench.modelRanking.entries[0];
+
+    // Every observation still counts toward the totals the Dashboard shows.
+    expect(entry.tokenEvidence.observationCount).toBe(3_000);
+    expect(entry.tokenTotals.total).toBe(3_000_000);
+    expect(entry.priceSnapshots).toHaveLength(1);
+    // Carrying the 3,000 observations and 3,000 cost records would run to megabytes.
+    expect(JSON.stringify(displayed).length).toBeLessThan(500_000);
+
+    const audited = repository.getOverview(NOW, {
+      window: '30d',
+      timeZone: 'UTC',
+      auditEvidence: true
+    });
+    expect(audited.providers[0].billingDomains[0].history.models[0].observations).toHaveLength(
+      3_000
+    );
     repository.close();
   });
 
@@ -172,27 +246,42 @@ describe('model ranking read model', () => {
       )
     );
 
-    const ranking = repository.getOverview(NOW, { window: '24h' }).workbench.modelRanking;
+    const overview = repository.getOverview(NOW, { window: '24h', auditEvidence: true });
+    const ranking = overview.workbench.modelRanking;
     expect(ranking.entries).toEqual([
       expect.objectContaining({
         id: 'codex::subscription::partially-classified',
         tokenTotals: expect.objectContaining({ total: 100 }),
-        observations: [
-          expect.objectContaining({
-            id: 'named-with-remainder',
-            recordedTokens: 150,
-            classifiedTokens: 100,
-            sourceReportedTotalTokens: 150,
-            unclassifiedTokens: 50,
-            usageScope: 'this-mac',
-            aggregationTemporality: 'delta',
-            tokenSemantics: {
-              reasoning: 'included-in-output',
-              cacheRead: 'separate',
-              cacheWrite: 'separate'
-            }
-          })
-        ]
+        composition: expect.objectContaining({ total: 100, input: 80, output: 20 }),
+        // The ranking entry reports only the classified part; the 50-Token remainder
+        // stays in the unclassified section asserted below.
+        tokenEvidence: expect.objectContaining({
+          recordedTokens: 100,
+          classifiedTokens: 100,
+          unclassifiedTokens: 0,
+          usageScopes: ['this-mac'],
+          aggregationTemporalities: ['delta']
+        })
+      })
+    ]);
+    expect(
+      overview.providers[0].billingDomains[0].history.models.find(
+        (model) => model.model === 'partially-classified'
+      )?.observations
+    ).toEqual([
+      expect.objectContaining({
+        id: 'named-with-remainder',
+        recordedTokens: 150,
+        classifiedTokens: 100,
+        sourceReportedTotalTokens: 150,
+        unclassifiedTokens: 50,
+        usageScope: 'this-mac',
+        aggregationTemporality: 'delta',
+        tokenSemantics: {
+          reasoning: 'included-in-output',
+          cacheRead: 'separate',
+          cacheWrite: 'separate'
+        }
       })
     ]);
     expect(ranking.unclassified).toEqual([

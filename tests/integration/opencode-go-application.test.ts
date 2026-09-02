@@ -135,20 +135,23 @@ describe('OpenCode Go application path', () => {
       tokenTotals: { total: 1700, input: 1000, output: 350, reasoning: 50, cacheRead: 300 },
       billingDomains: [{ id: 'local-history' }]
     });
-    expect(local.billingDomains[0].costs).toEqual(
+    expect(local.billingDomains[0].costs).toBeUndefined();
+    expect(local.billingDomains[0].history.costs).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          kind: 'reported-estimate',
-          amount: 0.42,
-          model: 'opencode-go/deepseek-v4-flash'
-        }),
-        expect.objectContaining({
-          kind: 'retail-equivalent',
-          amount: 0.00405,
-          model: 'anthropic/claude-opus-5'
-        })
+        expect.objectContaining({ kind: 'reported-estimate', amount: 0.42 }),
+        expect.objectContaining({ kind: 'retail-equivalent', amount: 0.0044034 })
       ])
     );
+    expect(
+      overview.workbench.modelRanking.entries.find(
+        (entry) => entry.model === 'opencode-go/deepseek-v4-flash'
+      )?.reportedEstimate
+    ).toMatchObject({ status: 'available', amount: 0.42 });
+    expect(
+      overview.workbench.modelRanking.entries.find(
+        (entry) => entry.model === 'anthropic/claude-opus-5'
+      )?.retailEquivalent
+    ).toMatchObject({ status: 'available', amount: 0.00405 });
     expect(overview.workbench.recordedTokens).toBe(1700);
     expect(
       overview.workbench.modelRanking.entries.map((entry) => `${entry.providerId}:${entry.model}`)
@@ -284,7 +287,11 @@ describe('OpenCode Go application path', () => {
     await application.refresh({ userInitiated: true });
     await application.refresh({ userInitiated: true });
 
-    const overview = await application.getOverview({ window: '7d', comparisonCurrency: 'USD' });
+    const overview = await application.getOverview({
+      window: '7d',
+      comparisonCurrency: 'USD',
+      auditEvidence: true
+    });
     const provider = overview.providers.find((candidate) => candidate.id === 'opencode')!;
     const domain = provider.billingDomains[0];
     expect(provider.tokenTotals.total).toBe(2_000_000);
@@ -293,7 +300,7 @@ describe('OpenCode Go application path', () => {
       timePrecisions: ['event'],
       aggregationTemporalities: ['delta']
     });
-    expect(domain.costs.filter((cost) => cost.kind === 'reported-estimate')).toHaveLength(2);
+    expect(domain.costs?.filter((cost) => cost.kind === 'reported-estimate')).toHaveLength(2);
     expect(domain.history.costs.find((cost) => cost.kind === 'reported-estimate')).toMatchObject({
       amount: 0.44
     });
@@ -355,9 +362,11 @@ describe('OpenCode Go application path', () => {
     });
     await restarted.refresh({ userInitiated: true });
 
-    const retailCosts = (await restarted.getOverview({ window: '7d' })).providers
+    const retailCosts = (
+      await restarted.getOverview({ window: '7d', auditEvidence: true })
+    ).providers
       .find((provider) => provider.id === 'opencode')!
-      .billingDomains[0].costs.filter((cost) => cost.kind === 'retail-equivalent');
+      .billingDomains[0].costs!.filter((cost) => cost.kind === 'retail-equivalent');
     expect(retailCosts).toHaveLength(1);
     expect(retailCosts[0]).toMatchObject({
       amount: 0.22,

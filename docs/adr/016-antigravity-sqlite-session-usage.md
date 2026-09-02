@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-09-02
+- Revised: 2026-09-02 — quota comes only from the official client's language server; the derived-capacity fallback is removed.
 
 ## Context
 
@@ -20,7 +21,7 @@ A read-only `antigravity` Provider reads local conversation SQLite stores across
    - Default Billing Domain: `code-assist-subscription` (display name: "Gemini Code Assist").
    - Credential owner: `official-client`.
    - Expected coverage: `['quota', 'tokens', 'history']`.
-   - Quota Model: Antigravity uses Google's dual-limit architecture (a 300-minute rolling 5-hour sprint window and a 10,080-minute weekly baseline cap). `AntigravityConnector` derives rolling usage, resets, and capacity utilization directly from local session event timestamps and token counts under `local-observation` authority.
+   - Quota Model: Antigravity uses Google's dual-limit architecture (a 300-minute rolling 5-hour sprint window and a 10,080-minute weekly baseline cap). Both allowances are stated only by the running official client, which reports them — with their model group, remaining fraction, and reset time — over its local language server (`RetrieveUserQuotaSummary`). `AntigravityConnector` publishes those buckets under `official-client` authority and publishes no quota at all when the language server is unreachable: local session events state how many Tokens were spent, never the capacity they were spent against, so a derived percentage would describe a limit no source publishes. Quota coverage is then `unavailable` while Token, history, and cost coverage stay complete.
 
 2. **Parser Architecture & Protobuf Extraction**:
    - A dedicated `AntigravitySqliteUsageClient` reads SQLite files directly.
@@ -40,6 +41,6 @@ A read-only `antigravity` Provider reads local conversation SQLite stores across
 
 ## Consequences
 
-- Antigravity usage is tracked completely offline without network requests, API keys, or OAuth credential handling.
-- Quota window countdowns (5-hour rolling sprint limit and weekly baseline limit) display accurately on provider cards and the Quota Timeline chart.
+- Antigravity Token usage is tracked completely offline without network requests, API keys, or OAuth credential handling. Quota additionally needs the official client running, and its absence never invents a number.
+- Quota window countdowns (5-hour rolling sprint limit and weekly baseline limit) display on provider cards and the Quota Timeline chart exactly as the official client reported them.
 - Token counts, model breakdowns, turn history, and equivalent cost analysis are 100% source-reported and exact.

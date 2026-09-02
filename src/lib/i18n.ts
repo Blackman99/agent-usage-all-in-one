@@ -40,6 +40,8 @@ const messages = {
     noQuotaWindow: 'No quota window',
     noQuotaWindowDetail:
       'This Provider meters each request instead of an allowance. Its Tokens and API retail equivalent are in Tokens & model costs.',
+    noQuotaReported:
+      'No quota window reported yet. Only the official client states this allowance; Tokens and cost stay complete without it.',
     quotaTimelineTitle: 'Quota timeline',
     quotaTimelineCurrentRange: 'current',
     quotaTimelineWeekly: 'Weekly',
@@ -367,6 +369,8 @@ const messages = {
     noQuotaWindow: '没有额度窗口',
     noQuotaWindowDetail:
       '该 Provider 按请求计量，没有额度。Token 与 API 对等零售价见「Token 与模型费用」。',
+    noQuotaReported:
+      '暂未获取到额度窗口。只有官方客户端会给出该额度；即使拿不到，Token 与费用依然完整。',
     quotaTimelineTitle: '额度时序',
     quotaTimelineCurrentRange: '当前',
     quotaTimelineWeekly: '按周',

@@ -42,6 +42,7 @@ export class AntigravityQuotaClient {
 
   constructor(options: AntigravityQuotaClientOptions = {}) {
     this.#logRoots = options.logRoots ?? [
+      join(homedir(), 'Library/Logs/Antigravity'),
       join(homedir(), '.gemini/antigravity-cli/log'),
       join(homedir(), '.gemini/antigravity/log')
     ];
@@ -51,13 +52,14 @@ export class AntigravityQuotaClient {
   }
 
   async readQuota(): Promise<QuotaBucket[] | null> {
-    const candidatePorts = this.#ports ?? this.discoverCandidatePorts();
+    const { ports, csrfToken } = this.discoverCandidates();
+    const candidatePorts = this.#ports ?? ports;
     if (candidatePorts.length === 0) {
       return null;
     }
 
     for (const port of candidatePorts) {
-      const quota = await this.queryPort(port);
+      const quota = await this.queryPort(port, csrfToken);
       if (quota) {
         return quota;
       }
@@ -66,9 +68,12 @@ export class AntigravityQuotaClient {
     return null;
   }
 
-  discoverCandidatePorts(): number[] {
+  discoverCandidates(): { ports: number[]; csrfToken: string | null } {
+    let csrfToken = process.env.ANTIGRAVITY_CSRF_TOKEN ?? null;
     const ports: number[] = [];
-    const httpPortRegex = /Language server listening on random port at (\d+) for HTTP/g;
+    const httpPortRegex =
+      /(?:Language server listening on random port at|Reloading all windows with URL: https?:\/\/127\.0\.0\.1:|Local:\s+https?:\/\/127\.0\.0\.1:|Host bridge server listening on http:\/\/127\.0\.0\.1:)\s*(\d+)/g;
+    const csrfRegex = /--csrf_token[= ]([a-f0-9-]+)/;
 
     for (const root of this.#logRoots) {
       try {
@@ -76,15 +81,22 @@ export class AntigravityQuotaClient {
           .filter((file) => file.endsWith('.log'))
           .sort()
           .reverse()
-          .slice(0, 5);
+          .slice(0, 10);
 
         for (const file of files) {
           const filePath = join(root, file);
           try {
             const content = readFileSync(filePath, 'utf8');
+            if (!csrfToken) {
+              const csrfMatch = csrfRegex.exec(content);
+              if (csrfMatch) csrfToken = csrfMatch[1];
+            }
             let match: RegExpExecArray | null;
             while ((match = httpPortRegex.exec(content)) !== null) {
-              ports.push(Number(match[1]));
+              const basePort = Number(match[1]);
+              ports.push(basePort);
+              ports.push(basePort + 1);
+              ports.push(basePort + 2);
             }
           } catch {
             // Ignore unreadable individual log file
@@ -96,17 +108,25 @@ export class AntigravityQuotaClient {
     }
 
     // Return unique ports, newest first
-    return [...new Set(ports.reverse())];
+    return {
+      ports: [...new Set(ports.reverse())],
+      csrfToken
+    };
   }
 
-  private async queryPort(port: number): Promise<QuotaBucket[] | null> {
+  discoverCandidatePorts(): number[] {
+    return this.discoverCandidates().ports;
+  }
+
+  private async queryPort(port: number, csrfToken: string | null = null): Promise<QuotaBucket[] | null> {
     try {
       const url = `http://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary`;
       const response = await this.#fetchFn(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Connect-Protocol-Version': '1'
+          'Connect-Protocol-Version': '1',
+          ...(csrfToken ? { 'x-codeium-csrf-token': csrfToken } : {})
         },
         body: JSON.stringify({}),
         signal: AbortSignal.timeout(this.#timeoutMs)

@@ -61,17 +61,17 @@ describe('retail-equivalent application tracer', () => {
 
     await usage.refresh({ userInitiated: true });
     expect(
-      (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0].costs.filter(
-        (cost) => cost.kind === 'retail-equivalent'
-      )
+      (
+        await usage.getOverview({ window: '24h', auditEvidence: true })
+      ).providers[0].billingDomains[0].costs!.filter((cost) => cost.kind === 'retail-equivalent')
     ).toHaveLength(1);
 
     timePrecision = 'day';
     await usage.refresh({ userInitiated: true });
     expect(
-      (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0].costs.filter(
-        (cost) => cost.kind === 'retail-equivalent'
-      )
+      (
+        await usage.getOverview({ window: '24h', auditEvidence: true })
+      ).providers[0].billingDomains[0].costs!.filter((cost) => cost.kind === 'retail-equivalent')
     ).toHaveLength(0);
 
     timePrecision = 'event';
@@ -79,9 +79,9 @@ describe('retail-equivalent application tracer', () => {
     aggregationTemporality = 'cumulative';
     await usage.refresh({ userInitiated: true });
     expect(
-      (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0].costs.filter(
-        (cost) => cost.kind === 'retail-equivalent'
-      )
+      (
+        await usage.getOverview({ window: '24h', auditEvidence: true })
+      ).providers[0].billingDomains[0].costs!.filter((cost) => cost.kind === 'retail-equivalent')
     ).toHaveLength(0);
     repository.close();
   });
@@ -124,16 +124,18 @@ describe('retail-equivalent application tracer', () => {
     const usage = new UsageApplication({ repository, connectors: [connector], clock: () => NOW });
 
     await usage.refresh({ userInitiated: true });
-    const first = (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0];
-    expect(first.costs.find((cost) => cost.kind === 'retail-equivalent')).toMatchObject({
+    const first = (await usage.getOverview({ window: '24h', auditEvidence: true })).providers[0]
+      .billingDomains[0];
+    expect(first.costs?.find((cost) => cost.kind === 'retail-equivalent')).toMatchObject({
       usageObservationId: '2026-08-28:glm-5.3',
       pricedTokens: 100_000
     });
 
     inputTokens = 200_000;
     await usage.refresh({ userInitiated: true });
-    const updated = (await usage.getOverview({ window: '24h' })).providers[0].billingDomains[0];
-    const updatedRetail = updated.costs.filter((cost) => cost.kind === 'retail-equivalent');
+    const updated = (await usage.getOverview({ window: '24h', auditEvidence: true })).providers[0]
+      .billingDomains[0];
+    const updatedRetail = updated.costs!.filter((cost) => cost.kind === 'retail-equivalent');
     expect(updatedRetail).toHaveLength(1);
     expect(updatedRetail[0]).toMatchObject({
       usageObservationId: '2026-08-28:glm-5.3',
@@ -165,7 +167,11 @@ describe('retail-equivalent application tracer', () => {
     const restarted = application(restartedRepository);
     await restarted.refresh({ userInitiated: true });
 
-    const overview = await restarted.getOverview({ window: '24h', comparisonCurrency: 'USD' });
+    const overview = await restarted.getOverview({
+      window: '24h',
+      comparisonCurrency: 'USD',
+      auditEvidence: true
+    });
     const provider = overview.providers.find((candidate) => candidate.id === 'claude-code')!;
     const domain = provider.billingDomains[0];
     expect(domain.tokenTotals.total).toBe(200_000);
@@ -326,9 +332,19 @@ describe('retail-equivalent application tracer', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       globalSummary: unknown;
+      workbench: {
+        modelRanking: {
+          entries: Array<{
+            model: string;
+            priceSnapshots: unknown[];
+            observations?: unknown[];
+            priceEvidence?: unknown[];
+          }>;
+        };
+      };
       providers: Array<{
         id: string;
-        billingDomains: Array<{ costs: unknown[]; history: { costs: unknown[] } }>;
+        billingDomains: Array<{ costs?: unknown[]; history: { costs: unknown[] } }>;
       }>;
     };
     expect(body).toMatchObject({
@@ -336,22 +352,24 @@ describe('retail-equivalent application tracer', () => {
         apiRetailEquivalent: { status: 'available', amount: 2.01, pricingCoverage: 0.65 }
       }
     });
-    const domain = body.providers.find((provider) => provider.id === 'claude-code')!
-      .billingDomains[0];
-    expect(domain.costs).toEqual(
+    const entry = body.workbench.modelRanking.entries.find(
+      (candidate) => candidate.model === 'Claude Fable 5'
+    )!;
+    expect(entry.priceSnapshots).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          kind: 'retail-equivalent',
-          model: 'Claude Fable 5',
-          usageObservationId: 'fable-event',
-          pricedTokens: 130_000,
-          priceSnapshot: expect.objectContaining({
-            version: 'anthropic-2026-06-09',
-            contextTier: 'standard-api'
-          })
+          version: 'anthropic-2026-06-09',
+          contextTier: 'standard-api'
         })
       ])
     );
+    const domain = body.providers.find((provider) => provider.id === 'claude-code')!
+      .billingDomains[0];
+    // Per-observation ledger rows are audit evidence. A Dashboard response stays
+    // proportional to what it displays, so they only reach an export.
+    expect(domain.costs).toBeUndefined();
+    expect(entry.observations).toBeUndefined();
+    expect(entry.priceEvidence).toBeUndefined();
     expect(domain.history.costs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

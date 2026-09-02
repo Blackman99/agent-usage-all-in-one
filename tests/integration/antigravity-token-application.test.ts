@@ -127,7 +127,7 @@ describe('Antigravity token application', () => {
       });
 
       await application.refresh({ userInitiated: true });
-      const overview = await application.getOverview({ window: '24h' });
+      const overview = await application.getOverview({ window: '24h', auditEvidence: true });
       const provider = overview.providers.find((candidate) => candidate.id === 'antigravity');
 
       expect(provider).toBeDefined();
@@ -143,6 +143,10 @@ describe('Antigravity token application', () => {
           windowDurationMinutes: 10_080
         }
       ]);
+      expect(provider?.coverage).toMatchObject({
+        tokens: 'partial',
+        history: 'partial'
+      });
 
       const domain = provider?.billingDomains.find(
         (entry) => entry.id === 'code-assist-subscription'

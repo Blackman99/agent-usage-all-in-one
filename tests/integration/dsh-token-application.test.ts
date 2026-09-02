@@ -172,7 +172,7 @@ describe('dsh token application', () => {
     });
 
     await application.refresh({ userInitiated: true });
-    const overview = await application.getOverview({ window: '24h' });
+    const overview = await application.getOverview({ window: '24h', auditEvidence: true });
     const provider = overview.providers.find((candidate) => candidate.id === 'dsh');
 
     expect(provider).toBeDefined();
@@ -203,7 +203,7 @@ describe('dsh token application', () => {
     expect((domain?.costs ?? []).some((cost) => cost.kind === 'reported-estimate')).toBe(false);
 
     await application.refresh({ userInitiated: true });
-    const second = await application.getOverview({ window: '24h' });
+    const second = await application.getOverview({ window: '24h', auditEvidence: true });
     expect(
       second.providers
         .find((candidate) => candidate.id === 'dsh')
