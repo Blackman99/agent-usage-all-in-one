@@ -12,11 +12,7 @@ import {
   deriveRetailEquivalentCosts,
   type RetailPriceCatalog
 } from '../core/retail-pricing.js';
-import type {
-  CollectionRequest,
-  CostRecord,
-  UsageObservation
-} from '../core/types.js';
+import type { CollectionRequest, CostRecord, UsageObservation } from '../core/types.js';
 
 const { DatabaseSync } = createRequire(import.meta.url)(
   'node:sqlite'
@@ -104,9 +100,7 @@ export class AntigravitySqliteUsageClient {
     const { costs } = deriveRetailEquivalentCosts(
       {
         provider: { id: 'antigravity', displayName: 'Antigravity' },
-        billingDomains: [
-          { id: 'code-assist-subscription', displayName: 'Gemini Code Assist' }
-        ],
+        billingDomains: [{ id: 'code-assist-subscription', displayName: 'Gemini Code Assist' }],
         quotaBuckets: [],
         usage,
         costs: [],
@@ -124,8 +118,11 @@ export class AntigravitySqliteUsageClient {
     };
   }
 
-  async #discoverDatabases(cutoff: number): Promise<Array<{ path: string; size: number; mtimeMs: number; conversationId: string }>> {
-    const results: Array<{ path: string; size: number; mtimeMs: number; conversationId: string }> = [];
+  async #discoverDatabases(
+    cutoff: number
+  ): Promise<Array<{ path: string; size: number; mtimeMs: number; conversationId: string }>> {
+    const results: Array<{ path: string; size: number; mtimeMs: number; conversationId: string }> =
+      [];
     const seenDbPaths = new Set<string>();
 
     for (const root of this.#roots) {
@@ -147,9 +144,7 @@ export class AntigravitySqliteUsageClient {
           const db: DatabaseSyncType = new DatabaseSync(summariesPath, { readOnly: true });
           try {
             const rows = db
-              .prepare(
-                'SELECT conversation_id, last_modified_time FROM conversation_summaries'
-              )
+              .prepare('SELECT conversation_id, last_modified_time FROM conversation_summaries')
               .all() as Array<{ conversation_id?: string; last_modified_time?: string }>;
 
             for (const row of rows) {
@@ -279,9 +274,7 @@ export function parseAntigravityDatabase(
   const db: DatabaseSyncType = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const tableExists = db
-      .prepare(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gen_metadata'"
-      )
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='gen_metadata'")
       .get();
     if (!tableExists) return [];
 
@@ -338,7 +331,6 @@ export function parseAntigravityDatabase(
         authority: 'local-observation'
       };
 
-
       // Validate observation with project normalization schema
       normalizeTokenObservation(observation);
       records.push({ dedupeKey, observation });
@@ -361,7 +353,6 @@ export function decodeGenMetadata(buf: Buffer): {
   let inputTokens = 0;
   const outputTokens = 0;
   let cacheReadTokens = 0;
-
 
   try {
     const r = protobuf.Reader.create(buf);
@@ -414,7 +405,6 @@ export function decodeGenMetadata(buf: Buffer): {
                   } else {
                     r10.skipType(wt10);
                   }
-
                 }
               } else {
                 r9.skipType(wt9);
@@ -442,7 +432,10 @@ export function decodeGenMetadata(buf: Buffer): {
 }
 
 export function canonicalizeAntigravityModel(raw: string): string {
-  const normalized = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const normalized = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
   if (normalized.startsWith('gemini-3p7') || normalized.startsWith('gemini-3.7')) {
     return 'gemini-3.7-flash';
   }
@@ -463,7 +456,6 @@ export function canonicalizeAntigravityModel(raw: string): string {
   }
   return raw.trim() || 'unknown';
 }
-
 
 export function extractTimestampFromStepMetadata(buf: Buffer): number | null {
   try {
@@ -509,7 +501,6 @@ function toNumeric(val: number | protobuf.Long | unknown): number {
 function stableId(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 16);
 }
-
 
 function isCachedDatabaseFile(value: unknown): value is CachedDatabaseFile {
   if (typeof value !== 'object' || value === null) return false;

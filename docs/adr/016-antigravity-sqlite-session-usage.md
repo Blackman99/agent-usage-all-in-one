@@ -43,4 +43,3 @@ A read-only `antigravity` Provider reads local conversation SQLite stores across
 - Antigravity usage is tracked completely offline without network requests, API keys, or OAuth credential handling.
 - Quota window countdowns (5-hour rolling sprint limit and weekly baseline limit) display accurately on provider cards and the Quota Timeline chart.
 - Token counts, model breakdowns, turn history, and equivalent cost analysis are 100% source-reported and exact.
-

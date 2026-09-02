@@ -384,7 +384,6 @@ function antigravityEntry(options: {
 }
 
 const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
-
   version: '2026-08-28-grok-4.6-build',
   entries: [
     ...ANTHROPIC_PRICING_CATALOG.entries,
@@ -822,7 +821,6 @@ function openCodeLocalModelPrefix(entry: RetailPriceCatalogEntry): string | null
   }
   return null;
 }
-
 
 export function deriveRetailEquivalentCosts(
   snapshot: ConnectorSnapshot,

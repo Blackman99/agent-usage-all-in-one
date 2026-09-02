@@ -77,7 +77,8 @@ describe('AntigravityConnector', () => {
       historyClient: mockClient({
         usage: [observation('conv-1:0', 'gemini-3.7-flash')]
       }),
-      quotaClient: mockQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
+      quotaClient:
+        mockQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
       clock: () => OBSERVED_AT
     });
 
@@ -112,7 +113,8 @@ describe('AntigravityConnector', () => {
       historyClient: mockClient({
         usage: [observation('conv-1:0', 'gemini-3.7-flash')]
       }),
-      quotaClient: fallbackQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
+      quotaClient:
+        fallbackQuotaClient as unknown as import('../../src/server/antigravity-quota-client.js').AntigravityQuotaClient,
       clock: () => OBSERVED_AT
     });
 
@@ -147,8 +149,6 @@ describe('AntigravityConnector', () => {
     expect(snapshot.usage).toHaveLength(1);
     expect(snapshot.warnings).toEqual([]);
   });
-
-
 
   it('reports safe degraded failure when SQLite read throws', async () => {
     const failingClient = {
@@ -188,4 +188,3 @@ describe('AntigravityConnector', () => {
     });
   });
 });
-

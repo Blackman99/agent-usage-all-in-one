@@ -22,7 +22,6 @@ import { AntigravityConnector } from '../connectors/antigravity/antigravity-conn
 import { AntigravitySqliteUsageClient } from './antigravity-sqlite-usage-client.js';
 import { GrokBuildConnector } from '../connectors/grok-build/grok-build-connector.js';
 
-
 import { parseGrokOtlpMetrics } from '../connectors/grok-build/grok-telemetry.js';
 import { StdioGrokBillingClient } from '../connectors/grok-build/stdio-grok-billing-client.js';
 import {
@@ -113,7 +112,16 @@ export async function runDaemon(home: string): Promise<void> {
       }
     }),
     connectorPolicies: Object.fromEntries(
-      ['codex', 'claude-code', 'opencode-go', 'opencode', 'grok', 'xai-api', 'dsh', 'antigravity'].map((id) => [
+      [
+        'codex',
+        'claude-code',
+        'opencode-go',
+        'opencode',
+        'grok',
+        'xai-api',
+        'dsh',
+        'antigravity'
+      ].map((id) => [
         id,
         { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: id === 'claude-code' ? 25_000 : 20_000 }
       ])

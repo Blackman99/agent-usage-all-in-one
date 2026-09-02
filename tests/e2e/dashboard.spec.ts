@@ -55,7 +55,6 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
     { id: 'dsh', name: 'dsh' },
     { id: 'antigravity', name: 'Antigravity' }
   ]) {
-
     await expect(
       agentPanel.getByRole('heading', { name: provider.name, exact: true })
     ).toBeVisible();

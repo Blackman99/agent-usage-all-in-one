@@ -20,9 +20,8 @@ which keep no usage of their own; it reports Tokens and history with no quota
 window, and its billing domains are dsh provider route keys, with
 `deepseek-official` as the deployment default and summary domain. Antigravity
 (Google Antigravity) is one Provider covering both CLI and IDE/desktop profiles;
-it reports source-recorded Tokens and turn history with no live quota window, and
+it reports source-recorded Tokens, turn history, and dual-limit quota windows (5-hour rolling sprint window and weekly baseline limit) via live language server RPC with local observation fallback, and
 its primary billing domain is `code-assist-subscription`.
-
 
 ## Ubiquitous language
 

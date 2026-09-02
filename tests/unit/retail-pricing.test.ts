@@ -677,7 +677,6 @@ describe('API retail-equivalent pricing', () => {
   });
 });
 
-
 function observation(overrides: Partial<UsageObservation> = {}): UsageObservation {
   return {
     id: 'fable-event',

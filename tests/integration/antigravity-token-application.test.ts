@@ -5,14 +5,12 @@ import { describe, expect, it } from 'vitest';
 import protobuf from 'protobufjs';
 import { createRequire } from 'node:module';
 
-
 import { AntigravityConnector } from '../../src/connectors/antigravity/antigravity-connector.js';
 import { defaultConnectorDefinitions } from '../../src/connectors/catalog.js';
 import { UsageApplication } from '../../src/core/usage-application.js';
 import { AntigravityQuotaClient } from '../../src/server/antigravity-quota-client.js';
 import { AntigravitySqliteUsageClient } from '../../src/server/antigravity-sqlite-usage-client.js';
 import { SqliteUsageRepository } from '../../src/server/sqlite-usage-repository.js';
-
 
 const { DatabaseSync } = createRequire(import.meta.url)(
   'node:sqlite'
@@ -72,10 +70,14 @@ describe('Antigravity token application', () => {
           last_modified_time TEXT
         );
       `);
-      summariesDb.prepare(`
+      summariesDb
+        .prepare(
+          `
         INSERT INTO conversation_summaries (conversation_id, last_modified_time)
         VALUES ('conv-test-1', '2026-09-02T10:00:00.000Z');
-      `).run();
+      `
+        )
+        .run();
       summariesDb.close();
 
       // Create conversations/conv-test-1.db
@@ -142,9 +144,9 @@ describe('Antigravity token application', () => {
         }
       ]);
 
-
-
-      const domain = provider?.billingDomains.find((entry) => entry.id === 'code-assist-subscription');
+      const domain = provider?.billingDomains.find(
+        (entry) => entry.id === 'code-assist-subscription'
+      );
       expect(domain?.tokenTotals).toMatchObject({
         input: 20_000,
         output: 0,

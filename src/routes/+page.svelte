@@ -1191,7 +1191,6 @@
       }
     };
     return paths[providerId] ?? null;
-
   }
 
   // The resolved theme is an argument so the markup re-renders the mark when the

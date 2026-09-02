@@ -105,4 +105,3 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
     officialCredentialPaths: ['.gemini/antigravity-cli', '.gemini/antigravity']
   }
 ];
-

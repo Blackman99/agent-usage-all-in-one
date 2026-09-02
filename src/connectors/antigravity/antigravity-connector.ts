@@ -93,7 +93,6 @@ export class AntigravityConnector implements Connector {
       quotaBuckets = buildAntigravityQuotaBuckets(usage, nowMs, this.#quotaLimits);
     }
 
-
     return {
       provider: { id: this.id, displayName: this.displayName },
       billingDomains: billingDomains(usage),
@@ -185,7 +184,6 @@ export function buildAntigravityQuotaBuckets(
       authority: 'local-observation',
       scope: 'local-only'
     }
-
   ];
 }
 
@@ -205,7 +203,8 @@ function incompleteSessionScanFailure(): ConnectorFailure {
   return {
     code: 'antigravity-session-scan-incomplete',
     message: 'Some local Antigravity conversation databases could not be read.',
-    recovery: 'Agent Usage will retry automatically on the next scan without removing stored history.'
+    recovery:
+      'Agent Usage will retry automatically on the next scan without removing stored history.'
   };
 }
 

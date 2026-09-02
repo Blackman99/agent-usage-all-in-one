@@ -5,7 +5,6 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import protobuf from 'protobufjs';
 
-
 import {
   AntigravitySqliteUsageClient,
   canonicalizeAntigravityModel,
@@ -24,7 +23,9 @@ describe('AntigravitySqliteUsageClient', () => {
     expect(canonicalizeAntigravityModel('gemini-3.6-flash-low')).toBe('gemini-3.6-flash');
     expect(canonicalizeAntigravityModel('gemini-3.1-pro-high')).toBe('gemini-3.1-pro');
     expect(canonicalizeAntigravityModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6');
-    expect(canonicalizeAntigravityModel('Claude Opus 4.6 (Thinking)')).toBe('claude-opus-4-6-thinking');
+    expect(canonicalizeAntigravityModel('Claude Opus 4.6 (Thinking)')).toBe(
+      'claude-opus-4-6-thinking'
+    );
     expect(canonicalizeAntigravityModel('gpt-oss-120b-medium')).toBe('gpt-oss-120b-medium');
     expect(canonicalizeAntigravityModel('custom-fine-tune')).toBe('custom-fine-tune');
   });
@@ -90,10 +91,14 @@ describe('AntigravitySqliteUsageClient', () => {
           last_modified_time TEXT
         );
       `);
-      summariesDb.prepare(`
+      summariesDb
+        .prepare(
+          `
         INSERT INTO conversation_summaries (conversation_id, last_modified_time)
         VALUES ('conv-123', '2026-09-02T10:00:00.000Z');
-      `).run();
+      `
+        )
+        .run();
       summariesDb.close();
 
       // Create conversations/conv-123.db

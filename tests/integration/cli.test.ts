@@ -239,7 +239,6 @@ describe('agent-usage CLI', () => {
       'antigravity'
     ]);
 
-
     const monitoring = await runCli(['--home', home, 'monitoring', '--json']);
     expect(monitoring.exitCode).toBe(0);
     expect(JSON.parse(monitoring.stdout)).toMatchObject({

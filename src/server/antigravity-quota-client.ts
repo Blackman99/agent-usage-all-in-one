@@ -143,8 +143,8 @@ export function mapQuotaGroups(groups: RawQuotaGroup[]): QuotaBucket[] {
       const is5h = windowStr === '5h' || /5[- ]?hour/i.test(displayStr);
       const isWeekly = windowStr === 'weekly' || /week/i.test(displayStr);
 
-      let durationMinutes: number | null = null;
-      let windowName = '';
+      let durationMinutes: number;
+      let windowName: string;
       if (is5h) {
         durationMinutes = 300;
         windowName = '5 hour';

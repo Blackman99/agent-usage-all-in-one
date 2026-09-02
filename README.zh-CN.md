@@ -9,7 +9,7 @@
 [![许可证：MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Agent Usage 是一个 macOS 优先、完全在本地运行的用量中心。一次启动即可统一查看
-Codex、Claude Code、OpenCode、Grok 与 dsh 的原生额度窗口、刷新时间、Token、模型排行、
+Codex、Claude Code、OpenCode、Grok、dsh 与 Antigravity 的原生额度窗口、刷新时间、Token、模型排行、
 API 对等费用、历史与诊断。它只提供建议，不会自动切换 Agent。
 
 ## 核心页面
@@ -90,15 +90,16 @@ agent-usage clear --yes
 
 ## 平台覆盖范围
 
-| 平台 / 计费域          | 原生额度                                            | Token 历史                                              | 费用证据                                                      |
-| ---------------------- | --------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------- |
-| Codex                  | 可用时读取官方账户额度桶                            | 本地 rollout，并与账户日汇总对账                        | API 对等零售价                                                |
-| Claude Code            | 实验性官方客户端用量，包括 All models 与 Fable only | 本地会话记录；可选 OTLP 补充                            | 客户端估算与 API 对等零售价                                   |
-| OpenCode Go            | 官方账户级 5 小时、周、月窗口                       | 与本地历史分开                                          | 仅作为额度上下文                                              |
-| OpenCode · 本地历史    | 没有订阅额度                                        | 所有已完成的本地请求，覆盖已配置 Provider               | 客户端报告估算；符合条件时计算 API 对等零售价                 |
-| Grok Build / SuperGrok | 实验性共享订阅额度                                  | 本地 `updates.jsonl`；可选 OTLP 补充                    | 客户端估算与 API 对等零售价，包括可识别的 Grok 4.6 Build 别名 |
-| Grok · xAI API         | 没有订阅额度                                        | 官方 Management API 聚合                                | 可用时展示实际美元金额、余额、上限与账单                      |
-| dsh · DeepSeek API     | 没有订阅额度                                        | 本机 dsh 全部 profile 的会话日志，含基于 dsh 的终端前端 | 按 DeepSeek 公布的峰谷价计算 API 对等零售价                   |
+| 平台 / 计费域                    | 原生额度                                                                                      | Token 历史                                                                   | 费用证据                                                       |
+| -------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Codex                            | 可用时读取官方账户额度桶                                                                      | 本地 rollout，并与账户日汇总对账                                             | API 对等零售价                                                 |
+| Claude Code                      | 实验性官方客户端用量，包括 All models 与 Fable only                                           | 本地会话记录；可选 OTLP 补充                                                 | 客户端估算与 API 对等零售价                                    |
+| OpenCode Go                      | 官方账户级 5 小时、周、月窗口                                                                 | 与本地历史分开                                                               | 仅作为额度上下文                                               |
+| OpenCode · 本地历史              | 没有订阅额度                                                                                  | 所有已完成的本地请求，覆盖已配置 Provider                                    | 客户端报告估算；符合条件时计算 API 对等零售价                  |
+| Grok Build / SuperGrok           | 实验性共享订阅额度                                                                            | 本地 `updates.jsonl`；可选 OTLP 补充                                         | 客户端估算与 API 对等零售价，包括可识别的 Grok 4.6 Build 别名  |
+| Grok · xAI API                   | 没有订阅额度                                                                                  | 官方 Management API 聚合                                                     | 可用时展示实际美元金额、余额、上限与账单                       |
+| dsh · DeepSeek API               | 没有订阅额度                                                                                  | 本机 dsh 全部 profile 的会话日志，含基于 dsh 的终端前端                      | 按 DeepSeek 公布的峰谷价计算 API 对等零售价                    |
+| Antigravity · Gemini Code Assist | 通过官方 Language Server 本地 RPC 获取 5 小时冲刺窗口与周度基准额度，支持本地会话分析平滑降级 | 本地会话 SQLite 数据库（~/.gemini/antigravity-cli 与 ~/.gemini/antigravity） | 按公布的 Google Gemini 及第三方模型公开价格计算 API 对等零售价 |
 
 每个数字都会保留来源权威等级和观测时间；账户全局与仅此 Mac 的证据始终明确区分。
 
@@ -110,7 +111,7 @@ Agent Usage 管理的凭据，存储在 macOS 钥匙串。本地页面使用一�
 
 所有用量数据都留在本机。JSON/CSV 导出默认排除账户标识、会话 ID、Cookie、OAuth Token
 和密钥值。原始观测保留 90 天，之后在事务中压缩为 UTC 日汇总。清理本地用量永远不会删除
-Codex、Claude Code、OpenCode、Grok 或 dsh 官方客户端拥有的凭据。
+Codex、Claude Code、OpenCode、Grok、dsh 或 Antigravity 官方客户端拥有的凭据。
 
 ## 验证
 
