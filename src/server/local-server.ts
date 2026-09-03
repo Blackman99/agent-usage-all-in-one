@@ -284,12 +284,39 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
         return;
       }
 
+      if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/custom-rates/')) {
+        const id = decodeURIComponent(requestUrl.pathname.slice('/api/custom-rates/'.length));
+        const rate = await options.application.getCustomModelRate(id);
+        if (!rate) {
+          sendJson(response, 404, { error: 'rate-not-found' });
+          return;
+        }
+        sendJson(response, 200, { rate });
+        return;
+      }
+
       if (request.method === 'POST' && requestUrl.pathname === '/api/custom-rates') {
         if (!validMutationOrigin(authentication, request, origin)) {
           sendJson(response, 403, { error: 'invalid-origin' });
           return;
         }
         const input = customModelRateSchema.parse(await readJsonBody(request));
+        const rate = await options.application.setCustomModelRate(input);
+        sendJson(response, 200, { rate });
+        return;
+      }
+
+      if (
+        (request.method === 'PUT' || request.method === 'PATCH') &&
+        requestUrl.pathname.startsWith('/api/custom-rates/')
+      ) {
+        if (!validMutationOrigin(authentication, request, origin)) {
+          sendJson(response, 403, { error: 'invalid-origin' });
+          return;
+        }
+        const id = decodeURIComponent(requestUrl.pathname.slice('/api/custom-rates/'.length));
+        const body = (await readJsonBody(request)) as Record<string, unknown>;
+        const input = customModelRateSchema.parse({ ...body, id });
         const rate = await options.application.setCustomModelRate(input);
         sendJson(response, 200, { rate });
         return;

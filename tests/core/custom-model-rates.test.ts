@@ -47,6 +47,8 @@ describe('Custom model rates', () => {
       const loaded = repository.getCustomModelRates();
       expect(loaded).toHaveLength(1);
       expect(loaded[0]).toEqual(rate1);
+      expect(repository.getCustomModelRate('rate-1')).toEqual(rate1);
+      expect(repository.getCustomModelRate('non-existent')).toBeNull();
 
       // Update rate with same provider, domain, and case-insensitive model
       const updatedRate: CustomModelRate = {

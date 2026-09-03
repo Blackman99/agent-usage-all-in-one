@@ -291,6 +291,7 @@ ratesCommand
   .requiredOption('--input <rate>', 'input rate in USD per million tokens', parseFloat)
   .requiredOption('--output <rate>', 'output rate in USD per million tokens', parseFloat)
   .option('--cache-read <rate>', 'cache read rate in USD per million tokens', parseFloat, 0)
+  .option('--id <id>', 'custom model rate ID to update')
   .action(
     async (
       model: string,
@@ -300,6 +301,7 @@ ratesCommand
         input: number;
         output: number;
         cacheRead: number;
+        id?: string;
       }
     ) => {
       const home = resolve(program.opts<{ home: string }>().home);
@@ -312,6 +314,7 @@ ratesCommand
           origin: state.origin
         },
         body: JSON.stringify({
+          ...(options.id ? { id: options.id } : {}),
           providerId: options.provider,
           billingDomainId: options.domain || null,
           model,
@@ -327,6 +330,31 @@ ratesCommand
       );
     }
   );
+
+ratesCommand
+  .command('get <id>')
+  .description('get details of a custom model rate by ID')
+  .option('--json', 'emit machine-readable JSON')
+  .action(async (id: string, options: { json?: boolean }) => {
+    const home = resolve(program.opts<{ home: string }>().home);
+    const state = await requireDaemonState(home);
+    const response = await fetch(`${state.origin}/api/custom-rates/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${state.apiToken}` }
+    });
+    if (!response.ok) {
+      if (response.status === 404) throw new Error(`Custom model rate not found: ${id}`);
+      throw new Error(`Daemon returned HTTP ${response.status}`);
+    }
+    const data = (await response.json()) as { rate: CustomModelRate };
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(data.rate, null, 2)}\n`);
+      return;
+    }
+    const domain = data.rate.billingDomainId ?? '*';
+    process.stdout.write(
+      `${data.rate.id} | ${data.rate.providerId} | domain: ${domain} | model: ${data.rate.model} | in: $${data.rate.ratesPerMillion.input}/M | out: $${data.rate.ratesPerMillion.output}/M | cache: $${data.rate.ratesPerMillion.cacheRead}/M | updated: ${data.rate.updatedAt}\n`
+    );
+  });
 
 ratesCommand
   .command('delete <id>')

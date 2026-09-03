@@ -150,7 +150,11 @@ describe('dsh custom endpoint model rate application and backfill', () => {
     expect(rates[0]?.model).toBe('my-coder-model');
 
     // 3. Verify that previously unpriced session is now automatically backfilled and priced
-    const updatedOverview = await application.getOverview({ window: '24h', auditEvidence: true });
+    const updatedOverview = await application.getOverview({
+      window: '24h',
+      comparisonCurrency: 'USD',
+      auditEvidence: true
+    });
     const dshProviderUpdated = updatedOverview.providers.find((p) => p.id === 'dsh');
     const customDomainUpdated = dshProviderUpdated?.billingDomains.find(
       (d) => d.id === 'my-custom-proxy'
@@ -162,6 +166,17 @@ describe('dsh custom endpoint model rate application and backfill', () => {
     expect(updatedRetailCosts).toHaveLength(1);
     // 100k * 2.0 / 1M = 0.20, 20k * 5.0 / 1M = 0.10, 10k * 0.1 / 1M = 0.001 -> 0.301 USD
     expect(updatedRetailCosts[0]?.amount).toBeCloseTo(0.301, 5);
+
+    // Verify model ranking calculates tokenShare and retailShare and includes custom route in headline
+    const modelRankingEntry = updatedOverview.workbench.modelRanking.entries.find(
+      (entry) => entry.model === 'my-coder-model'
+    );
+    expect(modelRankingEntry).toBeDefined();
+    expect(modelRankingEntry?.includedInHeadline).toBe(true);
+    expect(modelRankingEntry?.tokenShare).toBe(1);
+    expect(modelRankingEntry?.retailShare).toBe(1);
+    expect(updatedOverview.workbench.costs.retailEquivalent.amount).toBeCloseTo(0.301, 5);
+    expect(updatedOverview.workbench.recordedTokens).toBe(130_000);
 
     // 4. Delete rate and verify backfill unprices or handles deletion
     const deleted = await application.deleteCustomModelRate(savedRate.id);

@@ -112,8 +112,81 @@ describe('agent-usage rates CLI and HTTP API', () => {
     expect(httpData.rates).toHaveLength(1);
     expect(httpData.rates[0]?.id).toBe(rates[0]?.id);
 
-    // 5. Delete the rate via CLI
+    // 4b. Check GET by ID via HTTP API
     const rateId = rates[0]!.id;
+    const getByIdResponse = await fetch(
+      `${server.origin}/api/custom-rates/${encodeURIComponent(rateId)}`,
+      {
+        headers: { authorization: `Bearer ${server.apiToken}` }
+      }
+    );
+    expect(getByIdResponse.ok).toBe(true);
+    const getByIdData = (await getByIdResponse.json()) as { rate: (typeof rates)[0] };
+    expect(getByIdData.rate.id).toBe(rateId);
+    expect(getByIdData.rate.model).toBe('custom-qwen-coder');
+
+    // 4c. Check CLI rates get
+    const getCliResult = await runCli(['--home', home, 'rates', 'get', rateId, '--json']);
+    expect(getCliResult.exitCode).toBe(0);
+    const getCliData = JSON.parse(getCliResult.stdout) as (typeof rates)[0];
+    expect(getCliData.id).toBe(rateId);
+
+    // 4d. Update rate via PUT HTTP API
+    const putResponse = await fetch(
+      `${server.origin}/api/custom-rates/${encodeURIComponent(rateId)}`,
+      {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${server.apiToken}`,
+          'content-type': 'application/json',
+          origin: server.origin
+        },
+        body: JSON.stringify({
+          providerId: 'dsh',
+          model: 'custom-qwen-coder',
+          inputRate: 2.5,
+          outputRate: 7.5,
+          cacheReadRate: 0.5
+        })
+      }
+    );
+    expect(putResponse.ok).toBe(true);
+    const putData = (await putResponse.json()) as { rate: (typeof rates)[0] };
+    expect(putData.rate.id).toBe(rateId);
+    expect(putData.rate.ratesPerMillion.input).toBe(2.5);
+    expect(putData.rate.ratesPerMillion.output).toBe(7.5);
+    expect(putData.rate.ratesPerMillion.cacheRead).toBe(0.5);
+
+    // 4e. Update rate via CLI rates set with --id
+    const updateCliResult = await runCli([
+      '--home',
+      home,
+      'rates',
+      'set',
+      'custom-qwen-coder',
+      '--provider',
+      'dsh',
+      '--id',
+      rateId,
+      '--input',
+      '3.0',
+      '--output',
+      '9.0',
+      '--cache-read',
+      '0.8'
+    ]);
+    expect(updateCliResult.exitCode).toBe(0);
+    expect(updateCliResult.stdout).toContain(
+      `Custom model rate configured for custom-qwen-coder (ID: ${rateId})`
+    );
+
+    const verifyUpdated = await runCli(['--home', home, 'rates', 'get', rateId, '--json']);
+    const updatedData = JSON.parse(verifyUpdated.stdout) as (typeof rates)[0];
+    expect(updatedData.ratesPerMillion.input).toBe(3.0);
+    expect(updatedData.ratesPerMillion.output).toBe(9.0);
+    expect(updatedData.ratesPerMillion.cacheRead).toBe(0.8);
+
+    // 5. Delete the rate via CLI
     const deleteResult = await runCli(['--home', home, 'rates', 'delete', rateId]);
     expect(deleteResult.exitCode).toBe(0);
     expect(deleteResult.stdout).toContain(`Deleted custom model rate ${rateId}`);

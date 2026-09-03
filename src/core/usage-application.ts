@@ -567,6 +567,10 @@ export class UsageApplication {
     return this.#repository.getCustomModelRates?.() ?? [];
   }
 
+  async getCustomModelRate(id: string): Promise<CustomModelRate | null> {
+    return this.#repository.getCustomModelRate?.(id) ?? null;
+  }
+
   async setCustomModelRate(input: CustomModelRateInput): Promise<CustomModelRate> {
     const providerId = input.providerId?.trim();
     if (!providerId) throw new Error('Provider ID is required');

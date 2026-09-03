@@ -978,6 +978,7 @@ export interface UsageRepository {
   savePlanSubscription(subscription: PlanSubscription): void;
   deletePlanSubscription(providerId: string, billingDomainId: string): void;
   getCustomModelRates?(): CustomModelRate[];
+  getCustomModelRate?(id: string): CustomModelRate | null;
   saveCustomModelRate?(rate: CustomModelRate): void;
   deleteCustomModelRate?(id: string): boolean;
   getNotificationState(key: string): string | null;

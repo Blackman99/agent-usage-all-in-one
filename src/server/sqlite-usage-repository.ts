@@ -1318,16 +1318,59 @@ export class SqliteUsageRepository implements UsageRepository {
     }));
   }
 
+  getCustomModelRate(id: string): CustomModelRate | null {
+    const row = this.#database
+      .prepare(
+        `SELECT id, provider_id, billing_domain_id, model,
+                input_rate, output_rate, cache_read_rate, updated_at
+         FROM custom_model_rates
+         WHERE id = ?`
+      )
+      .get(id) as
+      | {
+          id: string;
+          provider_id: string;
+          billing_domain_id: string | null;
+          model: string;
+          input_rate: number;
+          output_rate: number;
+          cache_read_rate: number;
+          updated_at: string;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      providerId: row.provider_id,
+      billingDomainId: row.billing_domain_id ?? null,
+      model: row.model,
+      ratesPerMillion: {
+        input: row.input_rate,
+        output: row.output_rate,
+        cacheRead: row.cache_read_rate
+      },
+      updatedAt: row.updated_at
+    };
+  }
+
   saveCustomModelRate(rate: CustomModelRate): void {
-    const existing = this.#database
+    const byId = this.#database
+      .prepare('SELECT id FROM custom_model_rates WHERE id = ?')
+      .get(rate.id) as { id: string } | undefined;
+    const byKey = this.#database
       .prepare(
         `SELECT id FROM custom_model_rates
-         WHERE id = ? OR (provider_id = ? AND COALESCE(billing_domain_id, '') = COALESCE(?, '') AND lower(model) = lower(?))`
+         WHERE provider_id = ? AND COALESCE(billing_domain_id, '') = COALESCE(?, '') AND lower(model) = lower(?)`
       )
-      .get(rate.id, rate.providerId, rate.billingDomainId, rate.model) as
-      { id: string } | undefined;
+      .get(rate.providerId, rate.billingDomainId, rate.model) as { id: string } | undefined;
 
-    if (existing) {
+    if (byId && byKey && byId.id !== byKey.id) {
+      this.#database.prepare('DELETE FROM custom_model_rates WHERE id = ?').run(byKey.id);
+    }
+
+    const existingId = byId?.id ?? byKey?.id;
+
+    if (existingId) {
       this.#database
         .prepare(
           `UPDATE custom_model_rates SET
@@ -1343,7 +1386,7 @@ export class SqliteUsageRepository implements UsageRepository {
           rate.ratesPerMillion.output,
           rate.ratesPerMillion.cacheRead,
           rate.updatedAt,
-          existing.id
+          existingId
         );
     } else {
       this.#database
@@ -1667,6 +1710,24 @@ export class SqliteUsageRepository implements UsageRepository {
         }
       : { status: 'healthy', errorCode: null, message: null, recovery: null };
 
+    let providerTokenTotals = summaryDomain?.tokenTotals ?? emptyTotals;
+    let providerTokenEvidence = summaryDomain?.tokenEvidence ?? emptyEvidence;
+    if (provider.id === 'dsh' && billingDomains.length > 1) {
+      const combinedTotals = zeroTokenTotals();
+      const combinedEvidence = emptyTokenEvidence();
+      for (const d of billingDomains) {
+        combinedTotals.total += d.tokenTotals.total;
+        combinedTotals.input += d.tokenTotals.input;
+        combinedTotals.output += d.tokenTotals.output;
+        combinedTotals.reasoning += d.tokenTotals.reasoning;
+        combinedTotals.cacheRead += d.tokenTotals.cacheRead;
+        combinedTotals.cacheWrite += d.tokenTotals.cacheWrite;
+        addAggregatedTokenEvidence(combinedEvidence, d.tokenEvidence);
+      }
+      providerTokenTotals = combinedTotals;
+      providerTokenEvidence = finishTokenEvidence(combinedEvidence);
+    }
+
     return {
       id: provider.id,
       displayName: provider.display_name,
@@ -1678,8 +1739,8 @@ export class SqliteUsageRepository implements UsageRepository {
       health: summaryDomain?.health ?? providerFallbackHealth,
       coverage: summaryDomain?.coverage ?? emptyCoverage,
       quotaBuckets: summaryDomain?.quotaBuckets ?? [],
-      tokenTotals: summaryDomain?.tokenTotals ?? emptyTotals,
-      tokenEvidence: summaryDomain?.tokenEvidence ?? emptyEvidence,
+      tokenTotals: providerTokenTotals,
+      tokenEvidence: providerTokenEvidence,
       tokenAuthority: summaryDomain?.tokenAuthority ?? null,
       billingDomains,
       forecasts: summaryDomain?.forecasts ?? [],
@@ -3318,7 +3379,8 @@ function allDomainHistories(providers: ProviderOverview[]): Array<{
       provider,
       domain,
       history: domain.history,
-      includedInHeadline: domain.id === provider.summaryBillingDomainId
+      includedInHeadline:
+        provider.id === 'dsh' ? true : domain.id === provider.summaryBillingDomainId
     }))
   );
 }

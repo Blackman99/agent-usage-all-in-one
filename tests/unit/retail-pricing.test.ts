@@ -165,11 +165,85 @@ describe('API retail-equivalent pricing', () => {
     });
     expect(ANTHROPIC_PRICING_CATALOG.entries.map((entry) => entry.canonicalModel).sort()).toEqual([
       'claude-fable-5',
+      'claude-fable-5-1',
       'claude-haiku-4-5-20251001',
       'claude-opus-4-8',
       'claude-opus-5',
       'claude-sonnet-5'
     ]);
+  });
+
+  it('prices Claude Fable 5.1 with its published 75% cheaper cache-read rate', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'fable-5-1-event',
+          model: 'claude-fable-5-1',
+          observedAt: '2026-09-01T12:00:00.000Z',
+          inputTokens: 100_000,
+          outputTokens: 20_000,
+          cacheReadTokens: 10_000
+        })
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toMatchObject({ status: 'priced', reason: null });
+    expect(result.costs[0]).toMatchObject({
+      amount: 2.0025,
+      model: 'claude-fable-5-1',
+      priceSnapshot: {
+        id: 'anthropic-fable-5-1-2026-09-01',
+        canonicalModel: 'claude-fable-5-1',
+        ratesPerMillion: {
+          input: 10,
+          output: 50,
+          'cache-read': 0.25
+        }
+      }
+    });
+  });
+
+  it.each(['claude-fable-5.1', 'Claude Fable 5.1', 'fable-5.1', 'fable-5-1'])(
+    'prices Claude Fable 5.1 aliases (%s)',
+    (alias) => {
+      const result = deriveRetailEquivalentCosts(
+        snapshot(
+          observation({
+            id: `fable-alias-${alias}`,
+            model: alias,
+            observedAt: '2026-09-01T12:00:00.000Z',
+            inputTokens: 100_000,
+            outputTokens: 20_000,
+            cacheReadTokens: 10_000
+          })
+        ),
+        OFFICIAL_PRICING_CATALOG
+      );
+
+      expect(result.decisions[0]).toMatchObject({ status: 'priced', reason: null });
+      expect(result.costs[0]?.amount).toBe(2.0025);
+    }
+  );
+
+  it('leaves Claude Fable 5.1 unpriced before its 2026-09-01 release date', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'fable-5-1-early',
+          model: 'claude-fable-5-1',
+          observedAt: '2026-08-31T23:59:59.000Z'
+        })
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toMatchObject({
+      status: 'unavailable',
+      reason: 'price-not-effective',
+      pricedTokens: 0
+    });
+    expect(result.costs).toHaveLength(0);
   });
 
   it('prices the exact Claude Haiku transcript model identifier', () => {

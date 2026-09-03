@@ -107,10 +107,21 @@
   let planError = false;
   let planDrafts: Record<string, PlanDraft> = {};
   let pendingPlanDomain: string | null = null;
+  const defaultRateProviders = [
+    { id: 'grok', label: 'Grok' },
+    { id: 'dsh', label: 'DeepSeek (dsh)' },
+    { id: 'claude-code', label: 'Claude Code' },
+    { id: 'codex', label: 'Codex' },
+    { id: 'opencode-go', label: 'OpenCode Go' },
+    { id: 'opencode', label: 'OpenCode' },
+    { id: 'antigravity', label: 'Antigravity' }
+  ];
+  let rateProviderChoice = 'grok';
   let customRates: CustomModelRate[] = [];
   let customRatesError = false;
+  let loadingRates = false;
   let newRateDraft = {
-    providerId: 'dsh',
+    providerId: 'grok',
     billingDomainId: '',
     model: '',
     inputRate: '',
@@ -118,6 +129,18 @@
     cacheReadRate: '0'
   };
   let savingRate = false;
+  let editingRateId: string | null = null;
+  let editRateDraft = {
+    id: '',
+    providerId: '',
+    billingDomainId: '',
+    model: '',
+    inputRate: '',
+    outputRate: '',
+    cacheReadRate: ''
+  };
+  let updatingRate = false;
+  let deletingRateId: string | null = null;
   let diagnostics: DoctorReport | null = null;
   let diagnosticsLoaded = false;
   let retention: RetentionStatus | null = null;
@@ -486,6 +509,7 @@
   }
 
   async function loadCustomRates(): Promise<void> {
+    loadingRates = true;
     try {
       const response = await fetch('/api/custom-rates');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -494,18 +518,30 @@
       customRatesError = false;
     } catch {
       customRatesError = true;
+    } finally {
+      loadingRates = false;
+    }
+  }
+
+  function handleProviderChoiceChange(): void {
+    if (rateProviderChoice !== 'custom') {
+      newRateDraft.providerId = rateProviderChoice;
+    } else {
+      newRateDraft.providerId = '';
     }
   }
 
   async function saveCustomRate(): Promise<void> {
-    if (!newRateDraft.model.trim() || savingRate) return;
+    const provider =
+      rateProviderChoice === 'custom' ? newRateDraft.providerId.trim() : rateProviderChoice;
+    if (!provider || !newRateDraft.model.trim() || savingRate) return;
     savingRate = true;
     try {
       const response = await fetch('/api/custom-rates', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          providerId: newRateDraft.providerId.trim(),
+          providerId: provider,
           billingDomainId: newRateDraft.billingDomainId.trim() || null,
           model: newRateDraft.model.trim(),
           inputRate: parseFloat(newRateDraft.inputRate) || 0,
@@ -515,7 +551,7 @@
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       newRateDraft = {
-        providerId: 'dsh',
+        providerId: provider,
         billingDomainId: '',
         model: '',
         inputRate: '',
@@ -531,17 +567,80 @@
     }
   }
 
+  function startEditRate(rate: CustomModelRate): void {
+    editingRateId = rate.id;
+    editRateDraft = {
+      id: rate.id,
+      providerId: rate.providerId,
+      billingDomainId: rate.billingDomainId ?? '',
+      model: rate.model,
+      inputRate: String(rate.ratesPerMillion.input),
+      outputRate: String(rate.ratesPerMillion.output),
+      cacheReadRate: String(rate.ratesPerMillion.cacheRead)
+    };
+  }
+
+  function cancelEditRate(): void {
+    editingRateId = null;
+  }
+
+  async function updateCustomRate(): Promise<void> {
+    if (!editingRateId || updatingRate) return;
+    updatingRate = true;
+    try {
+      const response = await fetch(`/api/custom-rates/${encodeURIComponent(editingRateId)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          providerId: editRateDraft.providerId.trim(),
+          billingDomainId: editRateDraft.billingDomainId.trim() || null,
+          model: editRateDraft.model.trim(),
+          inputRate: parseFloat(editRateDraft.inputRate) || 0,
+          outputRate: parseFloat(editRateDraft.outputRate) || 0,
+          cacheReadRate: parseFloat(editRateDraft.cacheReadRate) || 0
+        })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      editingRateId = null;
+      await loadCustomRates();
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      updatingRate = false;
+    }
+  }
+
   async function deleteCustomRate(id: string): Promise<void> {
+    deletingRateId = id;
     try {
       const response = await fetch(`/api/custom-rates/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (editingRateId === id) editingRateId = null;
       await loadCustomRates();
       await loadOverview();
     } catch (err) {
       console.error(err);
+    } finally {
+      deletingRateId = null;
     }
+  }
+
+  function configureCustomRateForModel(
+    providerId: string,
+    domainId: string | null | undefined,
+    modelName: string
+  ): void {
+    void closeModelDetail();
+    rateProviderChoice = defaultRateProviders.some((p) => p.id === providerId)
+      ? providerId
+      : 'custom';
+    newRateDraft.providerId = providerId;
+    newRateDraft.billingDomainId = !domainId || domainId === '*' ? '' : domainId;
+    newRateDraft.model = modelName;
+    void openSettings('rates');
   }
 
   async function loadDiagnostics(): Promise<void> {
@@ -762,6 +861,7 @@
     }
     settingsOpen = true;
     settingsTarget = target;
+    void loadCustomRates();
     if (syncUrl) {
       const url = new URL(window.location.href);
       if (target) url.searchParams.set('settings', target);
@@ -774,6 +874,7 @@
           (element) => element.dataset.settingsTarget === target
         )
       : null;
+    targetElement?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     (targetElement ?? settingsPanel)?.focus();
   }
 
@@ -2424,8 +2525,51 @@
           >
         </div>
 
+        <nav class="settings-nav" aria-label={t('settings')}>
+          <button
+            type="button"
+            class:active={settingsTarget === 'connections' ||
+              settingsTarget?.startsWith('connector')}
+            on:click={() => openSettings('connections', false)}
+          >
+            {t('connections')}
+          </button>
+          <button
+            type="button"
+            class:active={settingsTarget === 'plans'}
+            on:click={() => openSettings('plans', false)}
+          >
+            {t('planSubscriptions')}
+          </button>
+          <button
+            type="button"
+            class:active={settingsTarget === 'rates'}
+            on:click={() => openSettings('rates', false)}
+          >
+            {t('customRatesNav')} ({customRates.length})
+          </button>
+          <button
+            type="button"
+            class:active={settingsTarget === 'monitoring'}
+            on:click={() => openSettings('monitoring', false)}
+          >
+            {t('monitoring')}
+          </button>
+          <button
+            type="button"
+            class:active={settingsTarget === 'privacy'}
+            on:click={() => openSettings('privacy', false)}
+          >
+            {t('privacy')}
+          </button>
+        </nav>
+
         <div class="settings-content">
-          <section aria-labelledby="settings-connections-heading">
+          <section
+            aria-labelledby="settings-connections-heading"
+            data-settings-target="connections"
+            tabindex="-1"
+          >
             <div class="settings-section-heading">
               <h2 id="settings-connections-heading">{t('connections')}</h2>
               <p>{t('connectionsSubtitle')}</p>
@@ -2635,7 +2779,20 @@
             tabindex="-1"
           >
             <div class="settings-section-heading">
-              <h2 id="rates-heading">{t('customRates')}</h2>
+              <div class="heading-with-action">
+                <h2 id="rates-heading">{t('customRates')}</h2>
+                <button
+                  type="button"
+                  class="rates-refresh-button"
+                  title={t('customRateRefreshTitle')}
+                  aria-label={t('customRateRefreshTitle')}
+                  disabled={loadingRates}
+                  on:click={loadCustomRates}
+                >
+                  <span class:spin={loadingRates} aria-hidden="true">↻</span>
+                  {t('customRateRefresh')}
+                </button>
+              </div>
               <p>{t('customRatesSubtitle')}</p>
             </div>
             {#if customRatesError}
@@ -2647,13 +2804,24 @@
                 <div class="custom-rate-inputs">
                   <label>
                     <span>{t('customRateProvider')}</span>
-                    <input
-                      type="text"
-                      bind:value={newRateDraft.providerId}
-                      placeholder="dsh"
-                      required
-                    />
+                    <select bind:value={rateProviderChoice} on:change={handleProviderChoiceChange}>
+                      {#each defaultRateProviders as p (p.id)}
+                        <option value={p.id}>{p.label} ({p.id})</option>
+                      {/each}
+                      <option value="custom">{t('customRateProviderOther')}</option>
+                    </select>
                   </label>
+                  {#if rateProviderChoice === 'custom'}
+                    <label>
+                      <span>{t('customRateProvider')} ID</span>
+                      <input
+                        type="text"
+                        bind:value={newRateDraft.providerId}
+                        placeholder={t('customRateProviderCustomPlaceholder')}
+                        required
+                      />
+                    </label>
+                  {/if}
                   <label>
                     <span>{t('customRateDomain')}</span>
                     <input
@@ -2706,34 +2874,125 @@
                 </div>
                 <div class="custom-rate-actions">
                   <button type="submit" disabled={savingRate}>
-                    {savingRate ? '...' : t('customRateAdd')}
+                    {savingRate ? t('customRateUpdating') : t('customRateAdd')}
                   </button>
                 </div>
               </form>
 
-              {#if customRates.length === 0}
+              {#if loadingRates && customRates.length === 0}
+                <small class="custom-rate-empty">{t('loading')}</small>
+              {:else if customRates.length === 0}
                 <small class="custom-rate-empty">{t('customRateEmpty')}</small>
               {:else}
                 <div class="custom-rates-list">
                   {#each customRates as rate (rate.id)}
                     <article class="custom-rate-card" data-testid={`custom-rate-${rate.id}`}>
-                      <div class="custom-rate-header">
-                        <strong>{rate.model}</strong>
-                        <small
-                          >{rate.providerId} · {rate.billingDomainId ??
-                            t('customRateDomainWildcard')}</small
+                      {#if editingRateId === rate.id}
+                        <form
+                          class="custom-rate-edit-form"
+                          on:submit|preventDefault={updateCustomRate}
                         >
-                      </div>
-                      <div class="custom-rate-details">
-                        <span>{t('customRateInput')}: ${rate.ratesPerMillion.input}/M</span>
-                        <span>{t('customRateOutput')}: ${rate.ratesPerMillion.output}/M</span>
-                        <span>{t('customRateCacheRead')}: ${rate.ratesPerMillion.cacheRead}/M</span>
-                      </div>
-                      <div class="custom-rate-card-actions">
-                        <button type="button" on:click={() => deleteCustomRate(rate.id)}>
-                          {t('customRateDelete')}
-                        </button>
-                      </div>
+                          <div class="custom-rate-edit-header">
+                            <strong>{rate.model}</strong>
+                            <small
+                              >{rate.providerId} · {rate.billingDomainId ??
+                                t('customRateDomainWildcard')}</small
+                            >
+                          </div>
+                          <div class="custom-rate-edit-fields">
+                            <label>
+                              <span>{t('customRateDomain')}</span>
+                              <input
+                                type="text"
+                                bind:value={editRateDraft.billingDomainId}
+                                placeholder={t('customRateDomainWildcard')}
+                              />
+                            </label>
+                            <label>
+                              <span>{t('customRateInput')}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                bind:value={editRateDraft.inputRate}
+                                required
+                              />
+                            </label>
+                            <label>
+                              <span>{t('customRateOutput')}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                bind:value={editRateDraft.outputRate}
+                                required
+                              />
+                            </label>
+                            <label>
+                              <span>{t('customRateCacheRead')}</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.0001"
+                                bind:value={editRateDraft.cacheReadRate}
+                              />
+                            </label>
+                          </div>
+                          <div class="custom-rate-edit-actions">
+                            <button type="submit" disabled={updatingRate}>
+                              {updatingRate ? t('customRateUpdating') : t('customRateSave')}
+                            </button>
+                            <button type="button" disabled={updatingRate} on:click={cancelEditRate}>
+                              {t('customRateCancel')}
+                            </button>
+                          </div>
+                        </form>
+                      {:else}
+                        <div class="custom-rate-header">
+                          <div class="custom-rate-title-row">
+                            <strong>{rate.model}</strong>
+                            <span class="custom-rate-provider-badge">{rate.providerId}</span>
+                          </div>
+                          <small
+                            >{rate.providerId} · {rate.billingDomainId ??
+                              t('customRateDomainWildcard')}</small
+                          >
+                        </div>
+                        <div class="custom-rate-details">
+                          <div class="rate-metric">
+                            <small>{t('customRateInput')}:</small>
+                            <b>${rate.ratesPerMillion.input}/M</b>
+                          </div>
+                          <div class="rate-metric">
+                            <small>{t('customRateOutput')}:</small>
+                            <b>${rate.ratesPerMillion.output}/M</b>
+                          </div>
+                          <div class="rate-metric">
+                            <small>{t('customRateCacheRead')}:</small>
+                            <b>${rate.ratesPerMillion.cacheRead}/M</b>
+                          </div>
+                        </div>
+                        <div class="custom-rate-footer">
+                          <small class="custom-rate-updated-time">
+                            {t('customRateUpdated')}
+                            {formatReset(rate.updatedAt)}
+                          </small>
+                          <div class="custom-rate-card-actions">
+                            <button type="button" on:click={() => startEditRate(rate)}>
+                              {t('customRateEdit')}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingRateId === rate.id}
+                              on:click={() => deleteCustomRate(rate.id)}
+                            >
+                              {deletingRateId === rate.id
+                                ? t('customRateDeleting')
+                                : t('customRateDelete')}
+                            </button>
+                          </div>
+                        </div>
+                      {/if}
                     </article>
                   {/each}
                 </div>
@@ -2910,6 +3169,19 @@
               <b>{formatNumber(model.tokenEvidence.observationCount)}</b>
             </span>
           </div>
+
+          {#if modelCost.status === 'unavailable'}
+            <div class="model-custom-rate-prompt">
+              <button
+                type="button"
+                class="configure-rate-button"
+                on:click={() =>
+                  configureCustomRateForModel(model.providerId, model.billingDomainId, model.model)}
+              >
+                + {t('setCustomRateForModel')}
+              </button>
+            </div>
+          {/if}
 
           <section class="model-activity" aria-labelledby="model-activity-heading">
             <h3 id="model-activity-heading">{t('activityOverview')}</h3>
@@ -3699,6 +3971,76 @@
     gap: 14px;
   }
 
+  .heading-with-action {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .rates-refresh-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid var(--border-soft);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.68rem;
+    cursor: pointer;
+  }
+
+  .rates-refresh-button:hover {
+    color: var(--text-strong);
+    border-color: var(--border);
+  }
+
+  .settings-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 30px 0;
+  }
+
+  .settings-nav button {
+    padding: 4px 10px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    color: var(--muted);
+    font-size: 0.68rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .settings-nav button:hover,
+  .settings-nav button.active {
+    color: var(--text-strong);
+    border-color: var(--border);
+    background: var(--surface);
+  }
+
+  .model-custom-rate-prompt {
+    margin-top: 8px;
+  }
+
+  .configure-rate-button {
+    width: 100%;
+    padding: 6px 12px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    color: var(--text-soft);
+    font-size: 0.7rem;
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .configure-rate-button:hover {
+    color: var(--text-strong);
+    border-color: var(--text-soft);
+  }
+
   .custom-rate-form {
     display: grid;
     gap: 12px;
@@ -3721,7 +4063,8 @@
     font-size: 0.63rem;
   }
 
-  .custom-rate-inputs input {
+  .custom-rate-inputs input,
+  .custom-rate-inputs select {
     width: 100%;
     padding: 6px 8px;
     border: 1px solid var(--border);
@@ -3749,7 +4092,7 @@
 
   .custom-rates-list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: 10px;
   }
 
@@ -3769,9 +4112,25 @@
     gap: 8px;
   }
 
+  .custom-rate-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .custom-rate-header strong {
     color: var(--text-strong);
     font-size: 0.78rem;
+  }
+
+  .custom-rate-provider-badge {
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border-soft);
+    color: var(--text-soft);
+    font-size: 0.62rem;
+    font-weight: 500;
   }
 
   .custom-rate-header small {
@@ -3784,6 +4143,96 @@
     gap: 4px;
     color: var(--muted);
     font-size: 0.66rem;
+  }
+
+  .rate-metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .rate-metric small {
+    color: var(--muted);
+  }
+
+  .rate-metric b {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+
+  .custom-rate-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .custom-rate-updated-time {
+    color: var(--muted);
+    font-size: 0.6rem;
+  }
+
+  .custom-rate-edit-form {
+    display: grid;
+    gap: 10px;
+  }
+
+  .custom-rate-edit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .custom-rate-edit-header strong {
+    color: var(--text-strong);
+    font-size: 0.78rem;
+  }
+
+  .custom-rate-edit-header small {
+    color: var(--muted);
+    font-size: 0.64rem;
+  }
+
+  .custom-rate-edit-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 6px;
+  }
+
+  .custom-rate-edit-fields label {
+    display: grid;
+    gap: 3px;
+    color: var(--muted);
+    font-size: 0.62rem;
+  }
+
+  .custom-rate-edit-fields input {
+    width: 100%;
+    padding: 5px 6px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface-subtle);
+    color: var(--text-strong);
+    font-size: 0.7rem;
+  }
+
+  .custom-rate-edit-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .custom-rate-edit-actions button {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface-subtle);
+    color: var(--text-strong);
+    font-size: 0.68rem;
+    cursor: pointer;
   }
 
   .model-ranking {

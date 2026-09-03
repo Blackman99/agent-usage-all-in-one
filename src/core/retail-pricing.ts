@@ -73,6 +73,25 @@ export interface RetailPricingResult {
 export const ANTHROPIC_PRICING_CATALOG: RetailPriceCatalog = {
   version: '2026-08-28',
   entries: [
+    anthropicEntry({
+      id: 'anthropic-fable-5-1-2026-09-01',
+      priceVersion: 'anthropic-2026-09-01',
+      model: 'claude-fable-5-1',
+      aliases: [
+        'Claude Fable 5.1',
+        'claude-fable-5.1',
+        'claude-fable-5-1-20260901',
+        'claude-fable-5.1-20260901',
+        'fable-5.1',
+        'fable-5-1'
+      ],
+      effectiveFrom: '2026-09-01T00:00:00.000Z',
+      input: 10,
+      output: 50,
+      cacheRead: 0.25,
+      sourceUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+      retrievedAt: '2026-09-03'
+    }),
     {
       id: 'anthropic-fable-5-2026-06-09',
       priceVersion: 'anthropic-2026-06-09',
@@ -157,6 +176,7 @@ function anthropicEntry(options: {
   output: number;
   cacheRead: number;
   sourceUrl: string;
+  retrievedAt?: string;
 }): RetailPriceCatalogEntry {
   return {
     id: options.id,
@@ -185,7 +205,7 @@ function anthropicEntry(options: {
     source: {
       title: 'Anthropic Claude API pricing',
       url: options.sourceUrl,
-      retrievedAt: '2026-08-28'
+      retrievedAt: options.retrievedAt ?? '2026-08-28'
     }
   };
 }
@@ -605,7 +625,7 @@ const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
 };
 
 export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
-  version: '2026-09-02-antigravity',
+  version: '2026-09-03-fable-5.1',
 
   entries: [
     ...DIRECT_OFFICIAL_PRICING_CATALOG.entries,
