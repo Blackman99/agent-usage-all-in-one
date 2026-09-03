@@ -1,5 +1,70 @@
 # agent-usage-all-in-one
 
+## 0.6.0
+
+### Minor Changes
+
+- 19d4a5b: Add official retail pricing for Anthropic Claude Fable 5.1 (`claude-fable-5-1`).
+  Anthropic launched Fable 5.1 on September 1, 2026. The pricing catalog reflects its official rates:
+
+  - Base input: $10 / MTok
+  - Output: $50 / MTok
+  - Cache read: $0.25 / MTok (75% reduction compared to Fable 5's $1.00 / MTok)
+  - 5-minute cache write: $12.50 / MTok (1.25x base input)
+  - 1-hour cache write: $20.00 / MTok (2x base input)
+
+  Aliases include `Claude Fable 5.1`, `claude-fable-5.1`, `fable-5.1`, `fable-5-1`, and date-pinned variants. Observations from 2026-09-01 onwards are automatically priced with these rates.
+
+- 81d3c5b: Support user-configured custom model rates for custom endpoints and routes.
+  When using custom routes, proxy endpoints, or third-party models in dsh (DeepSeek
+  Harness) or other providers, session tokens are recorded locally but previously
+  remained unpriced because the built-in retail catalog only covers known official
+  models under fixed billing domains.
+
+  Developers can now configure per-model input, output, and cache-read rates per
+  million tokens (in USD) either wildcarded across all routes or qualified by
+  billing domain. Custom rates take precedence over default catalog entries, and
+  saving, updating, or deleting custom rates automatically triggers background
+  re-pricing to backfill previously unpriced historical sessions. Rates can be
+  managed via the Settings drawer in the dashboard, the HTTP API (`/api/custom-rates`),
+  or the CLI (`agent-usage rates list / set / delete`).
+
+- 19d4a5b: Support full CRUD lifecycle and enhanced UX workflows for custom model rates.
+  Developers can now:
+
+  - View all configured custom model rates in the Settings drawer with auto-refresh on drawer open, an active rate count badge in the settings navigation bar, and a manual refresh button.
+  - Edit existing rates inline directly within the custom rate card view and update rates via `PUT /api/custom-rates/:id` or CLI `agent-usage rates set <model> --id <id>`.
+  - Retrieve individual custom model rate details via `GET /api/custom-rates/:id` and CLI `agent-usage rates get <id>`.
+  - Select target providers easily with a preset dropdown (Grok, DeepSeek dsh, Claude Code, Codex, OpenCode Go, OpenCode, Antigravity, or custom provider ID).
+  - One-click launch rate configuration directly from unpriced model detail panels in the Token & Model Costs view.
+
+### Patch Changes
+
+- 19d4a5b: Include all dsh (DeepSeek Harness) provider routes in workbench and global headline totals.
+  Previously, dsh selected only its default `deepseek-official` route as `includedInHeadline: true`, causing custom endpoint routes (e.g. proxy providers, local models) to be treated as separate non-headline domains with `不适用于摘要占比` ("Not applicable to headline") in model rankings. Because all dsh routes represent primary session activity without subscription double-counting, every active dsh route is now included in headline totals, enabling token and retail equivalent shares to be accurately calculated and displayed in the breakdown table.
+- 186d8f6: Stop showing an Antigravity quota percentage that no source reports. The two
+  `5 hour` and `Week` windows without a model group were computed by dividing local
+  Token counts by a built-in guess at Antigravity's allowance — 61% used meant
+  60,696,074 Tokens against an assumed 100,000,000, a limit Google does not publish
+  — and an empty window reset to "five hours from now" on every collection. Only the
+  official client states either allowance, so quota now comes solely from its live
+  language server and is reported as unavailable when that is unreachable, while
+  Tokens, history, and equivalent cost stay exact.
+
+  A quota window a Provider has stopped reporting is now retired instead of staying
+  on the card beside the windows that replaced it, which is what left the derived
+  rows sitting under the real ones. Existing databases have those derived rows
+  removed on open.
+
+- 186d8f6: Keep the local service running and the dashboard usable on a large local history.
+  The overview response carried every retained usage observation and cost record, so
+  a 30-day window over months of usage grew past what JSON can encode: the encoder
+  threw after the response had already started, the second write ended the daemon,
+  and every dashboard request failed with a connection reset. Model details now
+  receive the aggregates they display — Token composition, price snapshots, and the
+  recorded Tokens of each trend interval — while the underlying rows travel only to
+  exports, which still include every one of them.
+
 ## 0.5.0
 
 ### Minor Changes
