@@ -977,7 +977,11 @@ export class SqliteUsageRepository implements UsageRepository {
          price_snapshot_source_url, price_snapshot_context_tier,
          model, usage_observation_id, priced_tokens, line_items_json, calculated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(provider_id, id) DO NOTHING`
+       ON CONFLICT(provider_id, id) DO UPDATE SET
+         amount = excluded.amount,
+         price_snapshot_rates_json = excluded.price_snapshot_rates_json,
+         line_items_json = excluded.line_items_json,
+         calculated_at = excluded.calculated_at`
     );
     this.#database.exec('BEGIN IMMEDIATE');
     try {

@@ -82,7 +82,7 @@ Introduce user-configurable **Custom Model Rates** (方案三) across the applic
 - `pnpm lint`: Pass (`eslint .` clean)
 
 ## Plan
-- [x] Ticket 1: Data Model & Pricing Engine Fusion (Blocked by: None) — Delivers `CustomModelRate` types, `custom_model_rates` table and CRUD in SQLite repository, retail pricing catalog merging with custom rate precedence and dsh wildcard/route matching, and `tests/core/custom-model-rates.test.ts`.
-- [ ] Ticket 2: Automatic Backfill and Application Integration (Blocked by: Ticket 1) — Delivers application-level rate management methods in `UsageApplication`, catalog version fingerprint invalidation on rate mutation, automatic incremental backfill re-pricing, and `tests/integration/dsh-custom-rate-application.test.ts`.
-- [ ] Ticket 3: CLI, HTTP API, and Settings Drawer UI (Blocked by: Ticket 2) — Delivers HTTP API endpoints (`/api/custom-rates`), CLI command suite (`agent-usage rates list / set / delete`), and Settings drawer UI section for custom model rates with English and Simplified Chinese i18n.
+- [x] Ticket 1: Data Model & Pricing Engine Fusion
+- [x] Ticket 2: Automatic Backfill & Application Integration
+- [ ] Ticket 3: CLI, HTTP API & Settings UI
 

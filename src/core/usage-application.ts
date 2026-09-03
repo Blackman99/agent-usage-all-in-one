@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type {
   AgentProviderIndex,
   Connector,
@@ -6,6 +8,8 @@ import type {
   ConnectorFailure,
   ConnectorPolicy,
   CollectionMode,
+  CustomModelRate,
+  CustomModelRateInput,
   DoctorReport,
   ExchangeRateProvider,
   LocalNotification,
@@ -41,6 +45,7 @@ import { buildUsageExport } from './usage-export.js';
 import {
   OFFICIAL_PRICING_CATALOG,
   deriveRetailEquivalentCosts,
+  mergeCatalogWithCustomRates,
   type RetailPriceCatalog
 } from './retail-pricing.js';
 import {
@@ -98,7 +103,8 @@ export class UsageApplication {
   readonly #connectorPolicies: Record<string, ConnectorPolicy>;
   readonly #notifier?: LocalNotifier;
   readonly #startAtLoginManager?: StartAtLoginManager;
-  readonly #priceCatalog: RetailPriceCatalog | null;
+  readonly #basePriceCatalog: RetailPriceCatalog | null;
+  #priceCatalog: RetailPriceCatalog | null;
   readonly #planCatalog: PlanCatalog;
   #refreshPromise: Promise<void> | null = null;
   #refreshMode: CollectionMode | null = null;
@@ -121,10 +127,17 @@ export class UsageApplication {
     this.#connectorPolicies = options.connectorPolicies ?? {};
     this.#notifier = options.notifier;
     this.#startAtLoginManager = options.startAtLoginManager;
-    this.#priceCatalog =
+    this.#basePriceCatalog =
       options.priceCatalog === undefined ? OFFICIAL_PRICING_CATALOG : options.priceCatalog;
+    this.#priceCatalog = this.#resolvePriceCatalog();
     this.#planCatalog = options.planCatalog ?? SUBSCRIPTION_PLAN_CATALOG;
     this.#processingStatus = createProcessingStatus(this.#clock().toISOString(), false);
+  }
+
+  #resolvePriceCatalog(): RetailPriceCatalog | null {
+    if (!this.#basePriceCatalog) return null;
+    const customRates = this.#repository.getCustomModelRates?.() ?? [];
+    return mergeCatalogWithCustomRates(this.#basePriceCatalog, customRates);
   }
 
   async #backfillRetailCosts(mode: CollectionMode): Promise<void> {
@@ -548,6 +561,60 @@ export class UsageApplication {
       updatedAt: this.#clock().toISOString()
     });
     return this.getPlanSettings();
+  }
+
+  async getCustomModelRates(): Promise<CustomModelRate[]> {
+    return this.#repository.getCustomModelRates?.() ?? [];
+  }
+
+  async setCustomModelRate(input: CustomModelRateInput): Promise<CustomModelRate> {
+    const providerId = input.providerId?.trim();
+    if (!providerId) throw new Error('Provider ID is required');
+    const model = input.model?.trim();
+    if (!model) throw new Error('Model name is required');
+    if (!Number.isFinite(input.inputRate) || input.inputRate < 0) {
+      throw new Error('Input rate must be a non-negative number');
+    }
+    if (!Number.isFinite(input.outputRate) || input.outputRate < 0) {
+      throw new Error('Output rate must be a non-negative number');
+    }
+    const cacheReadRate = input.cacheReadRate ?? 0;
+    if (!Number.isFinite(cacheReadRate) || cacheReadRate < 0) {
+      throw new Error('Cache read rate must be a non-negative number');
+    }
+
+    const rate: CustomModelRate = {
+      id: input.id || `rate-${randomUUID()}`,
+      providerId,
+      billingDomainId: input.billingDomainId?.trim() || null,
+      model,
+      ratesPerMillion: {
+        input: input.inputRate,
+        output: input.outputRate,
+        cacheRead: cacheReadRate
+      },
+      updatedAt: this.#clock().toISOString()
+    };
+
+    await this.#queueDatabaseWrite(() => {
+      this.#repository.saveCustomModelRate?.(rate);
+    });
+
+    this.#priceCatalog = this.#resolvePriceCatalog();
+    await this.#backfillRetailCosts('hard-rebuild');
+    return rate;
+  }
+
+  async deleteCustomModelRate(id: string): Promise<boolean> {
+    let deleted = false;
+    await this.#queueDatabaseWrite(() => {
+      deleted = this.#repository.deleteCustomModelRate?.(id) ?? false;
+    });
+    if (deleted) {
+      this.#priceCatalog = this.#resolvePriceCatalog();
+      await this.#backfillRetailCosts('hard-rebuild');
+    }
+    return deleted;
   }
 
   /**
