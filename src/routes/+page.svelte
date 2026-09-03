@@ -2539,7 +2539,7 @@
             class:active={settingsTarget === 'plans'}
             on:click={() => openSettings('plans', false)}
           >
-            {t('planSubscriptions')}
+            {t('plans')}
           </button>
           <button
             type="button"
