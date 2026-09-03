@@ -1295,15 +1295,15 @@ export class SqliteUsageRepository implements UsageRepository {
          ORDER BY updated_at DESC`
       )
       .all() as Array<{
-        id: string;
-        provider_id: string;
-        billing_domain_id: string | null;
-        model: string;
-        input_rate: number;
-        output_rate: number;
-        cache_read_rate: number;
-        updated_at: string;
-      }>;
+      id: string;
+      provider_id: string;
+      billing_domain_id: string | null;
+      model: string;
+      input_rate: number;
+      output_rate: number;
+      cache_read_rate: number;
+      updated_at: string;
+    }>;
     return rows.map((row) => ({
       id: row.id,
       providerId: row.provider_id,
@@ -1324,7 +1324,8 @@ export class SqliteUsageRepository implements UsageRepository {
         `SELECT id FROM custom_model_rates
          WHERE id = ? OR (provider_id = ? AND COALESCE(billing_domain_id, '') = COALESCE(?, '') AND lower(model) = lower(?))`
       )
-      .get(rate.id, rate.providerId, rate.billingDomainId, rate.model) as { id: string } | undefined;
+      .get(rate.id, rate.providerId, rate.billingDomainId, rate.model) as
+      { id: string } | undefined;
 
     if (existing) {
       this.#database
@@ -1366,9 +1367,7 @@ export class SqliteUsageRepository implements UsageRepository {
   }
 
   deleteCustomModelRate(id: string): boolean {
-    const result = this.#database
-      .prepare('DELETE FROM custom_model_rates WHERE id = ?')
-      .run(id);
+    const result = this.#database.prepare('DELETE FROM custom_model_rates WHERE id = ?').run(id);
     return result.changes > 0;
   }
 

@@ -294,7 +294,13 @@ ratesCommand
   .action(
     async (
       model: string,
-      options: { provider: string; domain?: string; input: number; output: number; cacheRead: number }
+      options: {
+        provider: string;
+        domain?: string;
+        input: number;
+        output: number;
+        cacheRead: number;
+      }
     ) => {
       const home = resolve(program.opts<{ home: string }>().home);
       const state = await requireDaemonState(home);
@@ -316,7 +322,9 @@ ratesCommand
       });
       if (!response.ok) throw new Error(`Daemon returned HTTP ${response.status}`);
       const data = (await response.json()) as { rate: CustomModelRate };
-      process.stdout.write(`Custom model rate configured for ${data.rate.model} (ID: ${data.rate.id})\n`);
+      process.stdout.write(
+        `Custom model rate configured for ${data.rate.model} (ID: ${data.rate.id})\n`
+      );
     }
   );
 

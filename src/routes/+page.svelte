@@ -2647,27 +2647,61 @@
                 <div class="custom-rate-inputs">
                   <label>
                     <span>{t('customRateProvider')}</span>
-                    <input type="text" bind:value={newRateDraft.providerId} placeholder="dsh" required />
+                    <input
+                      type="text"
+                      bind:value={newRateDraft.providerId}
+                      placeholder="dsh"
+                      required
+                    />
                   </label>
                   <label>
                     <span>{t('customRateDomain')}</span>
-                    <input type="text" bind:value={newRateDraft.billingDomainId} placeholder={t('customRateDomainWildcard')} />
+                    <input
+                      type="text"
+                      bind:value={newRateDraft.billingDomainId}
+                      placeholder={t('customRateDomainWildcard')}
+                    />
                   </label>
                   <label>
                     <span>{t('customRateModel')}</span>
-                    <input type="text" bind:value={newRateDraft.model} placeholder="e.g. gpt-4o, qwen-max" required />
+                    <input
+                      type="text"
+                      bind:value={newRateDraft.model}
+                      placeholder="e.g. gpt-4o, qwen-max"
+                      required
+                    />
                   </label>
                   <label>
                     <span>{t('customRateInput')}</span>
-                    <input type="number" min="0" step="0.0001" bind:value={newRateDraft.inputRate} placeholder="2.0" required />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      bind:value={newRateDraft.inputRate}
+                      placeholder="2.0"
+                      required
+                    />
                   </label>
                   <label>
                     <span>{t('customRateOutput')}</span>
-                    <input type="number" min="0" step="0.0001" bind:value={newRateDraft.outputRate} placeholder="8.0" required />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      bind:value={newRateDraft.outputRate}
+                      placeholder="8.0"
+                      required
+                    />
                   </label>
                   <label>
                     <span>{t('customRateCacheRead')}</span>
-                    <input type="number" min="0" step="0.0001" bind:value={newRateDraft.cacheReadRate} placeholder="0.5" />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      bind:value={newRateDraft.cacheReadRate}
+                      placeholder="0.5"
+                    />
                   </label>
                 </div>
                 <div class="custom-rate-actions">
@@ -2685,7 +2719,10 @@
                     <article class="custom-rate-card" data-testid={`custom-rate-${rate.id}`}>
                       <div class="custom-rate-header">
                         <strong>{rate.model}</strong>
-                        <small>{rate.providerId} · {rate.billingDomainId ?? t('customRateDomainWildcard')}</small>
+                        <small
+                          >{rate.providerId} · {rate.billingDomainId ??
+                            t('customRateDomainWildcard')}</small
+                        >
                       </div>
                       <div class="custom-rate-details">
                         <span>{t('customRateInput')}: ${rate.ratesPerMillion.input}/M</span>

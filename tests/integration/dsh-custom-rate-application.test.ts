@@ -167,7 +167,10 @@ describe('dsh custom endpoint model rate application and backfill', () => {
     const deleted = await application.deleteCustomModelRate(savedRate.id);
     expect(deleted).toBe(true);
 
-    const afterDeleteOverview = await application.getOverview({ window: '24h', auditEvidence: true });
+    const afterDeleteOverview = await application.getOverview({
+      window: '24h',
+      auditEvidence: true
+    });
     const customDomainDeleted = afterDeleteOverview.providers
       .find((p) => p.id === 'dsh')
       ?.billingDomains.find((d) => d.id === 'my-custom-proxy');

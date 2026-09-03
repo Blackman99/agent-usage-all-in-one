@@ -18,7 +18,9 @@ afterEach(async () => {
   );
 });
 
-async function runCli(arguments_: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+async function runCli(
+  arguments_: string[]
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolveRun, reject) => {
     const processInstance = spawn(
       process.execPath,
