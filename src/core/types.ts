@@ -940,6 +940,29 @@ export interface DoctorReport {
   }>;
 }
 
+export interface CustomModelRate {
+  id: string;
+  providerId: string;
+  billingDomainId: string | null;
+  model: string;
+  ratesPerMillion: {
+    input: number;
+    output: number;
+    cacheRead: number;
+  };
+  updatedAt: string;
+}
+
+export interface CustomModelRateInput {
+  id?: string;
+  providerId: string;
+  billingDomainId?: string | null;
+  model: string;
+  inputRate: number;
+  outputRate: number;
+  cacheReadRate?: number;
+}
+
 export interface UsageRepository {
   saveSnapshot(snapshot: ConnectorSnapshot, options?: { preserveFailure?: boolean }): void;
   recordFailure(provider: ProviderIdentity, failedAt: string, failure: ConnectorFailure): void;
@@ -954,6 +977,9 @@ export interface UsageRepository {
   getPlanSubscriptions(): PlanSubscription[];
   savePlanSubscription(subscription: PlanSubscription): void;
   deletePlanSubscription(providerId: string, billingDomainId: string): void;
+  getCustomModelRates?(): CustomModelRate[];
+  saveCustomModelRate?(rate: CustomModelRate): void;
+  deleteCustomModelRate?(id: string): boolean;
   getNotificationState(key: string): string | null;
   saveNotificationState(key: string, value: string): void;
   saveConnectorDiagnostic(diagnostic: ConnectorDiagnostic): void;

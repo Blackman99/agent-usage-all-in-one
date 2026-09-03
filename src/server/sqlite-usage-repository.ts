@@ -14,6 +14,7 @@ import type {
   ConnectorSnapshot,
   CoverageLevel,
   CostRecord,
+  CustomModelRate,
   DataAuthority,
   ExchangeRateSnapshot,
   HistoryCost,
@@ -1281,6 +1282,92 @@ export class SqliteUsageRepository implements UsageRepository {
       .run(providerId, billingDomainId);
   }
 
+  getCustomModelRates(): CustomModelRate[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT id, provider_id, billing_domain_id, model,
+                input_rate, output_rate, cache_read_rate, updated_at
+         FROM custom_model_rates
+         ORDER BY updated_at DESC`
+      )
+      .all() as Array<{
+        id: string;
+        provider_id: string;
+        billing_domain_id: string | null;
+        model: string;
+        input_rate: number;
+        output_rate: number;
+        cache_read_rate: number;
+        updated_at: string;
+      }>;
+    return rows.map((row) => ({
+      id: row.id,
+      providerId: row.provider_id,
+      billingDomainId: row.billing_domain_id ?? null,
+      model: row.model,
+      ratesPerMillion: {
+        input: row.input_rate,
+        output: row.output_rate,
+        cacheRead: row.cache_read_rate
+      },
+      updatedAt: row.updated_at
+    }));
+  }
+
+  saveCustomModelRate(rate: CustomModelRate): void {
+    const existing = this.#database
+      .prepare(
+        `SELECT id FROM custom_model_rates
+         WHERE id = ? OR (provider_id = ? AND COALESCE(billing_domain_id, '') = COALESCE(?, '') AND lower(model) = lower(?))`
+      )
+      .get(rate.id, rate.providerId, rate.billingDomainId, rate.model) as { id: string } | undefined;
+
+    if (existing) {
+      this.#database
+        .prepare(
+          `UPDATE custom_model_rates SET
+             provider_id = ?, billing_domain_id = ?, model = ?,
+             input_rate = ?, output_rate = ?, cache_read_rate = ?, updated_at = ?
+           WHERE id = ?`
+        )
+        .run(
+          rate.providerId,
+          rate.billingDomainId,
+          rate.model,
+          rate.ratesPerMillion.input,
+          rate.ratesPerMillion.output,
+          rate.ratesPerMillion.cacheRead,
+          rate.updatedAt,
+          existing.id
+        );
+    } else {
+      this.#database
+        .prepare(
+          `INSERT INTO custom_model_rates (
+             id, provider_id, billing_domain_id, model,
+             input_rate, output_rate, cache_read_rate, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          rate.id,
+          rate.providerId,
+          rate.billingDomainId,
+          rate.model,
+          rate.ratesPerMillion.input,
+          rate.ratesPerMillion.output,
+          rate.ratesPerMillion.cacheRead,
+          rate.updatedAt
+        );
+    }
+  }
+
+  deleteCustomModelRate(id: string): boolean {
+    const result = this.#database
+      .prepare('DELETE FROM custom_model_rates WHERE id = ?')
+      .run(id);
+    return result.changes > 0;
+  }
+
   getNotificationState(key: string): string | null {
     const row = this.#database
       .prepare('SELECT value FROM notification_state WHERE key = ?')
@@ -2442,6 +2529,18 @@ export class SqliteUsageRepository implements UsageRepository {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (provider_id, billing_domain_id)
       );
+      CREATE TABLE IF NOT EXISTS custom_model_rates (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL,
+        billing_domain_id TEXT,
+        model TEXT NOT NULL,
+        input_rate REAL NOT NULL,
+        output_rate REAL NOT NULL,
+        cache_read_rate REAL NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_model_rates_key
+        ON custom_model_rates(provider_id, COALESCE(billing_domain_id, ''), lower(model));
     `);
     const usageColumns = this.#database
       .prepare('PRAGMA table_info(usage_observations)')

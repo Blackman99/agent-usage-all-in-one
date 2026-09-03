@@ -2,6 +2,7 @@ import { normalizeTokenObservation } from './token-normalization.js';
 import type {
   ConnectorSnapshot,
   CostRecord,
+  CustomModelRate,
   RetailPriceLineItem,
   RetailTokenKind,
   UsageObservation
@@ -822,6 +823,51 @@ function openCodeLocalModelPrefix(entry: RetailPriceCatalogEntry): string | null
   return null;
 }
 
+export function customModelRateToCatalogEntry(rate: CustomModelRate): RetailPriceCatalogEntry {
+  const versionDate = rate.updatedAt.slice(0, 10);
+  return {
+    id: `custom-rate-${rate.id}`,
+    priceVersion: `custom-${rate.id}-${rate.updatedAt}`,
+    providerId: rate.providerId,
+    billingDomainId: rate.billingDomainId ?? '*',
+    canonicalModel: rate.model,
+    aliases: [],
+    currency: 'USD',
+    effectiveFrom: '2020-01-01T00:00:00.000Z',
+    effectiveUntil: null,
+    contextTier: 'custom-rate',
+    contextRule: { kind: 'fixed' },
+    ratesPerMillion: {
+      input: rate.ratesPerMillion.input,
+      output: rate.ratesPerMillion.output,
+      reasoning: rate.ratesPerMillion.output,
+      'cache-read': rate.ratesPerMillion.cacheRead,
+      'cache-write': null
+    },
+    source: {
+      title: 'User-configured custom model rate',
+      url: 'local://settings/rates',
+      retrievedAt: versionDate
+    }
+  };
+}
+
+export function mergeCatalogWithCustomRates(
+  catalog: RetailPriceCatalog,
+  customRates: CustomModelRate[]
+): RetailPriceCatalog {
+  if (!customRates || customRates.length === 0) return catalog;
+  const customEntries = customRates.map(customModelRateToCatalogEntry);
+  const rateFingerprints = customRates
+    .map((r) => `${r.id}:${r.updatedAt}`)
+    .sort()
+    .join(';');
+  return {
+    version: `${catalog.version}+custom:${rateFingerprints}`,
+    entries: [...customEntries, ...catalog.entries]
+  };
+}
+
 export function deriveRetailEquivalentCosts(
   snapshot: ConnectorSnapshot,
   catalog: RetailPriceCatalog = ANTHROPIC_PRICING_CATALOG,
@@ -857,16 +903,36 @@ function priceObservation(
     return unavailable('model-unclassified');
   }
   const normalizedModel = normalized.model.trim().toLowerCase();
-  const modelEntries = catalog.entries.filter(
+  const matchingCandidates = catalog.entries.filter(
     (entry) =>
       entry.providerId === providerId &&
-      entry.billingDomainId === observation.billingDomainId &&
+      (entry.billingDomainId === observation.billingDomainId || entry.billingDomainId === '*') &&
       [entry.canonicalModel, ...entry.aliases].some(
         (model) => model.trim().toLowerCase() === normalizedModel
       )
   );
-  if (modelEntries.length === 0) return unavailable('model-unrecognized');
-  const timeActiveEntries = modelEntries.filter(
+
+  let selectedEntries: RetailPriceCatalogEntry[];
+  const customExact = matchingCandidates.filter(
+    (e) => e.contextTier === 'custom-rate' && e.billingDomainId === observation.billingDomainId
+  );
+  if (customExact.length > 0) {
+    selectedEntries = customExact;
+  } else {
+    const customWildcard = matchingCandidates.filter(
+      (e) => e.contextTier === 'custom-rate' && e.billingDomainId === '*'
+    );
+    if (customWildcard.length > 0) {
+      selectedEntries = customWildcard;
+    } else {
+      selectedEntries = matchingCandidates.filter(
+        (e) => e.contextTier !== 'custom-rate' && e.billingDomainId === observation.billingDomainId
+      );
+    }
+  }
+
+  if (selectedEntries.length === 0) return unavailable('model-unrecognized');
+  const timeActiveEntries = selectedEntries.filter(
     (entry) =>
       observation.observedAt >= entry.effectiveFrom &&
       (!entry.effectiveUntil || observation.observedAt < entry.effectiveUntil)
