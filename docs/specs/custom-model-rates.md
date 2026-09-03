@@ -84,5 +84,5 @@ Introduce user-configurable **Custom Model Rates** (方案三) across the applic
 ## Plan
 - [x] Ticket 1: Data Model & Pricing Engine Fusion
 - [x] Ticket 2: Automatic Backfill & Application Integration
-- [ ] Ticket 3: CLI, HTTP API & Settings UI
+- [x] Ticket 3: CLI, HTTP API & Settings UI
 

@@ -47,6 +47,15 @@ const planSubscriptionSchema = z.object({
     })
     .nullable()
 });
+const customModelRateSchema = z.object({
+  id: z.string().optional(),
+  providerId: z.string().min(1),
+  billingDomainId: z.string().nullable().optional(),
+  model: z.string().min(1),
+  inputRate: z.number().nonnegative(),
+  outputRate: z.number().nonnegative(),
+  cacheReadRate: z.number().nonnegative().optional()
+});
 const clearDataSchema = z.object({ deleteProductSecrets: z.boolean().default(false) });
 const hardRebuildSchema = z.object({ confirmExpensiveOperation: z.literal(true) });
 
@@ -266,6 +275,34 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
         }
         const input = planSubscriptionSchema.parse(await readJsonBody(request));
         sendJson(response, 200, await options.application.updatePlanSubscription(input));
+        return;
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/api/custom-rates') {
+        const rates = await options.application.getCustomModelRates();
+        sendJson(response, 200, { rates });
+        return;
+      }
+
+      if (request.method === 'POST' && requestUrl.pathname === '/api/custom-rates') {
+        if (!validMutationOrigin(authentication, request, origin)) {
+          sendJson(response, 403, { error: 'invalid-origin' });
+          return;
+        }
+        const input = customModelRateSchema.parse(await readJsonBody(request));
+        const rate = await options.application.setCustomModelRate(input);
+        sendJson(response, 200, { rate });
+        return;
+      }
+
+      if (request.method === 'DELETE' && requestUrl.pathname.startsWith('/api/custom-rates/')) {
+        if (!validMutationOrigin(authentication, request, origin)) {
+          sendJson(response, 403, { error: 'invalid-origin' });
+          return;
+        }
+        const id = decodeURIComponent(requestUrl.pathname.slice('/api/custom-rates/'.length));
+        const deleted = await options.application.deleteCustomModelRate(id);
+        sendJson(response, 200, { deleted });
         return;
       }
 

@@ -7,6 +7,7 @@
     CoverageLevel,
     DataAuthority,
     BillingHistory,
+    CustomModelRate,
     DoctorReport,
     HistoryWindow,
     MonitoringSettings,
@@ -106,6 +107,17 @@
   let planError = false;
   let planDrafts: Record<string, PlanDraft> = {};
   let pendingPlanDomain: string | null = null;
+  let customRates: CustomModelRate[] = [];
+  let customRatesError = false;
+  let newRateDraft = {
+    providerId: 'dsh',
+    billingDomainId: '',
+    model: '',
+    inputRate: '',
+    outputRate: '',
+    cacheReadRate: '0'
+  };
+  let savingRate = false;
   let diagnostics: DoctorReport | null = null;
   let diagnosticsLoaded = false;
   let retention: RetentionStatus | null = null;
@@ -186,6 +198,7 @@
       loadConnectors(),
       loadMonitoring(),
       loadPlanSettings(),
+      loadCustomRates(),
       loadRetention(),
       loadProcessing()
     ]);
@@ -469,6 +482,65 @@
       planError = true;
     } finally {
       pendingPlanDomain = null;
+    }
+  }
+
+  async function loadCustomRates(): Promise<void> {
+    try {
+      const response = await fetch('/api/custom-rates');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = (await response.json()) as { rates: CustomModelRate[] };
+      customRates = data.rates;
+      customRatesError = false;
+    } catch {
+      customRatesError = true;
+    }
+  }
+
+  async function saveCustomRate(): Promise<void> {
+    if (!newRateDraft.model.trim() || savingRate) return;
+    savingRate = true;
+    try {
+      const response = await fetch('/api/custom-rates', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          providerId: newRateDraft.providerId.trim(),
+          billingDomainId: newRateDraft.billingDomainId.trim() || null,
+          model: newRateDraft.model.trim(),
+          inputRate: parseFloat(newRateDraft.inputRate) || 0,
+          outputRate: parseFloat(newRateDraft.outputRate) || 0,
+          cacheReadRate: parseFloat(newRateDraft.cacheReadRate) || 0
+        })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      newRateDraft = {
+        providerId: 'dsh',
+        billingDomainId: '',
+        model: '',
+        inputRate: '',
+        outputRate: '',
+        cacheReadRate: '0'
+      };
+      await loadCustomRates();
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      savingRate = false;
+    }
+  }
+
+  async function deleteCustomRate(id: string): Promise<void> {
+    try {
+      const response = await fetch(`/api/custom-rates/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await loadCustomRates();
+      await loadOverview();
+    } catch (err) {
+      console.error(err);
     }
   }
 
@@ -2555,6 +2627,83 @@
             {/if}
           </section>
 
+          <section
+            aria-labelledby="rates-heading"
+            data-settings-target="rates"
+            data-testid="settings-rates"
+            class:settings-target-active={settingsTarget === 'rates'}
+            tabindex="-1"
+          >
+            <div class="settings-section-heading">
+              <h2 id="rates-heading">{t('customRates')}</h2>
+              <p>{t('customRatesSubtitle')}</p>
+            </div>
+            {#if customRatesError}
+              <p class="settings-error" role="status">{t('customRatesUnavailable')}</p>
+            {/if}
+
+            <div class="custom-rates-container">
+              <form class="custom-rate-form" on:submit|preventDefault={saveCustomRate}>
+                <div class="custom-rate-inputs">
+                  <label>
+                    <span>{t('customRateProvider')}</span>
+                    <input type="text" bind:value={newRateDraft.providerId} placeholder="dsh" required />
+                  </label>
+                  <label>
+                    <span>{t('customRateDomain')}</span>
+                    <input type="text" bind:value={newRateDraft.billingDomainId} placeholder={t('customRateDomainWildcard')} />
+                  </label>
+                  <label>
+                    <span>{t('customRateModel')}</span>
+                    <input type="text" bind:value={newRateDraft.model} placeholder="e.g. gpt-4o, qwen-max" required />
+                  </label>
+                  <label>
+                    <span>{t('customRateInput')}</span>
+                    <input type="number" min="0" step="0.0001" bind:value={newRateDraft.inputRate} placeholder="2.0" required />
+                  </label>
+                  <label>
+                    <span>{t('customRateOutput')}</span>
+                    <input type="number" min="0" step="0.0001" bind:value={newRateDraft.outputRate} placeholder="8.0" required />
+                  </label>
+                  <label>
+                    <span>{t('customRateCacheRead')}</span>
+                    <input type="number" min="0" step="0.0001" bind:value={newRateDraft.cacheReadRate} placeholder="0.5" />
+                  </label>
+                </div>
+                <div class="custom-rate-actions">
+                  <button type="submit" disabled={savingRate}>
+                    {savingRate ? '...' : t('customRateAdd')}
+                  </button>
+                </div>
+              </form>
+
+              {#if customRates.length === 0}
+                <small class="custom-rate-empty">{t('customRateEmpty')}</small>
+              {:else}
+                <div class="custom-rates-list">
+                  {#each customRates as rate (rate.id)}
+                    <article class="custom-rate-card" data-testid={`custom-rate-${rate.id}`}>
+                      <div class="custom-rate-header">
+                        <strong>{rate.model}</strong>
+                        <small>{rate.providerId} · {rate.billingDomainId ?? t('customRateDomainWildcard')}</small>
+                      </div>
+                      <div class="custom-rate-details">
+                        <span>{t('customRateInput')}: ${rate.ratesPerMillion.input}/M</span>
+                        <span>{t('customRateOutput')}: ${rate.ratesPerMillion.output}/M</span>
+                        <span>{t('customRateCacheRead')}: ${rate.ratesPerMillion.cacheRead}/M</span>
+                      </div>
+                      <div class="custom-rate-card-actions">
+                        <button type="button" on:click={() => deleteCustomRate(rate.id)}>
+                          {t('customRateDelete')}
+                        </button>
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </section>
+
           <section class="monitoring-section" aria-labelledby="monitoring-heading">
             <div class="settings-section-heading">
               <h2 id="monitoring-heading">{t('monitoring')}</h2>
@@ -3506,6 +3655,98 @@
   .plan-settings-actions small {
     color: var(--muted);
     font-size: 0.6rem;
+  }
+
+  .custom-rates-container {
+    display: grid;
+    gap: 14px;
+  }
+
+  .custom-rate-form {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+    background: var(--surface-inset);
+  }
+
+  .custom-rate-inputs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+  }
+
+  .custom-rate-inputs label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 0.63rem;
+  }
+
+  .custom-rate-inputs input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface-subtle);
+    color: var(--text-strong);
+    font-size: 0.72rem;
+  }
+
+  .custom-rate-actions button,
+  .custom-rate-card-actions button {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    color: var(--text-strong);
+    font-size: 0.7rem;
+    cursor: pointer;
+  }
+
+  .custom-rate-empty {
+    color: var(--muted);
+    font-size: 0.72rem;
+  }
+
+  .custom-rates-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 10px;
+  }
+
+  .custom-rate-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: var(--surface-inset);
+  }
+
+  .custom-rate-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .custom-rate-header strong {
+    color: var(--text-strong);
+    font-size: 0.78rem;
+  }
+
+  .custom-rate-header small {
+    color: var(--muted);
+    font-size: 0.64rem;
+  }
+
+  .custom-rate-details {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 0.66rem;
   }
 
   .model-ranking {

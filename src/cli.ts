@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { Command } from 'commander';
 import open from 'open';
 
-import type { DoctorReport, UsageOverview } from './core/types.js';
+import type { CustomModelRate, DoctorReport, UsageOverview } from './core/types.js';
 import { publicErrorMessage } from './core/redaction.js';
 import { readDaemonState, type DaemonState } from './server/daemon-state.js';
 
@@ -249,6 +249,92 @@ program
     if (!response.ok) throw new Error(`Daemon returned HTTP ${response.status}`);
     const status = (await response.json()) as { settings: { startAtLogin: boolean } };
     process.stdout.write(`${status.settings.startAtLogin ? 'enabled' : 'disabled'}\n`);
+  });
+
+const ratesCommand = program
+  .command('rates')
+  .description('view and manage custom model rates for custom endpoints');
+
+ratesCommand
+  .command('list')
+  .description('list configured custom model rates')
+  .option('--json', 'emit machine-readable JSON')
+  .action(async (options: { json?: boolean }) => {
+    const home = resolve(program.opts<{ home: string }>().home);
+    const state = await requireDaemonState(home);
+    const response = await fetch(`${state.origin}/api/custom-rates`, {
+      headers: { authorization: `Bearer ${state.apiToken}` }
+    });
+    if (!response.ok) throw new Error(`Daemon returned HTTP ${response.status}`);
+    const data = (await response.json()) as { rates: CustomModelRate[] };
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(data.rates, null, 2)}\n`);
+      return;
+    }
+    if (data.rates.length === 0) {
+      process.stdout.write('No custom model rates configured.\n');
+      return;
+    }
+    for (const rate of data.rates) {
+      const domain = rate.billingDomainId ?? '*';
+      process.stdout.write(
+        `${rate.id} | ${rate.providerId} | domain: ${domain} | model: ${rate.model} | in: $${rate.ratesPerMillion.input}/M | out: $${rate.ratesPerMillion.output}/M | cache: $${rate.ratesPerMillion.cacheRead}/M\n`
+      );
+    }
+  });
+
+ratesCommand
+  .command('set <model>')
+  .description('set custom model rate')
+  .requiredOption('--provider <provider>', 'provider id (e.g. dsh)')
+  .option('--domain <domain>', 'billing domain id (omit for wildcard across all routes)')
+  .requiredOption('--input <rate>', 'input rate in USD per million tokens', parseFloat)
+  .requiredOption('--output <rate>', 'output rate in USD per million tokens', parseFloat)
+  .option('--cache-read <rate>', 'cache read rate in USD per million tokens', parseFloat, 0)
+  .action(
+    async (
+      model: string,
+      options: { provider: string; domain?: string; input: number; output: number; cacheRead: number }
+    ) => {
+      const home = resolve(program.opts<{ home: string }>().home);
+      const state = await requireDaemonState(home);
+      const response = await fetch(`${state.origin}/api/custom-rates`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${state.apiToken}`,
+          'content-type': 'application/json',
+          origin: state.origin
+        },
+        body: JSON.stringify({
+          providerId: options.provider,
+          billingDomainId: options.domain || null,
+          model,
+          inputRate: options.input,
+          outputRate: options.output,
+          cacheReadRate: options.cacheRead
+        })
+      });
+      if (!response.ok) throw new Error(`Daemon returned HTTP ${response.status}`);
+      const data = (await response.json()) as { rate: CustomModelRate };
+      process.stdout.write(`Custom model rate configured for ${data.rate.model} (ID: ${data.rate.id})\n`);
+    }
+  );
+
+ratesCommand
+  .command('delete <id>')
+  .description('delete custom model rate by ID')
+  .action(async (id: string) => {
+    const home = resolve(program.opts<{ home: string }>().home);
+    const state = await requireDaemonState(home);
+    const response = await fetch(`${state.origin}/api/custom-rates/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${state.apiToken}`,
+        origin: state.origin
+      }
+    });
+    if (!response.ok) throw new Error(`Daemon returned HTTP ${response.status}`);
+    process.stdout.write(`Deleted custom model rate ${id}\n`);
   });
 
 program
