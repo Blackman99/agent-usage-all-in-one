@@ -1,11 +1,13 @@
 import { z } from 'zod';
 
 import type {
+  BillingDomain,
   Connector,
   CollectionRequest,
   ConnectorFailure,
   ConnectorSnapshot,
-  QuotaBucket
+  QuotaBucket,
+  UsageObservation
 } from '../../core/types.js';
 import type { TranscriptUsageClient } from '../../server/local-transcript-usage-client.js';
 
@@ -89,7 +91,7 @@ export class GrokBuildConnector implements Connector {
 
     return {
       provider: { id: this.id, displayName: this.displayName },
-      billingDomains: [grokBuildBillingDomain()],
+      billingDomains: grokBuildBillingDomains(history.usage),
       quotaBuckets,
       usage: history.usage,
       ...(history.usage.length > 0 && history.complete
@@ -120,6 +122,45 @@ export function grokBuildBillingDomain(): { id: string; displayName: string } {
     id: 'grok-build-subscription',
     displayName: 'Grok Build / SuperGrok shared pool'
   };
+}
+
+export function isGrokOfficialModel(model: string | null | undefined): boolean {
+  if (!model) return false;
+  const normalized = model.trim().toLowerCase();
+  if (normalized === 'grok') return true;
+  if (normalized.startsWith('grok-') || normalized.startsWith('grok/')) {
+    return true;
+  }
+  return false;
+}
+
+export function resolveGrokBillingDomain(
+  model: string | null | undefined,
+  customEndpoints?: Map<string, string>
+): string {
+  if (!model) return 'grok-build-subscription';
+  const normalized = model.trim().toLowerCase();
+  if (customEndpoints?.has(normalized)) {
+    return customEndpoints.get(normalized)!;
+  }
+  if (isGrokOfficialModel(model)) {
+    return 'grok-build-subscription';
+  }
+  return 'custom';
+}
+
+export function grokBuildBillingDomains(usage: UsageObservation[] = []): BillingDomain[] {
+  const primary = grokBuildBillingDomain();
+  const observed = [...new Set(usage.map((o) => o.billingDomainId))]
+    .filter((id) => id !== primary.id)
+    .sort();
+  return [
+    primary,
+    ...observed.map((id) => ({
+      id,
+      displayName: id === 'custom' ? 'Custom endpoints' : id
+    }))
+  ];
 }
 
 function mapBillingQuota(billing: GrokBuildBilling): QuotaBucket[] {

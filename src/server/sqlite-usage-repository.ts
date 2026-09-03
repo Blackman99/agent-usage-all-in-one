@@ -978,6 +978,7 @@ export class SqliteUsageRepository implements UsageRepository {
          model, usage_observation_id, priced_tokens, line_items_json, calculated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(provider_id, id) DO UPDATE SET
+         billing_domain_id = excluded.billing_domain_id,
          amount = excluded.amount,
          price_snapshot_rates_json = excluded.price_snapshot_rates_json,
          line_items_json = excluded.line_items_json,
@@ -1712,10 +1713,11 @@ export class SqliteUsageRepository implements UsageRepository {
 
     let providerTokenTotals = summaryDomain?.tokenTotals ?? emptyTotals;
     let providerTokenEvidence = summaryDomain?.tokenEvidence ?? emptyEvidence;
-    if (provider.id === 'dsh' && billingDomains.length > 1) {
+    if ((provider.id === 'dsh' || provider.id === 'grok') && billingDomains.length > 1) {
       const combinedTotals = zeroTokenTotals();
       const combinedEvidence = emptyTokenEvidence();
       for (const d of billingDomains) {
+        if (provider.id === 'grok' && d.id === 'xai-api') continue;
         combinedTotals.total += d.tokenTotals.total;
         combinedTotals.input += d.tokenTotals.input;
         combinedTotals.output += d.tokenTotals.output;
@@ -3380,7 +3382,9 @@ function allDomainHistories(providers: ProviderOverview[]): Array<{
       domain,
       history: domain.history,
       includedInHeadline:
-        provider.id === 'dsh' ? true : domain.id === provider.summaryBillingDomainId
+        provider.id === 'dsh' || (provider.id === 'grok' && domain.id !== 'xai-api')
+          ? true
+          : domain.id === provider.summaryBillingDomainId
     }))
   );
 }

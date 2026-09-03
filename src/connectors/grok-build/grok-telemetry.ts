@@ -15,7 +15,7 @@ import {
   readRecord,
   type OtlpPoint
 } from '../otlp.js';
-import { grokBuildBillingDomain } from './grok-build-connector.js';
+import { grokBuildBillingDomains, resolveGrokBillingDomain } from './grok-build-connector.js';
 
 interface UsageAggregate {
   timestamp: string;
@@ -105,7 +105,7 @@ export function parseGrokOtlpMetrics(payload: unknown, receivedAt: Date): Connec
   return snapshot(
     [...usage.entries()].map(([key, item]) => ({
       id: `grok-otel:${key}`,
-      billingDomainId: 'grok-build-subscription',
+      billingDomainId: resolveGrokBillingDomain(item.model),
       model: item.model,
       sessionId: item.sessionId,
       observedAt: item.timestamp,
@@ -159,7 +159,7 @@ export function parseGrokHeadlessResult(payload: unknown, receivedAt: Date): Con
       (entries.length === 1 ? aggregateTotal : null);
     return {
       id: `grok-headless:${sessionId ?? 'unknown-session'}:${requestId}:${model}`,
-      billingDomainId: 'grok-build-subscription',
+      billingDomainId: resolveGrokBillingDomain(model),
       model: model === 'unknown-model' ? null : model,
       sessionId: sessionId ?? null,
       observedAt: receivedAt.toISOString(),
@@ -200,7 +200,7 @@ function snapshot(
 ): ConnectorSnapshot {
   return {
     provider: { id: 'grok', displayName: 'Grok' },
-    billingDomains: [grokBuildBillingDomain()],
+    billingDomains: grokBuildBillingDomains(usage),
     quotaBuckets: [],
     usage,
     costs: [] as CostRecord[],

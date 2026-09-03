@@ -240,6 +240,68 @@ describe('GrokBuildConnector', () => {
     });
   });
 
+  it('separates custom endpoint models into a custom billing domain', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-grok-custom-'));
+    transcriptWorkspaces.push(workspace);
+    const update = JSON.stringify({
+      timestamp: Date.parse('2026-08-28T01:00:00.000Z') / 1000,
+      params: {
+        sessionId: 'session-custom',
+        _meta: { agentTimestampMs: Date.parse('2026-08-28T01:00:00.000Z') },
+        update: {
+          sessionUpdate: 'turn_completed',
+          prompt_id: 'prompt-custom',
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 200,
+            cachedReadTokens: 500,
+            cacheCreationTokens: 0,
+            reasoningTokens: 50,
+            modelUsage: {
+              'gemini-3.8-flash': {
+                inputTokens: 1000,
+                outputTokens: 200,
+                cachedReadTokens: 500,
+                cacheCreationTokens: 0,
+                reasoningTokens: 50
+              }
+            }
+          }
+        }
+      }
+    });
+    await writeFile(join(workspace, 'updates.jsonl'), `${update}\n`);
+
+    const snapshot = await new GrokBuildConnector({
+      billingClient: {
+        async readBilling() {
+          return billingFixture;
+        }
+      },
+      historyClient: new LocalTranscriptUsageClient({
+        provider: 'grok',
+        roots: [workspace],
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      }),
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.billingDomains).toEqual([
+      { id: 'grok-build-subscription', displayName: 'Grok Build / SuperGrok shared pool' },
+      { id: 'custom', displayName: 'Custom endpoints' }
+    ]);
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        billingDomainId: 'custom',
+        model: 'gemini-3.8-flash',
+        sessionId: 'session-custom',
+        inputTokens: 500,
+        outputTokens: 200,
+        cacheReadTokens: 500
+      })
+    ]);
+  });
+
   it('maps the provider-native shared weekly pool without inventing a five-hour window', async () => {
     const billingClient: GrokBuildBillingClient = {
       async readBilling() {

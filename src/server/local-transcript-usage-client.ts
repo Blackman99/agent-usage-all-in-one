@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline';
 
 import type { CollectionRequest, CostRecord, UsageObservation } from '../core/types.js';
 import { normalizeTokenObservation } from '../core/token-normalization.js';
+import { resolveGrokBillingDomain } from '../connectors/grok-build/grok-build-connector.js';
 import { readZstdFramedText } from './zstd-frames.js';
 
 export type LocalTranscriptProvider = 'claude-code' | 'codex' | 'grok' | 'dsh';
@@ -78,6 +79,38 @@ const DSH_COMPRESSED_SUFFIX = '.jsonl.zstd';
 /** Lines worth parsing in a dsh log: the header, a route change, or reported usage. */
 const DSH_LINE_HINTS = ['"usage"', '"request/context"', '"type":"session"'];
 
+export function loadGrokConfigCustomModels(configContent: string): Map<string, string> {
+  const customModels = new Map<string, string>();
+  const modelSections = [
+    ...configContent.matchAll(/\[model\.(?:"([^"]+)"|([a-zA-Z0-9_-]+))\]([\s\S]*?)(?=\n\[|$)/g)
+  ];
+  for (const m of modelSections) {
+    const key = m[1] || m[2];
+    const body = m[3];
+    const modelMatch = body.match(/model\s*=\s*"([^"]+)"/);
+    const baseUrlMatch = body.match(/base_url\s*=\s*"([^"]+)"/);
+    const providerMatch = body.match(/model_provider\s*=\s*"([^"]+)"/);
+    if (baseUrlMatch || providerMatch) {
+      const domain = providerMatch ? providerMatch[1].trim() : 'custom';
+      if (key) {
+        customModels.set(key.trim().toLowerCase(), domain);
+        const stripped = key
+          .trim()
+          .toLowerCase()
+          .replace(/-(high|medium|low)$/, '');
+        if (stripped) customModels.set(stripped, domain);
+      }
+      if (modelMatch) {
+        const mName = modelMatch[1].trim().toLowerCase();
+        customModels.set(mName, domain);
+        const stripped = mName.replace(/-(high|medium|low)$/, '');
+        if (stripped) customModels.set(stripped, domain);
+      }
+    }
+  }
+  return customModels;
+}
+
 export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   readonly #provider: LocalTranscriptProvider;
   readonly #roots: string[];
@@ -86,6 +119,8 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   readonly #cachePath?: string;
   readonly #fileCache = new Map<string, CachedTranscriptFile>();
   #cacheLoaded = false;
+  readonly #grokCustomModels = new Map<string, string>();
+  #grokCustomModelsLoaded = false;
 
   constructor(options: LocalTranscriptUsageClientOptions) {
     this.#provider = options.provider;
@@ -98,6 +133,20 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   async readUsage(
     options: CollectionRequest = { mode: 'incremental' }
   ): Promise<LocalTranscriptUsageResult> {
+    if (this.#provider === 'grok' && !this.#grokCustomModelsLoaded) {
+      this.#grokCustomModelsLoaded = true;
+      for (const root of this.#roots) {
+        try {
+          const configPath = join(dirname(root), 'config.toml');
+          const content = await readFile(configPath, 'utf8');
+          for (const [k, v] of loadGrokConfigCustomModels(content)) {
+            this.#grokCustomModels.set(k, v);
+          }
+        } catch {
+          // config.toml is optional
+        }
+      }
+    }
     await this.#loadCache();
     if (options.mode === 'hard-rebuild') this.#fileCache.clear();
     const cutoff = this.#clock().getTime() - this.#lookbackDays * 24 * 60 * 60 * 1000;
@@ -151,6 +200,22 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
     const cacheKey = stableId(file.path);
     const cached = this.#fileCache.get(cacheKey);
     if (cached && cached.size === file.size && cached.mtimeMs === file.mtimeMs) {
+      if (this.#provider === 'grok') {
+        const remapped = cached.records.map((r) => {
+          const expectedDomain = resolveGrokBillingDomain(
+            r.observation.model,
+            this.#grokCustomModels
+          );
+          if (r.observation.billingDomainId !== expectedDomain) {
+            return {
+              ...r,
+              observation: { ...r.observation, billingDomainId: expectedDomain }
+            };
+          }
+          return r;
+        });
+        return { records: remapped, complete: true, unsupportedFormat: false };
+      }
       return { records: cached.records, complete: true, unsupportedFormat: false };
     }
     const records: ParsedTranscriptRecord[] = [];
@@ -203,7 +268,9 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
         ? parseDshTranscriptLine(line, dshState)
         : [];
     }
-    return line.includes('"turn_completed"') ? parseGrokTranscriptLine(line) : [];
+    return line.includes('"turn_completed"')
+      ? parseGrokTranscriptLine(line, this.#grokCustomModels)
+      : [];
   }
 
   async #loadCache(): Promise<void> {
@@ -329,7 +396,10 @@ function nonNegativeSafeInteger(value: unknown): boolean {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function parseGrokTranscriptLine(line: string): ParsedTranscriptRecord[] {
+function parseGrokTranscriptLine(
+  line: string,
+  grokCustomModels?: Map<string, string>
+): ParsedTranscriptRecord[] {
   const record = parseObject(line);
   const params = asObject(record?.params);
   const update = asObject(params?.update);
@@ -393,11 +463,12 @@ function parseGrokTranscriptLine(line: string): ParsedTranscriptRecord[] {
       (remainingCost !== null && untickedTokens > 0
         ? remainingCost * (grokRecordedTokens(totals) / untickedTokens)
         : null);
+    const billingDomainId = resolveGrokBillingDomain(model, grokCustomModels);
     return {
       dedupeKey,
       observation: {
         id: `grok-transcript:${stableId(dedupeKey)}`,
-        billingDomainId: 'grok-build-subscription',
+        billingDomainId,
         model,
         sessionId,
         observedAt,
