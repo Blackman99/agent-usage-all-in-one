@@ -1,6 +1,6 @@
 # Specification: Custom Model Rates Support
 
-Status: landing
+Status: shipped
 
 ## Requirement
 添加支持，用方案三
