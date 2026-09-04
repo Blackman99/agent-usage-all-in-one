@@ -1308,6 +1308,14 @@
     return theme === 'dark' ? sources.dark : sources.light;
   }
 
+  function usageCardBillingDomains(
+    providerId: string,
+    domains: BillingDomainOverview[]
+  ): BillingDomainOverview[] {
+    if (providerId !== 'grok') return domains;
+    return domains.filter((domain) => domain.id === 'grok-build-subscription');
+  }
+
   function displayProviders(
     currentOverview: UsageOverview,
     connectionStatuses: ConnectorStatus[],
@@ -1318,12 +1326,15 @@
       .map((provider) => ({
         ...provider,
         // A Provider payload that arrives without billing domains must not take
-        // the whole dashboard down with it.
-        billingDomains: [...(provider.billingDomains ?? [])]
+        // the whole dashboard down with it. Grok's usage card is the
+        // subscription quota view; custom endpoints and xAI API stay in the
+        // workbench and Settings.
+        billingDomains: usageCardBillingDomains(provider.id, [...(provider.billingDomains ?? [])])
       }));
     for (const connector of connectionStatuses) {
       const { provider: targetProvider, billingDomain: targetDomain } = connector.target;
       if (targetProvider.id === 'opencode' || targetProvider.id === 'dsh') continue;
+      if (targetProvider.id === 'grok' && targetDomain.id !== 'grok-build-subscription') continue;
       let provider = providers.find((candidate) => candidate.id === targetProvider.id);
       if (!provider) {
         provider = emptyProvider(targetProvider.id, targetProvider.displayName);

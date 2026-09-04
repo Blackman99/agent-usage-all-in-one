@@ -12,9 +12,12 @@ The initial products are Codex, Claude Code, OpenCode, Grok, dsh, and Antigravit
 OpenCode Go quota and OpenCode local history use separate internal Provider
 identities: Go represents subscription allowance only, while local history
 represents every completed request made through OpenCode regardless of its
-underlying Provider. Grok is one top-level provider with two independent
-billing domains: Grok Build/SuperGrok subscriptions and the xAI API. Their usage
-and costs must never be merged. dsh (DeepSeek Harness) is one Provider covering
+underlying Provider. Grok is one top-level provider with independent billing
+domains: Grok Build/SuperGrok subscriptions, custom endpoints from Grok Build
+routes, and the xAI API. Their usage and costs must never be merged. The Grok
+usage card presents only the Grok Build/SuperGrok subscription quota; custom
+endpoints and xAI API remain separately identified in the workbench and
+Settings. dsh (DeepSeek Harness) is one Provider covering
 every profile of one dsh home, including terminal front ends composed on it,
 which keep no usage of their own; it reports Tokens and history with no quota
 window, and its billing domains are dsh provider route keys, with

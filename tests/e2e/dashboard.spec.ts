@@ -485,8 +485,11 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
   await expect(settingsButton).toBeFocused();
   const grokProvider = page.locator('.provider-card').filter({ hasText: 'Grok' });
-  await grokProvider.getByRole('tab', { name: 'xAI API' }).click();
-  const xaiApi = grokProvider.getByTestId('connector-xai-api');
+  await expect(grokProvider.getByRole('tab', { name: 'xAI API' })).toHaveCount(0);
+  await expect(grokProvider.getByRole('tab', { name: 'Custom endpoints' })).toHaveCount(0);
+  await expect(grokProvider.getByTestId('connector-xai-api')).toHaveCount(0);
+  await settingsButton.click();
+  const xaiApi = page.getByTestId('settings-connector-xai-api');
   await expect(xaiApi.getByText('Agent Usage Keychain')).toBeVisible();
   await expect(xaiApi.getByRole('button', { name: 'Connect' })).toBeDisabled();
   let xaiActionBody: unknown = null;
@@ -522,24 +525,14 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await xaiApi.getByRole('textbox', { name: /Management API key/ }).fill('browser-fake-key');
   await xaiApi.getByRole('button', { name: 'Connect' }).click();
   expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-fake-key' });
-  // The connected state rides on the card's status control: visible as its
-  // tooltip and title, and exposed to assistive technology as text.
   await expect(xaiApi.getByText('Connected')).toHaveCount(1);
-  await expect(xaiApi.getByRole('button', { name: 'Manage connection' })).toHaveAttribute(
-    'title',
-    /Connected/
-  );
   await expect(xaiApi).not.toContainText('browser-fake-key');
   await expect.poll(() => requestCounts.connectors).toBeGreaterThan(beforeAction.connectors);
   expect(requestCounts.overview).toBeGreaterThan(beforeAction.overview);
   expect(requestCounts.doctor).toBeGreaterThan(beforeAction.doctor);
 
-  await xaiApi.getByRole('button', { name: 'Manage connection' }).click();
-  const xaiSettings = page.getByTestId('settings-connector-xai-api');
-  await xaiSettings
-    .getByRole('textbox', { name: /Management API key/ })
-    .fill('browser-replacement-key');
-  await xaiSettings.getByRole('button', { name: 'Replace credential' }).click();
+  await xaiApi.getByRole('textbox', { name: /Management API key/ }).fill('browser-replacement-key');
+  await xaiApi.getByRole('button', { name: 'Replace credential' }).click();
   expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-replacement-key' });
   await page.getByRole('button', { name: 'Close settings' }).click();
 
@@ -1255,8 +1248,9 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   await expect(provider.getByText('Plan: SuperGrok Heavy')).toHaveCount(0);
   await expect(provider.getByText('5 hour', { exact: true })).toHaveCount(0);
   await expectProviderHasNoTokenDetail(provider);
-  await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
-  await provider.getByRole('tab', { name: 'xAI API' }).click();
+  await expect(provider.getByRole('tab', { name: 'xAI API' })).toHaveCount(0);
+  await expect(provider.getByRole('tab', { name: 'Custom endpoints' })).toHaveCount(0);
+  await expect(provider.getByRole('tab', { name: 'Build / SuperGrok' })).toHaveCount(0);
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
   await expect(provider.locator('.degraded')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -1264,8 +1258,6 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   await expect(page.getByTestId('settings-diagnostic-grok')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expectProviderHasNoTokenDetail(provider);
-  await expect(provider.getByText('Weekly limit')).toHaveCount(0);
-  await provider.getByRole('tab', { name: 'Build / SuperGrok' }).click();
   await expect(provider.getByText('Weekly limit')).toBeVisible();
 });
 
@@ -2447,12 +2439,9 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   await expect(agentUsageTab).toHaveAttribute('aria-selected', 'true');
 
   const grok = page.locator('.provider-card').filter({ hasText: 'Grok' });
-  const buildTab = grok.getByRole('tab', { name: 'Build / SuperGrok' });
-  const apiTab = grok.getByRole('tab', { name: 'xAI API' });
-  await buildTab.focus();
-  await buildTab.press('ArrowRight');
-  await expect(apiTab).toBeFocused();
-  await expect(apiTab).toHaveAttribute('aria-selected', 'true');
+  await expect(grok.getByRole('tab', { name: 'xAI API' })).toHaveCount(0);
+  await expect(grok.getByRole('tab', { name: 'Custom endpoints' })).toHaveCount(0);
+  await expect(grok.getByRole('tab')).toHaveCount(0);
 
   const settingsButton = page.getByRole('button', { name: 'Settings', exact: true });
   await settingsButton.focus();
@@ -3378,6 +3367,64 @@ const grokBillingDomains = [
           totalDerivations: ['categorized'],
           timePrecisions: ['billing-period'],
           usageScopes: ['account-wide'],
+          aggregationTemporalities: ['delta']
+        }
+      )
+    )
+  },
+  {
+    id: 'custom',
+    displayName: 'Custom endpoints',
+    freshness: { status: 'fresh', lastSuccessAt: '2026-08-28T01:56:00.000Z' },
+    health: { status: 'healthy', errorCode: null, message: null, recovery: null },
+    coverage: {
+      quota: 'unavailable',
+      tokens: 'partial',
+      actualCost: 'unavailable',
+      history: 'partial'
+    },
+    quotaBuckets: [],
+    tokenTotals: {
+      total: 1200,
+      input: 700,
+      output: 500,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0
+    },
+    tokenEvidence: tokenEvidenceFixture(
+      { total: 1200 },
+      {
+        totalDerivations: ['categorized'],
+        timePrecisions: ['event'],
+        usageScopes: ['this-mac'],
+        aggregationTemporalities: ['delta']
+      }
+    ),
+    tokenAuthority: 'local-observation',
+    costs: [],
+    balances: [],
+    invoices: [],
+    forecasts: [],
+    forecastCoverage: 'insufficient',
+    history: tokenHistoryFixture(
+      {
+        total: 1200,
+        input: 700,
+        output: 500,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0
+      },
+      ['local-observation'],
+      '2026-08-28T01:56:00.000Z',
+      [],
+      tokenEvidenceFixture(
+        { total: 1200 },
+        {
+          totalDerivations: ['categorized'],
+          timePrecisions: ['event'],
+          usageScopes: ['this-mac'],
           aggregationTemporalities: ['delta']
         }
       )
