@@ -9,6 +9,7 @@ const projectRoot = resolve(import.meta.dirname, '..');
 const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-package-smoke-'));
 const packageDirectory = join(workspace, 'package');
 const installDirectory = join(workspace, 'install');
+const npmCacheDirectory = join(workspace, 'npm-cache');
 const applicationHome = join(workspace, 'home');
 let daemonPid = null;
 
@@ -21,9 +22,22 @@ try {
   const archiveName = (await readdir(packageDirectory)).find((name) => name.endsWith('.tgz'));
   if (!archiveName) throw new Error('pnpm pack did not create an archive');
   const archivePath = join(packageDirectory, archiveName);
-  await execute('npm', ['install', '--prefix', installDirectory, archivePath], {
-    timeout: 60_000
-  });
+  await execute(
+    'npm',
+    [
+      'install',
+      '--prefix',
+      installDirectory,
+      '--cache',
+      npmCacheDirectory,
+      '--no-audit',
+      '--no-fund',
+      archivePath
+    ],
+    {
+      timeout: 60_000
+    }
+  );
 
   const executable = join(installDirectory, 'node_modules', '.bin', 'agent-usage');
   await access(executable);
@@ -94,9 +108,22 @@ try {
   await waitForExit(daemonPid);
   daemonPid = null;
 
-  await execute('npm', ['uninstall', '--prefix', installDirectory, 'agent-usage-all-in-one'], {
-    timeout: 30_000
-  });
+  await execute(
+    'npm',
+    [
+      'uninstall',
+      '--prefix',
+      installDirectory,
+      '--cache',
+      npmCacheDirectory,
+      '--no-audit',
+      '--no-fund',
+      'agent-usage-all-in-one'
+    ],
+    {
+      timeout: 60_000
+    }
+  );
   let executableStillExists = true;
   try {
     await access(executable);
