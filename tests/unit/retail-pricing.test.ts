@@ -322,6 +322,140 @@ describe('API retail-equivalent pricing', () => {
     });
   });
 
+  it('prices current Codex transcript model gpt-6-astra at standard rates', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'gpt-6-astra-event',
+          model: 'gpt-6-astra',
+          observedAt: '2026-09-04T12:00:00.000Z',
+          inputTokens: 100_000,
+          outputTokens: 20_000,
+          cacheReadTokens: 10_000
+        }),
+        {
+          providerId: 'codex',
+          domainId: 'subscription',
+          domainName: 'Codex subscription'
+        }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toMatchObject({ status: 'priced', reason: null });
+    expect(result.costs[0]).toMatchObject({
+      amount: 2.01,
+      model: 'gpt-6-astra',
+      priceSnapshot: {
+        id: 'openai-gpt-6-astra-standard-2026-09-03',
+        canonicalModel: 'gpt-6-astra',
+        contextTier: 'standard',
+        ratesPerMillion: {
+          input: 10,
+          output: 50,
+          reasoning: 50,
+          'cache-read': 1,
+          'cache-write': 12.5
+        }
+      }
+    });
+  });
+
+  it.each([
+    'gpt-6-astra',
+    'GPT-6 Astra',
+    'gpt-6-astra-2026-09-03',
+    'gpt-6-astra-20260903',
+    'astra'
+  ])('prices gpt-6-astra aliases (%s)', (alias) => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: `astra-alias-${alias}`,
+          model: alias,
+          observedAt: '2026-09-04T12:00:00.000Z',
+          inputTokens: 100_000,
+          outputTokens: 20_000,
+          cacheReadTokens: 10_000
+        }),
+        {
+          providerId: 'codex',
+          domainId: 'subscription',
+          domainName: 'Codex subscription'
+        }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toMatchObject({ status: 'priced', reason: null });
+    expect(result.costs[0]?.amount).toBe(2.01);
+    expect(result.costs[0]?.priceSnapshot?.canonicalModel).toBe('gpt-6-astra');
+  });
+
+  it('selects the long-context Codex tier for gpt-6-astra when prompt tokens exceed 272K', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'astra-long',
+          model: 'gpt-6-astra',
+          observedAt: '2026-09-04T12:00:00.000Z',
+          inputTokens: 300_000,
+          outputTokens: 20_000,
+          cacheReadTokens: 10_000
+        }),
+        {
+          providerId: 'codex',
+          domainId: 'subscription',
+          domainName: 'Codex subscription'
+        }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toMatchObject({ status: 'priced', reason: null });
+    expect(result.costs[0]).toMatchObject({
+      amount: 7.52,
+      model: 'gpt-6-astra',
+      priceSnapshot: {
+        id: 'openai-gpt-6-astra-prompt-above-272k-2026-09-03',
+        canonicalModel: 'gpt-6-astra',
+        contextTier: 'prompt-above-272k',
+        ratesPerMillion: {
+          input: 20,
+          output: 75,
+          reasoning: 75,
+          'cache-read': 2,
+          'cache-write': 25
+        }
+      }
+    });
+  });
+
+  it('leaves gpt-6-astra unpriced before its 2026-09-03 release date', () => {
+    const result = deriveRetailEquivalentCosts(
+      snapshot(
+        observation({
+          id: 'astra-early',
+          model: 'gpt-6-astra',
+          observedAt: '2026-09-02T23:59:59.000Z'
+        }),
+        {
+          providerId: 'codex',
+          domainId: 'subscription',
+          domainName: 'Codex subscription'
+        }
+      ),
+      OFFICIAL_PRICING_CATALOG
+    );
+
+    expect(result.decisions[0]).toMatchObject({
+      status: 'unavailable',
+      reason: 'price-not-effective',
+      pricedTokens: 0
+    });
+    expect(result.costs).toHaveLength(0);
+  });
+
   it('selects xAI short and long context tiers only from event-level prompt evidence', () => {
     const short = deriveRetailEquivalentCosts(
       snapshot(observation({ model: 'grok-4.6', billingDomainId: 'xai-api' }), {
@@ -650,6 +784,7 @@ describe('API retail-equivalent pricing', () => {
   it.each([
     ['xai/grok-4.6', 0.325],
     ['openai/gpt-5.6-sol', 0.804],
+    ['openai/gpt-6-astra', 2.01],
     ['anthropic/claude-opus-5', 1.005],
     ['opencode-go/glm-5.2', 0.2306]
   ])(
@@ -657,7 +792,12 @@ describe('API retail-equivalent pricing', () => {
     (model, amount) => {
       const result = deriveRetailEquivalentCosts(
         snapshot(
-          observation({ id: `opencode:${model}`, model, billingDomainId: 'local-history' }),
+          observation({
+            id: `opencode:${model}`,
+            model,
+            billingDomainId: 'local-history',
+            observedAt: '2026-09-04T12:00:00.000Z'
+          }),
           {
             providerId: 'opencode',
             domainId: 'local-history',

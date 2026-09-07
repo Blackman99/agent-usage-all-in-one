@@ -225,6 +225,11 @@ const OPENAI_GPT_56_SOURCE = {
   url: 'https://openai.com/index/gpt-5-6/',
   retrievedAt: '2026-08-28'
 };
+const OPENAI_GPT_6_ASTRA_SOURCE = {
+  title: 'OpenAI GPT-6 Astra pricing',
+  url: 'https://developers.openai.com/api/docs/models/gpt-6-astra',
+  retrievedAt: '2026-09-05'
+};
 const OPEN_CODE_GO_SOURCE_PATH = 'packages/web/src/content/docs/go.mdx';
 const openCodeHistory = (commit: string, effectiveFrom: string) => ({
   effectiveFrom,
@@ -420,6 +425,11 @@ const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
       ['2026-07-09T00:00:00.000Z', '2026-07-30T00:00:00.000Z', 1, 6],
       ['2026-07-30T00:00:00.000Z', null, 0.2, 1.2]
     ]),
+    ...openAiGpt6AstraEntries(
+      'gpt-6-astra',
+      [['2026-09-03T00:00:00.000Z', null, 10, 50]],
+      ['GPT-6 Astra', 'gpt-6-astra-2026-09-03', 'gpt-6-astra-20260903', 'astra']
+    ),
     ...OPEN_CODE_FLAT_MODELS.map(([model, input, output, cacheRead, cacheWrite]) =>
       openCodeGoEntry(model, 'standard', input, output, cacheRead, cacheWrite ?? null, {
         kind: 'fixed'
@@ -625,7 +635,7 @@ const DIRECT_OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
 };
 
 export const OFFICIAL_PRICING_CATALOG: RetailPriceCatalog = {
-  version: '2026-09-03-fable-5.1',
+  version: '2026-09-05-gpt-6-astra',
 
   entries: [
     ...DIRECT_OFFICIAL_PRICING_CATALOG.entries,
@@ -640,23 +650,27 @@ type OpenAiPricePeriod = [
   output: number
 ];
 
-function openAiGpt56Entries(
-  model: string,
-  periods: OpenAiPricePeriod[]
-): RetailPriceCatalogEntry[] {
-  return periods.flatMap(([effectiveFrom, effectiveUntil, input, output]) => {
+function openAiCodexEntries(options: {
+  model: string;
+  aliases?: string[];
+  periods: OpenAiPricePeriod[];
+  priceVersionPrefix: string;
+  source: { title: string; url: string; retrievedAt: string };
+}): RetailPriceCatalogEntry[] {
+  const aliases = options.aliases ?? [];
+  return options.periods.flatMap(([effectiveFrom, effectiveUntil, input, output]) => {
     const versionDate = effectiveFrom.slice(0, 10);
     const entry = (tier: 'standard' | 'prompt-above-272k'): RetailPriceCatalogEntry => {
       const long = tier === 'prompt-above-272k';
       const tierInput = long ? input * 2 : input;
       const tierOutput = long ? output * 1.5 : output;
       return {
-        id: `openai-${model}-${tier}-${versionDate}`,
-        priceVersion: `openai-gpt-5.6-${versionDate}`,
+        id: `openai-${options.model}-${tier}-${versionDate}`,
+        priceVersion: `${options.priceVersionPrefix}-${versionDate}`,
         providerId: 'codex',
         billingDomainId: 'subscription',
-        canonicalModel: model,
-        aliases: [],
+        canonicalModel: options.model,
+        aliases,
         currency: 'USD',
         effectiveFrom,
         effectiveUntil,
@@ -671,10 +685,36 @@ function openAiGpt56Entries(
           'cache-read': tierInput * 0.1,
           'cache-write': tierInput * 1.25
         },
-        source: OPENAI_GPT_56_SOURCE
+        source: options.source
       };
     };
     return [entry('standard'), entry('prompt-above-272k')];
+  });
+}
+
+function openAiGpt56Entries(
+  model: string,
+  periods: OpenAiPricePeriod[]
+): RetailPriceCatalogEntry[] {
+  return openAiCodexEntries({
+    model,
+    periods,
+    priceVersionPrefix: 'openai-gpt-5.6',
+    source: OPENAI_GPT_56_SOURCE
+  });
+}
+
+function openAiGpt6AstraEntries(
+  model: string,
+  periods: OpenAiPricePeriod[],
+  aliases: string[] = []
+): RetailPriceCatalogEntry[] {
+  return openAiCodexEntries({
+    model,
+    aliases,
+    periods,
+    priceVersionPrefix: 'openai-gpt-6-astra',
+    source: OPENAI_GPT_6_ASTRA_SOURCE
   });
 }
 
