@@ -124,6 +124,37 @@ describe('monitoring', () => {
     repository.close();
   });
 
+  it('handles quota utilization exceeding 100% without negative remaining percent', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-overage-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const notifier = new RecordingNotifier();
+    const used = 101;
+    const connector: Connector = {
+      id: 'quota',
+      displayName: 'Quota',
+      async collect() {
+        return quotaSnapshot(new Date('2026-08-28T00:00:00.000Z'), used);
+      }
+    };
+    const application = new UsageApplication({
+      repository,
+      connectors: [connector],
+      clock: () => new Date('2026-08-28T00:00:00.000Z'),
+      notifier,
+      connectorPolicies: { quota: { minimumIntervalMs: 0, timeoutMs: 5_000 } }
+    });
+    await application.updateMonitoringSettings({ notificationsEnabled: true });
+    await application.refresh();
+
+    expect(notifier.events).toHaveLength(1);
+    expect(notifier.events[0]).toMatchObject({
+      kind: 'low-quota-5',
+      message: '5 hour has 0% remaining.'
+    });
+    repository.close();
+  });
+
   it('runs the scheduler only when background collection is enabled', async () => {
     let refreshes = 0;
     let enabled = false;

@@ -18,6 +18,7 @@
     type QuotaTimelineProvider,
     type QuotaTimelineWindow
   } from '$lib/quota-timeline.js';
+  import { clampPercent } from '$core/quota-normalization.js';
   import { trendSegmentColor } from '$lib/usage-trend.js';
 
   const THEME_EVENT = 'agent-usage:theme-changed';
@@ -174,10 +175,11 @@
         formatter(parameters: unknown) {
           const entry = tooltipWindow(parameters);
           if (!entry) return '';
+          const clampedUsed = clampPercent(entry.usedPercent);
           const usage =
-            entry.usedPercent === null
+            clampedUsed === null
               ? ''
-              : `<br/><strong>${formatNumber(entry.usedPercent)}% ${escapeHtml(t('used'))}</strong>`;
+              : `<br/><strong>${formatNumber(clampedUsed)}% ${escapeHtml(t('used'))}</strong>`;
           const observed = entry.observedAt ? formatInstant(Date.parse(entry.observedAt)) : '—';
           return `<strong>${escapeHtml(entry.providerDisplayName)}</strong> · ${escapeHtml(
             entry.billingDomainDisplayName
@@ -285,7 +287,7 @@
                 style: {
                   x: start[0] + 8,
                   y: start[1],
-                  text: `${formatNumber(chartEntry.window.usedPercent)}% · ${formatInstant(chartEntry.window.endMs)}`,
+                  text: `${formatNumber(clampPercent(chartEntry.window.usedPercent))}% · ${formatInstant(chartEntry.window.endMs)}`,
                   fill: theme.text,
                   font: '600 10px Inter, system-ui, sans-serif',
                   verticalAlign: 'middle',
@@ -491,11 +493,13 @@
             <tr
               ><td>{lane.providerDisplayName}</td><td>{lane.billingDomainDisplayName}</td><td
                 >{lane.selectedLabel}</td
-              ><td>{lane.usedPercent === null ? '—' : `${formatNumber(lane.usedPercent)}%`}</td><td
-                >{formatInstant(Date.parse(lane.resetsAt))}</td
-              ><td>{authorityLabel(lane.authority)}</td><td
-                >{lane.observedAt ? formatInstant(Date.parse(lane.observedAt)) : '—'}</td
-              ></tr
+              ><td
+                >{lane.usedPercent === null
+                  ? '—'
+                  : `${formatNumber(clampPercent(lane.usedPercent))}%`}</td
+              ><td>{formatInstant(Date.parse(lane.resetsAt))}</td><td
+                >{authorityLabel(lane.authority)}</td
+              ><td>{lane.observedAt ? formatInstant(Date.parse(lane.observedAt)) : '—'}</td></tr
             >
           {/each}
         </tbody>

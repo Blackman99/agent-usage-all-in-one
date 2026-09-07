@@ -19,6 +19,7 @@
     RetentionStatus,
     UsageOverview
   } from '$core/types.js';
+  import { clampPercent } from '$core/quota-normalization.js';
   import type {
     ConfigureConnectorInput,
     ConnectorSetupState,
@@ -1924,29 +1925,32 @@
                   {/if}
                   <div class="quotas">
                     {#each displayQuotaBuckets(domain.quotaBuckets) as bucket (bucket.id)}
+                      {@const normalizedUsed = clampPercent(bucket.usedPercent)}
                       <div class="quota-row">
                         <div class="quota-copy">
                           <strong>{bucket.label}</strong>
-                          <span>{bucket.usedPercent ?? '—'}% {t('used')}</span>
+                          <span
+                            >{normalizedUsed !== null ? formatNumber(normalizedUsed) : '—'}% {t(
+                              'used'
+                            )}</span
+                          >
                         </div>
                         <div
                           class="progress"
-                          class:progress-warning={(bucket.usedPercent ?? 0) >= 70 &&
-                            (bucket.usedPercent ?? 0) < 90}
-                          class:progress-critical={(bucket.usedPercent ?? 0) >= 90}
+                          class:progress-warning={(normalizedUsed ?? 0) >= 70 &&
+                            (normalizedUsed ?? 0) < 90}
+                          class:progress-critical={(normalizedUsed ?? 0) >= 90}
                           role="progressbar"
                           aria-label={bucket.label}
                           aria-valuemin="0"
                           aria-valuemax="100"
-                          aria-valuenow={bucket.usedPercent ?? undefined}
-                          aria-valuetext={bucket.usedPercent === null
+                          aria-valuenow={normalizedUsed ?? undefined}
+                          aria-valuetext={normalizedUsed === null
                             ? t('notAvailable')
-                            : `${formatNumber(bucket.usedPercent)}% ${t('used')}`}
+                            : `${formatNumber(normalizedUsed)}% ${t('used')}`}
                           aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
                         >
-                          <span
-                            style={`width: ${Math.min(100, Math.max(0, bucket.usedPercent ?? 0))}%`}
-                          ></span>
+                          <span style={`width: ${normalizedUsed ?? 0}%`}></span>
                         </div>
                         <span hidden id={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}>
                           {t('source')}: {authorityLabel(bucket.authority)} ·

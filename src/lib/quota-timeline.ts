@@ -1,4 +1,5 @@
 import type { DataAuthority, QuotaBucket } from '$core/types.js';
+import { clampPercent } from '$core/quota-normalization.js';
 
 // The product question follows CLIProxyAPI Management Center's MIT-licensed
 // quota timeline, while this projection is implemented for Agent Usage's
@@ -104,7 +105,7 @@ export function buildQuotaTimeline(
         billingDomainDisplayName: provider.billingDomainDisplayName,
         selectedLabel: selected.bucket.label,
         durationMinutes: selected.durationMinutes,
-        usedPercent: selected.bucket.usedPercent,
+        usedPercent: clampPercent(selected.bucket.usedPercent),
         resetsAt: selected.bucket.resetsAt,
         authority: selected.bucket.authority,
         observedAt: selected.bucket.observedAt ?? provider.observedAt
@@ -280,7 +281,7 @@ function projectLane(
         visibleStartMs,
         visibleEndMs,
         state,
-        usedPercent: isObservedWindow ? lane.usedPercent : null,
+        usedPercent: isObservedWindow ? clampPercent(lane.usedPercent) : null,
         authority: isObservedWindow ? lane.authority : 'estimate',
         observedAt: lane.observedAt
       });

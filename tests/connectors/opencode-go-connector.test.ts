@@ -83,6 +83,32 @@ describe('OpenCodeGoConnector', () => {
     });
   });
 
+  it('clamps quota bucket usedPercent between 0 and 100', async () => {
+    const accountClient: OpenCodeGoAccountClient = {
+      async readUsage() {
+        return {
+          ...goUsageFixture,
+          usage: {
+            ...goUsageFixture.usage,
+            rolling: { ...goUsageFixture.usage.rolling, percent: 110 },
+            weekly: { ...goUsageFixture.usage.weekly, percent: -5 }
+          }
+        };
+      }
+    };
+    const connector = new OpenCodeGoConnector({
+      accountClient,
+      localHistoryClient: {
+        async readHistory() {
+          return [];
+        }
+      }
+    });
+    const snapshot = await connector.collect();
+    expect(snapshot.quotaBuckets.find((b) => b.id === 'rolling')?.usedPercent).toBe(100);
+    expect(snapshot.quotaBuckets.find((b) => b.id === 'weekly')?.usedPercent).toBe(0);
+  });
+
   it('retires legacy Go-attributed local history when account quota is unavailable', async () => {
     const accountClient: OpenCodeGoAccountClient = {
       async readUsage() {

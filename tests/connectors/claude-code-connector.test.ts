@@ -117,6 +117,24 @@ Resets Aug 31 at 11:59pm (Asia/Shanghai)`,
     );
   });
 
+  it('clamps usedPercent to 100 when Claude Code reports utilization exceeding 100%', () => {
+    const output = `
+Settings  Status   Config   Usage   Stats
+Current session
+101% 101% used
+Resets 2:50pm (Asia/Shanghai)
+Current week (all models)
+52% 52% used
+Resets Sep 8 at 12am (Asia/Shanghai)
+Current week (Fable)
+94% 94% used
+Resets Sep 8 at 12am (Asia/Shanghai)
+Esc to cancel
+`;
+    const quota = parseClaudeUsageScreen(output, new Date('2026-09-07T12:00:00.000Z'));
+    expect(quota.find((b) => b.id === 'current-session')?.usedPercent).toBe(100);
+  });
+
   it('runs only the official screen-reader usage command and never requests OAuth material', async () => {
     const process = new FakeClaudeUsageProcess();
     const client = new ScreenReaderClaudeQuotaClient({

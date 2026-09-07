@@ -655,6 +655,34 @@ describe('CodexConnector', () => {
     expect(snapshot.quotaBuckets).toHaveLength(2);
     expect(snapshot.usage).toEqual([]);
   });
+
+  it('clamps quota bucket usedPercent between 0 and 100', async () => {
+    const client: CodexAccountClient = {
+      async readAccount() {
+        return {
+          ...accountPayload,
+          rateLimits: {
+            rateLimits: {
+              ...accountPayload.rateLimits!.rateLimits!,
+              primary: {
+                ...accountPayload.rateLimits!.rateLimits!.primary!,
+                usedPercent: 125
+              },
+              secondary: {
+                ...accountPayload.rateLimits!.rateLimits!.secondary!,
+                usedPercent: -10
+              }
+            },
+            rateLimitsByLimitId: null
+          }
+        };
+      }
+    };
+    const connector = new CodexConnector(client, () => new Date('2026-08-28T02:00:00.000Z'));
+    const snapshot = await connector.collect();
+    expect(snapshot.quotaBuckets[0].usedPercent).toBe(100);
+    expect(snapshot.quotaBuckets[1].usedPercent).toBe(0);
+  });
 });
 
 describe('StdioCodexAccountClient', () => {

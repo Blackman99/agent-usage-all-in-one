@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
+import { clampPercent } from '../../core/quota-normalization.js';
 import type { ClaudeQuotaClient } from './claude-code-connector.js';
 
 export interface ParsedClaudeQuota {
@@ -242,7 +243,7 @@ export function parseClaudeUsageScreen(text: string, now: Date): ParsedClaudeQuo
     quotas.set(id, {
       id,
       label: displayLabel(heading),
-      usedPercent: Number(match[1]),
+      usedPercent: clampPercent(Number(match[1])),
       windowDurationMinutes: windowDurationMinutes(heading),
       resetsAt: resetLine ? parseReset(resetLine, now) : null
     });

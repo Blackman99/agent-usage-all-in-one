@@ -4,6 +4,7 @@ import type {
   ConnectorSnapshot,
   QuotaBucket
 } from '../../core/types.js';
+import { clampPercent } from '../../core/quota-normalization.js';
 import type { OpenCodeGoUsageResponse } from './official-opencode-go-client.js';
 
 export interface OpenCodeGoAccountClient {
@@ -89,7 +90,7 @@ function mapQuota(response: OpenCodeGoUsageResponse): QuotaBucket[] {
     id,
     billingDomainId: 'go-subscription',
     label: LIMITS[id].label,
-    usedPercent: response.usage[id].percent,
+    usedPercent: clampPercent(response.usage[id].percent),
     windowDurationMinutes: LIMITS[id].windowDurationMinutes,
     resetsAt: response.usage[id].resetsAt,
     authority: 'official-account',

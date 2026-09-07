@@ -9,6 +9,7 @@ import type {
   UsageObservation
 } from '../../core/types.js';
 import type { TranscriptUsageClient } from '../../server/local-transcript-usage-client.js';
+import { clampPercent } from '../../core/quota-normalization.js';
 import { normalizeTokenObservation } from '../../core/token-normalization.js';
 
 const nullableNumeric = z.union([z.number(), z.string()]).transform(Number).nullable();
@@ -253,7 +254,7 @@ function mapQuotaBuckets(response: CodexRateLimitsResponse): QuotaBucket[] {
         id: `${key}:${windowName}`,
         billingDomainId: 'subscription',
         label: multipleLimits ? `${baseLabel} · ${windowLabel}` : windowLabel,
-        usedPercent: window.usedPercent,
+        usedPercent: clampPercent(window.usedPercent),
         windowDurationMinutes: window.windowDurationMins,
         resetsAt: window.resetsAt === null ? null : new Date(window.resetsAt * 1000).toISOString(),
         authority: 'official-account'

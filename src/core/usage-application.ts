@@ -672,7 +672,7 @@ export class UsageApplication {
           });
         }
         this.#repository.saveNotificationState(usedKey, String(bucket.usedPercent));
-        const remaining = 100 - bucket.usedPercent;
+        const remaining = Math.max(0, 100 - bucket.usedPercent);
         const level = remaining <= 5 ? '5' : remaining <= 20 ? '20' : 'normal';
         const levelKey = `quota-level:${prefix}`;
         const priorLevel = this.#repository.getNotificationState(levelKey) ?? 'normal';

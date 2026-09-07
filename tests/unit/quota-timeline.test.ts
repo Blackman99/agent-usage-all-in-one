@@ -100,6 +100,22 @@ describe('quota timeline', () => {
       'xAI API'
     ]);
   });
+
+  it('clamps usedPercent within [0, 100] for lanes and observed windows', () => {
+    const provider: QuotaTimelineProvider = {
+      providerId: 'claude-code',
+      providerDisplayName: 'Claude Code',
+      billingDomainId: 'subscription',
+      billingDomainDisplayName: 'Subscription',
+      observedAt: '2026-08-29T12:00:00.000Z',
+      quotaBuckets: [bucket('claude:overshot', '5 hour', 101, 300, '2026-08-29T15:00:00.000Z')]
+    };
+
+    const timeline = buildQuotaTimeline([provider], 'session', 0, now);
+    expect(timeline.lanes[0].usedPercent).toBe(100);
+    const currentWindow = timeline.windows.find((w) => w.state === 'current');
+    expect(currentWindow?.usedPercent).toBe(100);
+  });
 });
 
 const providers: QuotaTimelineProvider[] = [

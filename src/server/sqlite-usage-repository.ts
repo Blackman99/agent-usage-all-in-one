@@ -46,6 +46,7 @@ import type {
   UsageRepository
 } from '../core/types.js';
 import { normalizeTokenObservation } from '../core/token-normalization.js';
+import { clampPercent } from '../core/quota-normalization.js';
 import {
   billingPeriodContaining,
   buildWorkbenchPlanValue,
@@ -593,12 +594,13 @@ export class SqliteUsageRepository implements UsageRepository {
         }
       }
       for (const bucket of snapshot.quotaBuckets) {
+        const clampedUsedPercent = clampPercent(bucket.usedPercent);
         quotaStatement.run(
           snapshot.provider.id,
           bucket.id,
           bucket.billingDomainId,
           bucket.label,
-          bucket.usedPercent,
+          clampedUsedPercent,
           bucket.windowDurationMinutes ?? null,
           bucket.resetsAt,
           bucket.authority,
@@ -623,13 +625,14 @@ export class SqliteUsageRepository implements UsageRepository {
            authority = excluded.authority`
       );
       for (const bucket of snapshot.quotaBuckets) {
-        if (bucket.usedPercent === null) continue;
+        const clampedUsedPercent = clampPercent(bucket.usedPercent);
+        if (clampedUsedPercent === null) continue;
         quotaObservationStatement.run(
           snapshot.provider.id,
           bucket.id,
           bucket.billingDomainId,
           bucket.label,
-          bucket.usedPercent,
+          clampedUsedPercent,
           bucket.resetsAt,
           bucket.authority,
           snapshot.observedAt
@@ -2827,7 +2830,7 @@ function mapQuotaRow(row: QuotaRow): QuotaBucket {
     id: row.id,
     billingDomainId: row.billing_domain_id,
     label: row.label,
-    usedPercent: row.used_percent,
+    usedPercent: clampPercent(row.used_percent),
     windowDurationMinutes: row.window_duration_minutes,
     resetsAt: row.resets_at,
     authority: row.authority,
@@ -4214,7 +4217,10 @@ function buildRiskSummary(providers: ProviderOverview[]): UsageOverview['riskSum
         const limitingBucket = [...buckets].sort(
           (left, right) => right.usedPercent - left.usedPercent || left.id.localeCompare(right.id)
         )[0];
-        const remaining = Math.min(...buckets.map((bucket) => 100 - bucket.usedPercent));
+        const remaining = Math.max(
+          0,
+          Math.min(...buckets.map((bucket) => 100 - bucket.usedPercent))
+        );
         const predictsFailure = domain.forecasts.some((forecast) => !forecast.willLastUntilReset);
         const predictsSuccess =
           domain.forecasts.length > 0 &&

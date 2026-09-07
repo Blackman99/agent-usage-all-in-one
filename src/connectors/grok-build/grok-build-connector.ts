@@ -10,6 +10,7 @@ import type {
   UsageObservation
 } from '../../core/types.js';
 import type { TranscriptUsageClient } from '../../server/local-transcript-usage-client.js';
+import { clampPercent } from '../../core/quota-normalization.js';
 
 const centSchema = z.object({ val: z.number().default(0) }).passthrough();
 const usagePeriodSchema = z
@@ -167,8 +168,9 @@ function mapBillingQuota(billing: GrokBuildBilling): QuotaBucket[] {
   const config = billing.config;
   if (!config) return [];
 
-  const usedPercent =
-    config.creditUsagePercent ?? derivePercent(config.used?.val, config.monthlyLimit?.val);
+  const usedPercent = clampPercent(
+    config.creditUsagePercent ?? derivePercent(config.used?.val, config.monthlyLimit?.val)
+  );
   if (usedPercent === null) return [];
 
   const periodType = config.currentPeriod?.type;

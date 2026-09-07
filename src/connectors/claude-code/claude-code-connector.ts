@@ -5,6 +5,7 @@ import type {
   ConnectorSnapshot,
   QuotaBucket
 } from '../../core/types.js';
+import { clampPercent } from '../../core/quota-normalization.js';
 import type { ParsedClaudeQuota } from './claude-usage-screen-client.js';
 import type { TranscriptUsageClient } from '../../server/local-transcript-usage-client.js';
 
@@ -78,7 +79,7 @@ function mapQuota(quota: ParsedClaudeQuota): QuotaBucket {
     id: quota.id,
     billingDomainId: 'subscription',
     label: quota.label,
-    usedPercent: quota.usedPercent,
+    usedPercent: clampPercent(quota.usedPercent),
     windowDurationMinutes: quota.windowDurationMinutes,
     resetsAt: quota.resetsAt,
     authority: 'official-client',

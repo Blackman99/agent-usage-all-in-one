@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -81,6 +82,43 @@ describe('quota bucket lifecycle', () => {
       ['gemini-5h', 'gemini-weekly', 'official-weekly'].sort()
     );
     migrated.close();
+  });
+
+  it('clamps usedPercent to [0, 100] when saving snapshots and reading legacy database records', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-quota-clamp-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+
+    repository.saveSnapshot(
+      snapshot('2026-09-02T11:00:00.000Z', [
+        bucket('overshot-5h', '5 hour', 105, 'official-client'),
+        bucket('negative-weekly', 'Week', -10, 'official-client')
+      ])
+    );
+
+    let domain = repository
+      .getOverview(NOW)
+      .providers.find((provider) => provider.id === 'antigravity')!.billingDomains[0];
+
+    expect(domain.quotaBuckets.find((b) => b.id === 'overshot-5h')?.usedPercent).toBe(100);
+    expect(domain.quotaBuckets.find((b) => b.id === 'negative-weekly')?.usedPercent).toBe(0);
+
+    // Directly insert an un-clamped raw row as if written by an older version
+    const rawDb = new DatabaseSync(databasePath);
+    rawDb.exec(`
+      UPDATE quota_buckets SET used_percent = 101.0 WHERE id = 'overshot-5h';
+      UPDATE quota_observations SET used_percent = 101.0 WHERE bucket_id = 'overshot-5h';
+    `);
+    rawDb.close();
+
+    domain = repository
+      .getOverview(NOW)
+      .providers.find((provider) => provider.id === 'antigravity')!.billingDomains[0];
+
+    expect(domain.quotaBuckets.find((b) => b.id === 'overshot-5h')?.usedPercent).toBe(100);
+
+    repository.close();
   });
 });
 

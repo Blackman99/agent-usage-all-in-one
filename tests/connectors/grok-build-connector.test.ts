@@ -335,6 +335,19 @@ describe('GrokBuildConnector', () => {
     expect(snapshot.quotaBuckets.some((bucket) => bucket.label.includes('5 hour'))).toBe(false);
   });
 
+  it('clamps quota bucket usedPercent between 0 and 100', async () => {
+    const billingClient: GrokBuildBillingClient = {
+      async readBilling() {
+        return {
+          ...billingFixture,
+          config: { ...billingFixture.config, creditUsagePercent: 115 }
+        };
+      }
+    };
+    const snapshot = await new GrokBuildConnector({ billingClient }).collect();
+    expect(snapshot.quotaBuckets[0].usedPercent).toBe(100);
+  });
+
   it('preserves the official log observation time instead of presenting fallback data as fresh', async () => {
     const billingClient: GrokBuildBillingClient = {
       async readBilling() {
