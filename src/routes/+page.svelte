@@ -5140,6 +5140,41 @@
     .providers {
       grid-template-columns: 1fr;
     }
+
+    .settings-dialog {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 1fr;
+      width: min(100%, 100vw);
+      height: 100%;
+      max-height: 100vh;
+      border-radius: 0;
+      border: none;
+    }
+
+    .settings-sidebar {
+      border-right: none;
+      border-bottom: 1px solid var(--border-soft);
+      padding: 14px 16px;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    .settings-sidebar-header {
+      display: none;
+    }
+
+    .settings-sidebar-nav {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      gap: 6px;
+    }
+
+    .settings-nav-button {
+      flex-shrink: 0;
+      width: auto;
+      padding: 7px 12px;
+      white-space: nowrap;
+    }
   }
 
   @keyframes spin {
