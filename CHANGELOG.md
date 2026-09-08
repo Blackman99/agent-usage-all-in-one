@@ -1,5 +1,11 @@
 # agent-usage-all-in-one
 
+## 0.7.2
+
+### Patch Changes
+
+- 1db0abc: Allocate a random available port by default for the development server and support `--port` CLI flag and `.env` configuration.
+
 ## 0.7.1
 
 ### Patch Changes
