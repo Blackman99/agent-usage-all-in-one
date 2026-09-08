@@ -2,12 +2,12 @@ import { writeFileSync } from 'node:fs';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin, type ProxyOptions } from 'vite';
 import { validateLoopbackOrigin } from './scripts/dev-origin.mjs';
+import { resolveDevelopmentPort } from './scripts/dev-port.mjs';
 
 const daemonOrigin = process.env.AGENT_USAGE_DEV_DAEMON_ORIGIN
   ? validateLoopbackOrigin(process.env.AGENT_USAGE_DEV_DAEMON_ORIGIN)
   : undefined;
-const requestedDevelopmentPort = Number(process.env.AGENT_USAGE_DEV_PORT ?? 5173);
-const developmentPort = Number.isFinite(requestedDevelopmentPort) ? requestedDevelopmentPort : 5173;
+const developmentPort = resolveDevelopmentPort();
 const developmentOrigin = `http://127.0.0.1:${developmentPort}`;
 
 function daemonProxy(target: string): ProxyOptions {

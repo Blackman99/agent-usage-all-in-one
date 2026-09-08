@@ -64,9 +64,10 @@ pnpm install
 pnpm dev
 ```
 
-This starts the source daemon, authenticated Vite proxy, hot reload, and dashboard.
+This starts the source daemon, authenticated Vite proxy, hot reload, and dashboard on a random available port.
 Development state is isolated in the ignored `.agent-usage-dev/` directory. Use
-`AGENT_USAGE_DEMO=1 pnpm dev` for demo data or `pnpm dev -- --no-open` to keep the
+`pnpm dev -- --port 3000` (or `AGENT_USAGE_DEV_PORT=3000`) to customize the port,
+`AGENT_USAGE_DEMO=1 pnpm dev` for demo data, or `pnpm dev -- --no-open` to keep the
 browser closed.
 
 ## Install and run

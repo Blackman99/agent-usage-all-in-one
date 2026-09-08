@@ -145,6 +145,27 @@ describe('one-command development mode', () => {
       'demo'
     );
   }, 30_000);
+
+  it('supports custom development port via --port argument', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'agent-usage-dev-port-'));
+    workspaces.push(home);
+    const child = spawn(process.execPath, ['scripts/dev.mjs', '--no-open', '--port', '0'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AGENT_USAGE_DEMO: '1',
+        AGENT_USAGE_DEV_HOME: home,
+        NO_COLOR: '1'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    children.push(child);
+
+    const launchUrl = await waitForLaunchUrl(child);
+    expect(launchUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/launch/);
+    await stopChild(child);
+    children.splice(children.indexOf(child), 1);
+  }, 30_000);
 });
 
 async function authenticatedSession(

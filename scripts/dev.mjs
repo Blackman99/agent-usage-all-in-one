@@ -4,8 +4,32 @@ import { connect as tcpConnect, createServer as createTcpServer } from 'node:net
 import { join, resolve } from 'node:path';
 
 import { validateLoopbackOrigin } from './dev-origin.mjs';
+import { DEFAULT_DEV_PORT, parseDevelopmentPort, resolveDevelopmentPort } from './dev-port.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
+
+for (const envFile of ['.env.local', '.env']) {
+  try {
+    process.loadEnvFile?.(join(projectRoot, envFile));
+  } catch (error) {
+    if (/** @type {{ code?: string }} */ (error)?.code !== 'ENOENT') {
+      // Ignore missing or unreadable environment files
+    }
+  }
+}
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  process.stdout.write(`Usage: pnpm dev [options]
+
+Start the local daemon and Vite development server.
+
+Options:
+  -p, --port <port>   Specify the development port (default: random available port)
+  --no-open           Do not open the browser automatically
+  -h, --help          Show this help message
+`);
+  process.exit(0);
+}
 const tsxImport = import.meta.resolve('tsx');
 const developmentHome = resolve(
   process.env.AGENT_USAGE_DEV_HOME ?? join(projectRoot, '.agent-usage-dev')
@@ -52,7 +76,11 @@ try {
 
   const daemonState = await waitForDaemon(developmentHome, daemon, stopController.signal);
   throwIfStopping();
-  const vitePort = await selectDevelopmentPort(process.env.AGENT_USAGE_DEV_PORT);
+  const requestedPort = resolveDevelopmentPort({
+    argv: process.argv.slice(2),
+    env: process.env
+  });
+  const vitePort = await selectDevelopmentPort(requestedPort);
   const viteOrigin = `http://127.0.0.1:${vitePort}/`;
   vite = spawn(
     process.execPath,
@@ -206,10 +234,8 @@ async function portIsListening(origin) {
 }
 
 async function selectDevelopmentPort(input) {
-  const requested = Number(input ?? 5173);
-  if (!Number.isInteger(requested) || requested < 0 || requested > 65_535) {
-    throw new Error('AGENT_USAGE_DEV_PORT must be a valid TCP port');
-  }
+  const requested =
+    typeof input === 'number' ? input : parseDevelopmentPort(input ?? DEFAULT_DEV_PORT);
   if (requested === 0) return await availablePort(0);
   for (let candidate = requested; candidate < Math.min(65_536, requested + 20); candidate += 1) {
     if (await portIsAvailable(candidate)) return candidate;

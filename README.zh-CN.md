@@ -48,8 +48,8 @@ pnpm install
 pnpm dev
 ```
 
-该命令会启动源码守护进程、带认证的 Vite 代理、热更新和页面。开发数据隔离在已忽略的
-`.agent-usage-dev/` 目录。使用 `AGENT_USAGE_DEMO=1 pnpm dev` 加载演示数据；使用
+该命令会启动源码守护进程、带认证的 Vite 代理、热更新和页面（默认分配随机可用端口）。开发数据隔离在已忽略的
+`.agent-usage-dev/` 目录。使用 `pnpm dev -- --port 3000`（或环境变量 `AGENT_USAGE_DEV_PORT=3000`）自定义端口；使用 `AGENT_USAGE_DEMO=1 pnpm dev` 加载演示数据；使用
 `pnpm dev -- --no-open` 禁止自动打开浏览器。
 
 ## 安装与启动
