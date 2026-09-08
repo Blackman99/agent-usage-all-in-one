@@ -1,6 +1,6 @@
 # Specification: Settings Panel Layout & Presentation Redesign
 
-Status: landing
+Status: shipped
 Branch: ship/settings-layout-redesign
 Base-Commit: 741c5195febcbe086614c286286513de5926b18d
 Original-Branch: main
