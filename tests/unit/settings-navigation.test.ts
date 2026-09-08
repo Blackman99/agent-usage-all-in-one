@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SETTINGS_TABS,
+  SETTINGS_TAB_DESCRIPTORS,
+  isTargetInTab,
   resolveSettingsTab,
+  shouldHighlightSettingsTarget,
   type SettingsTab
 } from '../../src/lib/settings-navigation.js';
 
@@ -16,6 +19,49 @@ describe('settings navigation routing', () => {
       'privacy'
     ];
     expect(SETTINGS_TABS).toEqual(expectedTabs);
+  });
+
+  it('defines descriptors for all 5 first-class categories with dedicated i18n keys', () => {
+    expect(SETTINGS_TAB_DESCRIPTORS).toHaveLength(5);
+    expect(SETTINGS_TAB_DESCRIPTORS.map((d) => d.id)).toEqual(SETTINGS_TABS);
+
+    const diagnosticsDesc = SETTINGS_TAB_DESCRIPTORS.find((d) => d.id === 'diagnostics');
+    expect(diagnosticsDesc).toEqual({
+      id: 'diagnostics',
+      navKey: 'diagnosticsNav',
+      headingKey: 'diagnostics',
+      subtitleKey: 'diagnosticsSubtitle'
+    });
+
+    const ratesDesc = SETTINGS_TAB_DESCRIPTORS.find((d) => d.id === 'rates');
+    expect(ratesDesc).toEqual({
+      id: 'rates',
+      navKey: 'customRatesNav',
+      headingKey: 'customRates',
+      subtitleKey: 'customRatesSubtitle'
+    });
+  });
+
+  it('determines whether a target belongs to a specific settings tab', () => {
+    expect(isTargetInTab('connector:codex', 'connections')).toBe(true);
+    expect(isTargetInTab('connector:codex', 'diagnostics')).toBe(false);
+    expect(isTargetInTab('diagnostic:codex', 'diagnostics')).toBe(true);
+    expect(isTargetInTab('diagnostic:codex', 'connections')).toBe(false);
+    expect(isTargetInTab('rates', 'rates')).toBe(true);
+    expect(isTargetInTab('rates', 'privacy')).toBe(false);
+    expect(isTargetInTab('monitoring', 'monitoring')).toBe(true);
+    expect(isTargetInTab('privacy', 'privacy')).toBe(true);
+    expect(isTargetInTab(null, 'connections')).toBe(true);
+    expect(isTargetInTab(null, 'diagnostics')).toBe(false);
+  });
+
+  it('determines whether an element target should receive active highlighting', () => {
+    expect(shouldHighlightSettingsTarget('diagnostic:codex', 'diagnostic:codex')).toBe(true);
+    expect(shouldHighlightSettingsTarget('diagnostic:codex', 'diagnostic:grok')).toBe(false);
+    expect(shouldHighlightSettingsTarget('connector:xai-api', 'connector:xai-api')).toBe(true);
+    expect(shouldHighlightSettingsTarget('rates', 'rates')).toBe(true);
+    expect(shouldHighlightSettingsTarget(null, 'diagnostic:codex')).toBe(false);
+    expect(shouldHighlightSettingsTarget(undefined, 'rates')).toBe(false);
   });
 
   it('resolves null, undefined, empty, and root targets to connections', () => {

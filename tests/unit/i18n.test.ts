@@ -8,5 +8,7 @@ describe('internationalization catalogs', () => {
     expect(detectLocale('zh-Hans-CN')).toBe('zh-CN');
     expect(detectLocale('en-US')).toBe('en');
     expect(translate('zh-CN', 'privacy')).toBe('隐私与数据');
+    expect(translate('en', 'diagnosticsNav')).toBe('Diagnostics');
+    expect(translate('zh-CN', 'diagnosticsNav')).toBe('系统诊断');
   });
 });

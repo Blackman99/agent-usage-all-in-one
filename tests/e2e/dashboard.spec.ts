@@ -467,8 +467,10 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await expect(settings).toBeVisible();
   await expect(settings.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await settings.getByRole('button', { name: 'Diagnostics' }).click();
   await expect(settings.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
   await expect(settings.getByTestId('settings-diagnostic-codex')).toBeVisible();
+  await settings.getByRole('button', { name: 'Monitoring' }).click();
   const notificationSetting = page.getByRole('checkbox', { name: 'Local notifications' });
   await expect(notificationSetting).not.toBeChecked();
   await notificationSetting.check();
@@ -543,6 +545,7 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await page.reload();
   await expect(page.getByTestId('connector-opencode-go').getByText('Skipped')).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settings.getByRole('button', { name: 'Monitoring' }).click();
   await expect(page.getByRole('checkbox', { name: 'Local notifications' })).toBeChecked();
   await page.getByRole('checkbox', { name: 'Local notifications' }).uncheck();
 });
@@ -684,8 +687,10 @@ test('renders Codex quota without card diagnostics and keeps human actions in se
   await expect(provider.getByText('codex · Unauthorized')).toHaveCount(0);
   await expect(provider.getByText('Run codex login, then refresh Agent Usage.')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await settings.getByRole('button', { name: 'Diagnostics' }).click();
   const diagnostic = page.getByTestId('settings-diagnostic-codex');
-  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   await expect(diagnostic).toBeVisible();
   await expect(page.getByTestId('settings-diagnostic-codex-stale')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
@@ -705,9 +710,9 @@ test('keeps successful usage visible when an auxiliary settings request fails', 
   await page.goto(freshLaunch.stdout.trim());
   await expect(page.getByRole('heading', { name: 'Demo Agent' })).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Settings' })).toContainText(
-    'Retention data is unavailable.'
-  );
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByRole('button', { name: /Privacy/ }).click();
+  await expect(settings).toContainText('Retention data is unavailable.');
 });
 
 test('shows OpenCode Go account quota without duplicating its Token history', async ({ page }) => {
@@ -1254,6 +1259,8 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   await expect(provider.getByText('Replace the xAI API key.')).toHaveCount(0);
   await expect(provider.locator('.degraded')).toHaveCount(0);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByRole('button', { name: 'Diagnostics' }).click();
   await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeVisible();
   await expect(page.getByTestId('settings-diagnostic-grok')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
@@ -2380,6 +2387,8 @@ test('keeps narrow keyboard flows labelled, constrained, and reduced-motion safe
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await expect(settings).toBeFocused();
   await expect(page.locator('.shell')).toHaveAttribute('inert', '');
+  await settings.getByRole('button', { name: /Privacy/ }).click();
+  await settings.focus();
   await page.keyboard.press('Shift+Tab');
   await expect(settings.getByRole('button', { name: 'Clear local usage' })).toBeFocused();
   await page.keyboard.press('Tab');
@@ -3303,32 +3312,45 @@ test('keeps settings controls readable in the light theme', async ({ page }) => 
 
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await expect(settings).toBeVisible();
-  const controlColors = await settings.evaluate((dialog) => {
+  const connectionColors = await settings.evaluate((dialog) => {
     const bodyStyle = getComputedStyle(document.body);
     const section = dialog.querySelector<HTMLElement>('.settings-content > section');
     if (!section) throw new Error('Missing settings section');
     const sectionStyle = getComputedStyle(section);
-    const read = (selector: string) => {
-      const element = dialog.querySelector<HTMLElement>(selector);
-      if (!element) throw new Error(`Missing settings control: ${selector}`);
-      const style = getComputedStyle(element);
-      return { color: style.color, border: style.borderTopColor };
-    };
+    const element = dialog.querySelector<HTMLElement>(
+      '.connection-actions button:not(.primary-action)'
+    );
+    if (!element) throw new Error('Missing settings connection button');
+    const style = getComputedStyle(element);
     return {
-      monitoring: read('.monitoring-controls label'),
-      connection: read('.connection-actions button:not(.primary-action)'),
-      privacy: read('.privacy-actions button'),
+      connection: { color: style.color, border: style.borderTopColor },
       text: bodyStyle.color,
       border: sectionStyle.borderTopColor
     };
   });
 
-  expect(controlColors.monitoring.color).toBe(controlColors.text);
-  expect(controlColors.connection.color).toBe(controlColors.text);
-  expect(controlColors.privacy.color).toBe(controlColors.text);
-  expect(controlColors.monitoring.border).toBe(controlColors.border);
-  expect(controlColors.connection.border).toBe(controlColors.border);
-  expect(controlColors.privacy.border).toBe(controlColors.border);
+  await settings.getByRole('button', { name: 'Monitoring' }).click();
+  const monitoringColors = await settings.evaluate((dialog) => {
+    const element = dialog.querySelector<HTMLElement>('.monitoring-controls label');
+    if (!element) throw new Error('Missing settings monitoring label');
+    const style = getComputedStyle(element);
+    return { color: style.color, border: style.borderTopColor };
+  });
+
+  await settings.getByRole('button', { name: 'Privacy' }).click();
+  const privacyColors = await settings.evaluate((dialog) => {
+    const element = dialog.querySelector<HTMLElement>('.privacy-actions button');
+    if (!element) throw new Error('Missing settings privacy button');
+    const style = getComputedStyle(element);
+    return { color: style.color, border: style.borderTopColor };
+  });
+
+  expect(monitoringColors.color).toBe(connectionColors.text);
+  expect(connectionColors.connection.color).toBe(connectionColors.text);
+  expect(privacyColors.color).toBe(connectionColors.text);
+  expect(monitoringColors.border).toBe(connectionColors.border);
+  expect(connectionColors.connection.border).toBe(connectionColors.border);
+  expect(privacyColors.border).toBe(connectionColors.border);
 });
 
 test('keeps provider cards and their final quota rows aligned without forecasts', async ({

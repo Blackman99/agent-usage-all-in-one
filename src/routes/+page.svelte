@@ -2249,7 +2249,7 @@
               class:active={settingsTab === 'diagnostics'}
               on:click={() => openSettings('diagnostics', false)}
             >
-              <span>{t('diagnostics')}</span>
+              <span>{t('diagnosticsNav')}</span>
             </button>
             <button
               type="button"
@@ -2264,445 +2264,470 @@
 
         <div class="settings-main">
           <div class="settings-content">
-            <section
-              aria-labelledby="settings-connections-heading"
-              data-settings-target="connections"
-              tabindex="-1"
-            >
-              <div class="settings-section-heading">
-                <h2 id="settings-connections-heading">{t('connections')}</h2>
-                <p>{t('connectionsSubtitle')}</p>
-              </div>
-              {#if connectorsError}
-                <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
-              {/if}
-              <div class="settings-connections">
-                {#each connectors as connector (connector.id)}
-                  <article
-                    class:settings-target-active={settingsTarget === `connector:${connector.id}`}
-                    data-settings-target={`connector:${connector.id}`}
-                    data-testid={`settings-connector-${connector.id}`}
-                    tabindex="-1"
-                  >
-                    <div class="settings-connector-title">
-                      <strong>{connector.displayName}</strong>
-                      <span>{connectorStateLabel(connector.state)}</span>
-                    </div>
-                    <p>{connectorPermission(connector)}</p>
-                    <small
-                      >{credentialOwnerLabel(connector.credentialOwner)} · {connector.target
-                        .billingDomain.displayName}</small
-                    >
-                    {#if connector.credentialOwner === 'agent-usage'}
-                      <label class="secret-field">
-                        <span>{t('managementKey')}</span>
-                        <input
-                          type="password"
-                          autocomplete="off"
-                          aria-label={`${connector.displayName} ${t('managementKey')}`}
-                          value={secretInputs[connector.id] ?? ''}
-                          on:input={(event) =>
-                            (secretInputs = {
-                              ...secretInputs,
-                              [connector.id]: event.currentTarget.value
-                            })}
-                        />
-                      </label>
-                    {/if}
-                    <div class="connection-actions">
-                      {#if connector.state === 'connected' && connector.credentialOwner === 'agent-usage'}
-                        <button
-                          class="primary-action"
-                          disabled={pendingConnectorId === connector.id ||
-                            !secretInputs[connector.id]}
-                          on:click={() => configureConnector(connector.id, 'connect')}
-                          >{t('replaceCredential')}</button
-                        >
-                      {/if}
-                      {#if connector.state === 'discovered' || connector.state === 'skipped'}
-                        <button
-                          class="primary-action"
-                          disabled={!connector.installed ||
-                            pendingConnectorId === connector.id ||
-                            (connector.credentialOwner === 'agent-usage' &&
-                              !secretInputs[connector.id])}
-                          on:click={() => configureConnector(connector.id, 'connect')}
-                          >{t('connect')}</button
-                        >
-                      {/if}
-                      {#if connector.state === 'error' || connector.state === 'not-installed' || connector.state === 'connected'}
-                        <button
-                          disabled={pendingConnectorId === connector.id}
-                          on:click={() => configureConnector(connector.id, 'retry')}
-                          >{t('retry')}</button
-                        >
-                      {/if}
-                      {#if connector.state !== 'skipped'}
-                        <button
-                          disabled={pendingConnectorId === connector.id}
-                          on:click={() => configureConnector(connector.id, 'skip')}
-                          >{t('skip')}</button
-                        >
-                      {/if}
-                    </div>
-                  </article>
-                {/each}
-              </div>
-            </section>
-
-            <section
-              aria-labelledby="rates-heading"
-              data-settings-target="rates"
-              data-testid="settings-rates"
-              class:settings-target-active={settingsTarget === 'rates'}
-              tabindex="-1"
-            >
-              <div class="settings-section-heading">
-                <div class="heading-with-action">
-                  <h2 id="rates-heading">{t('customRates')}</h2>
-                  <button
-                    type="button"
-                    class="rates-refresh-button"
-                    title={t('customRateRefreshTitle')}
-                    aria-label={t('customRateRefreshTitle')}
-                    disabled={loadingRates}
-                    on:click={loadCustomRates}
-                  >
-                    <span class:spin={loadingRates} aria-hidden="true">↻</span>
-                    {t('customRateRefresh')}
-                  </button>
+            {#if settingsTab === 'connections'}
+              <section
+                class="settings-tab-panel connections-section"
+                aria-labelledby="settings-connections-heading"
+                data-settings-target="connections"
+                data-testid="settings-panel-connections"
+                tabindex="-1"
+              >
+                <div class="settings-section-heading">
+                  <h2 id="settings-connections-heading">{t('connections')}</h2>
+                  <p>{t('connectionsSubtitle')}</p>
                 </div>
-                <p>{t('customRatesSubtitle')}</p>
-              </div>
-              {#if customRatesError}
-                <p class="settings-error" role="status">{t('customRatesUnavailable')}</p>
-              {/if}
-
-              <div class="custom-rates-container">
-                <form class="custom-rate-form" on:submit|preventDefault={saveCustomRate}>
-                  <div class="custom-rate-inputs">
-                    <label>
-                      <span>{t('customRateProvider')}</span>
-                      <select
-                        bind:value={rateProviderChoice}
-                        on:change={handleProviderChoiceChange}
+                {#if connectorsError}
+                  <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
+                {/if}
+                <div class="settings-connections">
+                  {#each connectors as connector (connector.id)}
+                    <article
+                      class:settings-target-active={settingsTarget === `connector:${connector.id}`}
+                      data-settings-target={`connector:${connector.id}`}
+                      data-testid={`settings-connector-${connector.id}`}
+                      tabindex="-1"
+                    >
+                      <div class="settings-connector-title">
+                        <strong>{connector.displayName}</strong>
+                        <span>{connectorStateLabel(connector.state)}</span>
+                      </div>
+                      <p>{connectorPermission(connector)}</p>
+                      <small
+                        >{credentialOwnerLabel(connector.credentialOwner)} · {connector.target
+                          .billingDomain.displayName}</small
                       >
-                        {#each defaultRateProviders as p (p.id)}
-                          <option value={p.id}>{p.label} ({p.id})</option>
-                        {/each}
-                        <option value="custom">{t('customRateProviderOther')}</option>
-                      </select>
-                    </label>
-                    {#if rateProviderChoice === 'custom'}
+                      {#if connector.credentialOwner === 'agent-usage'}
+                        <label class="secret-field">
+                          <span>{t('managementKey')}</span>
+                          <input
+                            type="password"
+                            autocomplete="off"
+                            aria-label={`${connector.displayName} ${t('managementKey')}`}
+                            value={secretInputs[connector.id] ?? ''}
+                            on:input={(event) =>
+                              (secretInputs = {
+                                ...secretInputs,
+                                [connector.id]: event.currentTarget.value
+                              })}
+                          />
+                        </label>
+                      {/if}
+                      <div class="connection-actions">
+                        {#if connector.state === 'connected' && connector.credentialOwner === 'agent-usage'}
+                          <button
+                            class="primary-action"
+                            disabled={pendingConnectorId === connector.id ||
+                              !secretInputs[connector.id]}
+                            on:click={() => configureConnector(connector.id, 'connect')}
+                            >{t('replaceCredential')}</button
+                          >
+                        {/if}
+                        {#if connector.state === 'discovered' || connector.state === 'skipped'}
+                          <button
+                            class="primary-action"
+                            disabled={!connector.installed ||
+                              pendingConnectorId === connector.id ||
+                              (connector.credentialOwner === 'agent-usage' &&
+                                !secretInputs[connector.id])}
+                            on:click={() => configureConnector(connector.id, 'connect')}
+                            >{t('connect')}</button
+                          >
+                        {/if}
+                        {#if connector.state === 'error' || connector.state === 'not-installed' || connector.state === 'connected'}
+                          <button
+                            disabled={pendingConnectorId === connector.id}
+                            on:click={() => configureConnector(connector.id, 'retry')}
+                            >{t('retry')}</button
+                          >
+                        {/if}
+                        {#if connector.state !== 'skipped'}
+                          <button
+                            disabled={pendingConnectorId === connector.id}
+                            on:click={() => configureConnector(connector.id, 'skip')}
+                            >{t('skip')}</button
+                          >
+                        {/if}
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              </section>
+            {:else if settingsTab === 'rates'}
+              <section
+                class="settings-tab-panel rates-section"
+                aria-labelledby="rates-heading"
+                data-settings-target="rates"
+                data-testid="settings-rates"
+                class:settings-target-active={settingsTarget === 'rates'}
+                tabindex="-1"
+              >
+                <div class="settings-section-heading">
+                  <div class="heading-with-action">
+                    <h2 id="rates-heading">{t('customRates')}</h2>
+                    <button
+                      type="button"
+                      class="rates-refresh-button"
+                      title={t('customRateRefreshTitle')}
+                      aria-label={t('customRateRefreshTitle')}
+                      disabled={loadingRates}
+                      on:click={loadCustomRates}
+                    >
+                      <span class:spin={loadingRates} aria-hidden="true">↻</span>
+                      {t('customRateRefresh')}
+                    </button>
+                  </div>
+                  <p>{t('customRatesSubtitle')}</p>
+                </div>
+                {#if customRatesError}
+                  <p class="settings-error" role="status">{t('customRatesUnavailable')}</p>
+                {/if}
+
+                <div class="custom-rates-container">
+                  <form class="custom-rate-form" on:submit|preventDefault={saveCustomRate}>
+                    <div class="custom-rate-inputs">
                       <label>
-                        <span>{t('customRateProvider')} ID</span>
+                        <span>{t('customRateProvider')}</span>
+                        <select
+                          bind:value={rateProviderChoice}
+                          on:change={handleProviderChoiceChange}
+                        >
+                          {#each defaultRateProviders as p (p.id)}
+                            <option value={p.id}>{p.label} ({p.id})</option>
+                          {/each}
+                          <option value="custom">{t('customRateProviderOther')}</option>
+                        </select>
+                      </label>
+                      {#if rateProviderChoice === 'custom'}
+                        <label>
+                          <span>{t('customRateProvider')} ID</span>
+                          <input
+                            type="text"
+                            bind:value={newRateDraft.providerId}
+                            placeholder={t('customRateProviderCustomPlaceholder')}
+                            required
+                          />
+                        </label>
+                      {/if}
+                      <label>
+                        <span>{t('customRateDomain')}</span>
                         <input
                           type="text"
-                          bind:value={newRateDraft.providerId}
-                          placeholder={t('customRateProviderCustomPlaceholder')}
+                          bind:value={newRateDraft.billingDomainId}
+                          placeholder={t('customRateDomainWildcard')}
+                        />
+                      </label>
+                      <label>
+                        <span>{t('customRateModel')}</span>
+                        <input
+                          type="text"
+                          bind:value={newRateDraft.model}
+                          placeholder="e.g. gpt-4o, qwen-max"
                           required
                         />
                       </label>
-                    {/if}
-                    <label>
-                      <span>{t('customRateDomain')}</span>
-                      <input
-                        type="text"
-                        bind:value={newRateDraft.billingDomainId}
-                        placeholder={t('customRateDomainWildcard')}
-                      />
-                    </label>
-                    <label>
-                      <span>{t('customRateModel')}</span>
-                      <input
-                        type="text"
-                        bind:value={newRateDraft.model}
-                        placeholder="e.g. gpt-4o, qwen-max"
-                        required
-                      />
-                    </label>
-                    <label>
-                      <span>{t('customRateInput')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.0001"
-                        bind:value={newRateDraft.inputRate}
-                        placeholder="2.0"
-                        required
-                      />
-                    </label>
-                    <label>
-                      <span>{t('customRateOutput')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.0001"
-                        bind:value={newRateDraft.outputRate}
-                        placeholder="8.0"
-                        required
-                      />
-                    </label>
-                    <label>
-                      <span>{t('customRateCacheRead')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.0001"
-                        bind:value={newRateDraft.cacheReadRate}
-                        placeholder="0.5"
-                      />
-                    </label>
-                  </div>
-                  <div class="custom-rate-actions">
-                    <button type="submit" disabled={savingRate}>
-                      {savingRate ? t('customRateUpdating') : t('customRateAdd')}
-                    </button>
-                  </div>
-                </form>
+                      <label>
+                        <span>{t('customRateInput')}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.0001"
+                          bind:value={newRateDraft.inputRate}
+                          placeholder="2.0"
+                          required
+                        />
+                      </label>
+                      <label>
+                        <span>{t('customRateOutput')}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.0001"
+                          bind:value={newRateDraft.outputRate}
+                          placeholder="8.0"
+                          required
+                        />
+                      </label>
+                      <label>
+                        <span>{t('customRateCacheRead')}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.0001"
+                          bind:value={newRateDraft.cacheReadRate}
+                          placeholder="0.5"
+                        />
+                      </label>
+                    </div>
+                    <div class="custom-rate-actions">
+                      <button type="submit" disabled={savingRate}>
+                        {savingRate ? t('customRateUpdating') : t('customRateAdd')}
+                      </button>
+                    </div>
+                  </form>
 
-                {#if loadingRates && customRates.length === 0}
-                  <small class="custom-rate-empty">{t('loading')}</small>
-                {:else if customRates.length === 0}
-                  <small class="custom-rate-empty">{t('customRateEmpty')}</small>
-                {:else}
-                  <div class="custom-rates-list">
-                    {#each customRates as rate (rate.id)}
-                      <article class="custom-rate-card" data-testid={`custom-rate-${rate.id}`}>
-                        {#if editingRateId === rate.id}
-                          <form
-                            class="custom-rate-edit-form"
-                            on:submit|preventDefault={updateCustomRate}
-                          >
-                            <div class="custom-rate-edit-header">
-                              <strong>{rate.model}</strong>
+                  {#if loadingRates && customRates.length === 0}
+                    <small class="custom-rate-empty">{t('loading')}</small>
+                  {:else if customRates.length === 0}
+                    <small class="custom-rate-empty">{t('customRateEmpty')}</small>
+                  {:else}
+                    <div class="custom-rates-list">
+                      {#each customRates as rate (rate.id)}
+                        <article class="custom-rate-card" data-testid={`custom-rate-${rate.id}`}>
+                          {#if editingRateId === rate.id}
+                            <form
+                              class="custom-rate-edit-form"
+                              on:submit|preventDefault={updateCustomRate}
+                            >
+                              <div class="custom-rate-edit-header">
+                                <strong>{rate.model}</strong>
+                                <small
+                                  >{rate.providerId} · {rate.billingDomainId ??
+                                    t('customRateDomainWildcard')}</small
+                                >
+                              </div>
+                              <div class="custom-rate-edit-fields">
+                                <label>
+                                  <span>{t('customRateDomain')}</span>
+                                  <input
+                                    type="text"
+                                    bind:value={editRateDraft.billingDomainId}
+                                    placeholder={t('customRateDomainWildcard')}
+                                  />
+                                </label>
+                                <label>
+                                  <span>{t('customRateInput')}</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    bind:value={editRateDraft.inputRate}
+                                    required
+                                  />
+                                </label>
+                                <label>
+                                  <span>{t('customRateOutput')}</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    bind:value={editRateDraft.outputRate}
+                                    required
+                                  />
+                                </label>
+                                <label>
+                                  <span>{t('customRateCacheRead')}</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    bind:value={editRateDraft.cacheReadRate}
+                                  />
+                                </label>
+                              </div>
+                              <div class="custom-rate-edit-actions">
+                                <button type="submit" disabled={updatingRate}>
+                                  {updatingRate ? t('customRateUpdating') : t('customRateSave')}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={updatingRate}
+                                  on:click={cancelEditRate}
+                                >
+                                  {t('customRateCancel')}
+                                </button>
+                              </div>
+                            </form>
+                          {:else}
+                            <div class="custom-rate-header">
+                              <div class="custom-rate-title-row">
+                                <strong>{rate.model}</strong>
+                                <span class="custom-rate-provider-badge">{rate.providerId}</span>
+                              </div>
                               <small
                                 >{rate.providerId} · {rate.billingDomainId ??
                                   t('customRateDomainWildcard')}</small
                               >
                             </div>
-                            <div class="custom-rate-edit-fields">
-                              <label>
-                                <span>{t('customRateDomain')}</span>
-                                <input
-                                  type="text"
-                                  bind:value={editRateDraft.billingDomainId}
-                                  placeholder={t('customRateDomainWildcard')}
-                                />
-                              </label>
-                              <label>
-                                <span>{t('customRateInput')}</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.0001"
-                                  bind:value={editRateDraft.inputRate}
-                                  required
-                                />
-                              </label>
-                              <label>
-                                <span>{t('customRateOutput')}</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.0001"
-                                  bind:value={editRateDraft.outputRate}
-                                  required
-                                />
-                              </label>
-                              <label>
-                                <span>{t('customRateCacheRead')}</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.0001"
-                                  bind:value={editRateDraft.cacheReadRate}
-                                />
-                              </label>
+                            <div class="custom-rate-details">
+                              <div class="rate-metric">
+                                <small>{t('customRateInput')}:</small>
+                                <b>${rate.ratesPerMillion.input}/M</b>
+                              </div>
+                              <div class="rate-metric">
+                                <small>{t('customRateOutput')}:</small>
+                                <b>${rate.ratesPerMillion.output}/M</b>
+                              </div>
+                              <div class="rate-metric">
+                                <small>{t('customRateCacheRead')}:</small>
+                                <b>${rate.ratesPerMillion.cacheRead}/M</b>
+                              </div>
                             </div>
-                            <div class="custom-rate-edit-actions">
-                              <button type="submit" disabled={updatingRate}>
-                                {updatingRate ? t('customRateUpdating') : t('customRateSave')}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={updatingRate}
-                                on:click={cancelEditRate}
-                              >
-                                {t('customRateCancel')}
-                              </button>
+                            <div class="custom-rate-footer">
+                              <small class="custom-rate-updated-time">
+                                {t('customRateUpdated')}
+                                {formatReset(rate.updatedAt)}
+                              </small>
+                              <div class="custom-rate-card-actions">
+                                <button type="button" on:click={() => startEditRate(rate)}>
+                                  {t('customRateEdit')}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={deletingRateId === rate.id}
+                                  on:click={() => deleteCustomRate(rate.id)}
+                                >
+                                  {deletingRateId === rate.id
+                                    ? t('customRateDeleting')
+                                    : t('customRateDelete')}
+                                </button>
+                              </div>
                             </div>
-                          </form>
-                        {:else}
-                          <div class="custom-rate-header">
-                            <div class="custom-rate-title-row">
-                              <strong>{rate.model}</strong>
-                              <span class="custom-rate-provider-badge">{rate.providerId}</span>
-                            </div>
-                            <small
-                              >{rate.providerId} · {rate.billingDomainId ??
-                                t('customRateDomainWildcard')}</small
-                            >
-                          </div>
-                          <div class="custom-rate-details">
-                            <div class="rate-metric">
-                              <small>{t('customRateInput')}:</small>
-                              <b>${rate.ratesPerMillion.input}/M</b>
-                            </div>
-                            <div class="rate-metric">
-                              <small>{t('customRateOutput')}:</small>
-                              <b>${rate.ratesPerMillion.output}/M</b>
-                            </div>
-                            <div class="rate-metric">
-                              <small>{t('customRateCacheRead')}:</small>
-                              <b>${rate.ratesPerMillion.cacheRead}/M</b>
-                            </div>
-                          </div>
-                          <div class="custom-rate-footer">
-                            <small class="custom-rate-updated-time">
-                              {t('customRateUpdated')}
-                              {formatReset(rate.updatedAt)}
-                            </small>
-                            <div class="custom-rate-card-actions">
-                              <button type="button" on:click={() => startEditRate(rate)}>
-                                {t('customRateEdit')}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={deletingRateId === rate.id}
-                                on:click={() => deleteCustomRate(rate.id)}
-                              >
-                                {deletingRateId === rate.id
-                                  ? t('customRateDeleting')
-                                  : t('customRateDelete')}
-                              </button>
-                            </div>
-                          </div>
+                          {/if}
+                        </article>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              </section>
+            {:else if settingsTab === 'monitoring'}
+              <section
+                class="settings-tab-panel monitoring-section"
+                aria-labelledby="monitoring-heading"
+                data-settings-target="monitoring"
+                data-testid="settings-panel-monitoring"
+                tabindex="-1"
+              >
+                <div class="settings-section-heading">
+                  <h2 id="monitoring-heading">{t('monitoring')}</h2>
+                  <p>{t('monitoringSubtitle')}</p>
+                </div>
+                {#if monitoringError}
+                  <p class="settings-error" role="status">{t('monitoringUnavailable')}</p>
+                {/if}
+                {#if monitoring}
+                  <div class="monitoring-controls">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={monitoring.backgroundCollectionEnabled}
+                        on:change={(event) =>
+                          updateMonitoring({
+                            backgroundCollectionEnabled: event.currentTarget.checked
+                          })}
+                      />
+                      {t('backgroundCollection')}
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={monitoring.notificationsEnabled}
+                        on:change={(event) =>
+                          updateMonitoring({ notificationsEnabled: event.currentTarget.checked })}
+                      />
+                      {t('notifications')}
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={monitoring.startAtLogin}
+                        on:change={(event) =>
+                          updateMonitoring({ startAtLogin: event.currentTarget.checked })}
+                      />
+                      {t('startAtLogin')}
+                    </label>
+                  </div>
+                {/if}
+              </section>
+            {:else if settingsTab === 'diagnostics'}
+              <section
+                class="settings-tab-panel diagnostics-section"
+                aria-labelledby="diagnostics-heading"
+                data-settings-target="diagnostics"
+                data-testid="settings-panel-diagnostics"
+                tabindex="-1"
+              >
+                <div class="settings-section-heading">
+                  <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
+                  <p>{t('diagnosticsSubtitle')}</p>
+                </div>
+                {#if diagnosticsError}
+                  <p class="settings-error" role="status">{t('diagnosticsUnavailable')}</p>
+                {/if}
+                {#if diagnostics}
+                  <div class="diagnostics-grid">
+                    {#each diagnostics.connectors.filter((diagnostic) => !isAutomaticallyManagedCategory(diagnostic.category)) as diagnostic (diagnostic.id)}
+                      <article
+                        class:diagnostic-degraded={diagnostic.status === 'degraded'}
+                        class:settings-target-active={settingsTarget ===
+                          `diagnostic:${diagnostic.id}`}
+                        data-settings-target={`diagnostic:${diagnostic.id}`}
+                        data-testid={`settings-diagnostic-${diagnostic.id}`}
+                        tabindex="-1"
+                      >
+                        <div>
+                          <strong>{diagnostic.id}</strong>
+                          <span>{diagnosticCategoryLabel(diagnostic)}</span>
+                        </div>
+                        <small>{diagnostic.billingDomainId ?? t('unknown')}</small>
+                        {#if diagnostic.affectedCoverage.length > 0}
+                          <p>
+                            {diagnostic.affectedCoverage.map(coverageDimensionLabel).join(' · ')}
+                          </p>
+                        {/if}
+                        {#if diagnosticRecovery(diagnostic)}
+                          <code>{diagnosticRecovery(diagnostic)}</code>
                         {/if}
                       </article>
                     {/each}
                   </div>
                 {/if}
-              </div>
-            </section>
-
-            <section class="monitoring-section" aria-labelledby="monitoring-heading">
-              <div class="settings-section-heading">
-                <h2 id="monitoring-heading">{t('monitoring')}</h2>
-                <p>{t('monitoringSubtitle')}</p>
-              </div>
-              {#if monitoringError}
-                <p class="settings-error" role="status">{t('monitoringUnavailable')}</p>
-              {/if}
-              {#if monitoring}
-                <div class="monitoring-controls">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={monitoring.backgroundCollectionEnabled}
-                      on:change={(event) =>
-                        updateMonitoring({
-                          backgroundCollectionEnabled: event.currentTarget.checked
-                        })}
-                    />
-                    {t('backgroundCollection')}
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={monitoring.notificationsEnabled}
-                      on:change={(event) =>
-                        updateMonitoring({ notificationsEnabled: event.currentTarget.checked })}
-                    />
-                    {t('notifications')}
-                  </label>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={monitoring.startAtLogin}
-                      on:change={(event) =>
-                        updateMonitoring({ startAtLogin: event.currentTarget.checked })}
-                    />
-                    {t('startAtLogin')}
-                  </label>
+              </section>
+            {:else if settingsTab === 'privacy'}
+              <section
+                class="settings-tab-panel privacy-section"
+                aria-labelledby="privacy-heading"
+                data-settings-target="privacy"
+                data-testid="settings-panel-privacy"
+                tabindex="-1"
+              >
+                <div class="settings-section-heading">
+                  <h2 id="privacy-heading">{t('privacy')}</h2>
+                  <p>{t('privacySubtitle')}</p>
                 </div>
-              {/if}
-            </section>
-
-            <section class="diagnostics-section" aria-labelledby="diagnostics-heading">
-              <div class="settings-section-heading">
-                <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
-                <p>{t('diagnosticsSubtitle')}</p>
-              </div>
-              {#if diagnosticsError}
-                <p class="settings-error" role="status">{t('diagnosticsUnavailable')}</p>
-              {/if}
-              {#if diagnostics}
-                <div class="diagnostics-grid">
-                  {#each diagnostics.connectors.filter((diagnostic) => !isAutomaticallyManagedCategory(diagnostic.category)) as diagnostic (diagnostic.id)}
-                    <article
-                      class:diagnostic-degraded={diagnostic.status === 'degraded'}
-                      class:settings-target-active={settingsTarget ===
-                        `diagnostic:${diagnostic.id}`}
-                      data-settings-target={`diagnostic:${diagnostic.id}`}
-                      data-testid={`settings-diagnostic-${diagnostic.id}`}
-                      tabindex="-1"
-                    >
-                      <div>
-                        <strong>{diagnostic.id}</strong>
-                        <span>{diagnosticCategoryLabel(diagnostic)}</span>
-                      </div>
-                      <small>{diagnostic.billingDomainId ?? t('unknown')}</small>
-                      {#if diagnostic.affectedCoverage.length > 0}
-                        <p>{diagnostic.affectedCoverage.map(coverageDimensionLabel).join(' · ')}</p>
-                      {/if}
-                      {#if diagnosticRecovery(diagnostic)}
-                        <code>{diagnosticRecovery(diagnostic)}</code>
-                      {/if}
-                    </article>
-                  {/each}
+                {#if retentionError}
+                  <p class="settings-error" role="status">{t('retentionUnavailable')}</p>
+                {:else if retention}
+                  <small>
+                    {retention.rawRetentionDays}
+                    {t('retentionDays')} · {retention.rawObservations}
+                    {t('rawObservations')} · {retention.dailyAggregates}
+                    {t('dailyAggregates')}
+                  </small>
+                {/if}
+                {#if privacyActionError}
+                  <p class="settings-error" role="status">{t('privacyActionUnavailable')}</p>
+                {/if}
+                <div class="privacy-actions">
+                  <button on:click={() => downloadExport('json')}>{t('exportJson')}</button>
+                  <button on:click={() => downloadExport('csv')}>{t('exportCsv')}</button>
+                  <label>
+                    <input type="checkbox" bind:checked={includeAccountIdentifiers} />
+                    {t('includeAccountIdentifiers')}
+                  </label>
+                  <label>
+                    <input type="checkbox" bind:checked={deleteProductSecrets} />
+                    {t('deleteProductSecrets')}
+                  </label>
+                  <button class="danger-action" disabled={hardRebuilding} on:click={hardRebuild}>
+                    {hardRebuilding ? t('hardRebuilding') : t('hardRebuild')}
+                  </button>
+                  <small>{t('hardRebuildWarning')}</small>
+                  <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
+                    {clearingData ? t('clearing') : t('clearData')}
+                  </button>
                 </div>
-              {/if}
-            </section>
-
-            <section class="privacy-section" aria-labelledby="privacy-heading">
-              <div class="settings-section-heading">
-                <h2 id="privacy-heading">{t('privacy')}</h2>
-                <p>{t('privacySubtitle')}</p>
-              </div>
-              {#if retentionError}
-                <p class="settings-error" role="status">{t('retentionUnavailable')}</p>
-              {:else if retention}
-                <small>
-                  {retention.rawRetentionDays}
-                  {t('retentionDays')} · {retention.rawObservations}
-                  {t('rawObservations')} · {retention.dailyAggregates}
-                  {t('dailyAggregates')}
-                </small>
-              {/if}
-              {#if privacyActionError}
-                <p class="settings-error" role="status">{t('privacyActionUnavailable')}</p>
-              {/if}
-              <div class="privacy-actions">
-                <button on:click={() => downloadExport('json')}>{t('exportJson')}</button>
-                <button on:click={() => downloadExport('csv')}>{t('exportCsv')}</button>
-                <label>
-                  <input type="checkbox" bind:checked={includeAccountIdentifiers} />
-                  {t('includeAccountIdentifiers')}
-                </label>
-                <label>
-                  <input type="checkbox" bind:checked={deleteProductSecrets} />
-                  {t('deleteProductSecrets')}
-                </label>
-                <button class="danger-action" disabled={hardRebuilding} on:click={hardRebuild}>
-                  {hardRebuilding ? t('hardRebuilding') : t('hardRebuild')}
-                </button>
-                <small>{t('hardRebuildWarning')}</small>
-                <button class="danger-action" disabled={clearingData} on:click={clearLocalData}>
-                  {clearingData ? t('clearing') : t('clearData')}
-                </button>
-              </div>
-            </section>
+              </section>
+            {/if}
           </div>
         </div>
       </div>
@@ -4707,6 +4732,7 @@
   }
 
   .settings-dialog .settings-content > section {
+    margin: 0;
     background: var(--surface-subtle);
   }
 
@@ -4789,6 +4815,7 @@
   }
 
   .settings-dialog .settings-content > section {
+    margin: 0;
     background: var(--surface-subtle);
   }
 
