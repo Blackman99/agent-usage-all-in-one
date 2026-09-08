@@ -2210,10 +2210,6 @@
         tabindex="-1"
         bind:this={settingsPanel}
       >
-        <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
-          >×</button
-        >
-
         <nav class="settings-sidebar" aria-label="Settings Categories">
           <div class="settings-sidebar-header">
             <p class="eyebrow">{t('settings')}</p>
@@ -2269,12 +2265,42 @@
         </nav>
 
         <div class="settings-main">
+          <header class="settings-main-header">
+            <div class="settings-main-actions">
+              {#if settingsTab === 'rates'}
+                <button
+                  type="button"
+                  class="rates-refresh-button"
+                  title={t('customRateRefreshTitle')}
+                  aria-label={t('customRateRefreshTitle')}
+                  disabled={loadingRates}
+                  on:click={loadCustomRates}
+                >
+                  <span class:spin={loadingRates} aria-hidden="true">↻</span>
+                  {t('customRateRefresh')}
+                </button>
+                <button
+                  type="button"
+                  class="add-rate-toggle-button"
+                  data-testid="toggle-add-rate-button"
+                  aria-expanded={showAddRateForm}
+                  aria-controls="custom-rate-form"
+                  on:click={toggleAddRateForm}
+                >
+                  {showAddRateForm ? t('customRateCancel') : t('customRateAddToggle')}
+                </button>
+              {/if}
+            </div>
+            <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
+              >×</button
+            >
+          </header>
+
           <div class="settings-content">
             {#if settingsTab === 'connections'}
               <section
                 class="settings-tab-panel connections-section"
                 aria-label={t('connections')}
-                data-settings-target="connections"
                 data-testid="settings-panel-connections"
                 tabindex="-1"
               >
@@ -2358,36 +2384,9 @@
               <section
                 class="settings-tab-panel rates-section"
                 aria-label={t('customRates')}
-                data-settings-target="rates"
                 data-testid="settings-rates"
-                class:settings-target-active={settingsTarget === 'rates'}
                 tabindex="-1"
               >
-                <div class="rates-toolbar">
-                  <div class="rates-header-actions">
-                    <button
-                      type="button"
-                      class="rates-refresh-button"
-                      title={t('customRateRefreshTitle')}
-                      aria-label={t('customRateRefreshTitle')}
-                      disabled={loadingRates}
-                      on:click={loadCustomRates}
-                    >
-                      <span class:spin={loadingRates} aria-hidden="true">↻</span>
-                      {t('customRateRefresh')}
-                    </button>
-                    <button
-                      type="button"
-                      class="add-rate-toggle-button"
-                      data-testid="toggle-add-rate-button"
-                      aria-expanded={showAddRateForm}
-                      aria-controls="custom-rate-form"
-                      on:click={toggleAddRateForm}
-                    >
-                      {showAddRateForm ? t('customRateCancel') : t('customRateAddToggle')}
-                    </button>
-                  </div>
-                </div>
                 {#if customRatesError}
                   <p class="settings-error" role="status">{t('customRatesUnavailable')}</p>
                 {/if}
@@ -2638,7 +2637,6 @@
               <section
                 class="settings-tab-panel monitoring-section"
                 aria-label={t('monitoring')}
-                data-settings-target="monitoring"
                 data-testid="settings-panel-monitoring"
                 tabindex="-1"
               >
@@ -2683,7 +2681,6 @@
               <section
                 class="settings-tab-panel diagnostics-section"
                 aria-label={t('diagnosticsNav')}
-                data-settings-target="diagnostics"
                 data-testid="settings-panel-diagnostics"
                 tabindex="-1"
               >
@@ -2723,7 +2720,6 @@
               <section
                 class="settings-tab-panel privacy-section"
                 aria-label={t('privacy')}
-                data-settings-target="privacy"
                 data-testid="settings-panel-privacy"
                 tabindex="-1"
               >
@@ -3334,12 +3330,6 @@
   .rates-refresh-button:hover {
     color: var(--text-strong);
     border-color: var(--border);
-  }
-
-  .rates-header-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
   }
 
   .add-rate-toggle-button {
@@ -4777,25 +4767,39 @@
   .settings-main {
     position: relative;
     height: 100%;
-    overflow-y: auto;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     background: var(--surface);
   }
 
+  .settings-main-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 24px 8px;
+    flex-shrink: 0;
+    min-height: 52px;
+  }
+
+  .settings-main-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .settings-close {
-    position: absolute;
-    top: 18px;
-    right: 20px;
-    z-index: 10;
-    width: 36px;
-    height: 36px;
+    position: static;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
     border: 1px solid var(--border);
     border-radius: 50%;
     background: var(--surface-subtle);
     color: var(--text-strong);
     cursor: pointer;
-    font-size: 1.35rem;
+    font-size: 1.25rem;
     line-height: 1;
     display: flex;
     align-items: center;
@@ -4809,12 +4813,15 @@
   }
 
   .settings-content {
+    flex: 1;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    padding: 24px 28px 40px;
-    min-height: 100%;
+    padding: 8px 24px 36px;
+    min-height: 0;
   }
 
+  .settings-tab-panel,
   .settings-dialog .settings-content > section {
     display: flex;
     flex-direction: column;
@@ -4822,17 +4829,11 @@
     width: 100%;
     margin: 0;
     padding: 0;
-    border: none;
+    border: 0 solid var(--border) !important;
     border-radius: 0;
-    background: transparent;
-  }
-
-  .rates-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
   }
 
   .retention-info-bar {
@@ -5113,6 +5114,11 @@
       width: auto;
       padding: 7px 12px;
       white-space: nowrap;
+    }
+
+    .settings-main-header {
+      padding: 10px 16px 6px;
+      min-height: 44px;
     }
   }
 
