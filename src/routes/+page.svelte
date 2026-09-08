@@ -2308,7 +2308,8 @@
                   <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
                 {/if}
                 <div class="settings-connections">
-                  {#each connectors as connector (connector.id)}
+                  {#each connectors.filter((c) => c.id !== 'xai-api') as connector (connector.id)}
+                    {@const logo = providerLogoSources(connector.target.provider.id)}
                     <article
                       class:settings-target-active={settingsTarget === `connector:${connector.id}`}
                       data-settings-target={`connector:${connector.id}`}
@@ -2316,47 +2317,24 @@
                       tabindex="-1"
                     >
                       <div class="settings-connector-title">
-                        <strong>{connector.displayName}</strong>
+                        <div class="settings-connector-identity">
+                          {#if logo}
+                            <img
+                              class="settings-connector-logo"
+                              data-provider-logo={connector.target.provider.id}
+                              src={logoSrc(logo, $activeTheme)}
+                              alt=""
+                            />
+                          {/if}
+                          <strong>{connector.displayName}</strong>
+                        </div>
                         <span>{connectorStateLabel(connector.state)}</span>
                       </div>
-                      <p>{connectorPermission(connector)}</p>
-                      <small
-                        >{credentialOwnerLabel(connector.credentialOwner)} · {connector.target
-                          .billingDomain.displayName}</small
-                      >
-                      {#if connector.credentialOwner === 'agent-usage'}
-                        <label class="secret-field">
-                          <span>{t('managementKey')}</span>
-                          <input
-                            type="password"
-                            autocomplete="off"
-                            aria-label={`${connector.displayName} ${t('managementKey')}`}
-                            value={secretInputs[connector.id] ?? ''}
-                            on:input={(event) =>
-                              (secretInputs = {
-                                ...secretInputs,
-                                [connector.id]: event.currentTarget.value
-                              })}
-                          />
-                        </label>
-                      {/if}
                       <div class="connection-actions">
-                        {#if connector.state === 'connected' && connector.credentialOwner === 'agent-usage'}
-                          <button
-                            class="primary-action"
-                            disabled={pendingConnectorId === connector.id ||
-                              !secretInputs[connector.id]}
-                            on:click={() => configureConnector(connector.id, 'connect')}
-                            >{t('replaceCredential')}</button
-                          >
-                        {/if}
                         {#if connector.state === 'discovered' || connector.state === 'skipped'}
                           <button
                             class="primary-action"
-                            disabled={!connector.installed ||
-                              pendingConnectorId === connector.id ||
-                              (connector.credentialOwner === 'agent-usage' &&
-                                !secretInputs[connector.id])}
+                            disabled={!connector.installed || pendingConnectorId === connector.id}
                             on:click={() => configureConnector(connector.id, 'connect')}
                             >{t('connect')}</button
                           >
@@ -4848,15 +4826,24 @@
   .settings-connections {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
+    gap: 12px;
   }
 
   .settings-connections article {
-    padding: 12px;
-    border: 1px solid rgba(122, 136, 164, 0.13);
-    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
     outline: none;
-    background: rgba(255, 255, 255, 0.018);
+    background: var(--surface-inset);
+    transition: border-color 0.15s ease;
+  }
+
+  .settings-connections article:hover {
+    border-color: var(--border);
   }
 
   .settings-connector-title {
@@ -4866,18 +4853,42 @@
     gap: 8px;
   }
 
-  .settings-connector-title span,
-  .settings-connections small {
-    color: #929baa;
-    font-size: 0.66rem;
+  .settings-connector-identity {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
   }
 
-  .settings-connections article > p {
-    min-height: 42px;
-    margin: 9px 0;
-    color: #aab1bf;
-    font-size: 0.7rem;
-    line-height: 1.45;
+  .settings-connector-identity strong {
+    color: var(--text-strong);
+    font-size: 0.86rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-connector-logo {
+    display: block;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    flex: none;
+  }
+
+  .settings-connector-logo[data-provider-logo='codex'],
+  .settings-connector-logo[data-provider-logo='dsh'] {
+    border-radius: 4px;
+    background: #fff;
+    padding: 2px;
+  }
+
+  .settings-connector-title span {
+    color: var(--muted);
+    font-size: 0.68rem;
+    font-weight: 500;
+    flex: none;
   }
 
   .settings-dialog .monitoring-section,
@@ -4961,9 +4972,7 @@
   .quota-meta,
   dt,
   .settings-sidebar-subtitle,
-  .settings-connector-title span,
-  .settings-connections small,
-  .settings-connections article > p {
+  .settings-connector-title span {
     color: var(--muted);
   }
 

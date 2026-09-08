@@ -404,7 +404,7 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   page
 }) => {
   const requestCounts = { connectors: 0, overview: 0, doctor: 0 };
-  let xaiConnected = false;
+  const xaiConnected = false;
   await page.route('**/api/connectors', async (route) => {
     requestCounts.connectors += 1;
     const response = await route.fetch();
@@ -491,51 +491,10 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await expect(grokProvider.getByRole('tab', { name: 'Custom endpoints' })).toHaveCount(0);
   await expect(grokProvider.getByTestId('connector-xai-api')).toHaveCount(0);
   await settingsButton.click();
-  const xaiApi = page.getByTestId('settings-connector-xai-api');
-  await expect(xaiApi.getByText('Agent Usage Keychain')).toBeVisible();
-  await expect(xaiApi.getByRole('button', { name: 'Connect' })).toBeDisabled();
-  let xaiActionBody: unknown = null;
-  await page.route('**/api/connectors/xai-api/action', async (route) => {
-    xaiActionBody = route.request().postDataJSON();
-    xaiConnected = true;
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        id: 'xai-api',
-        displayName: 'xAI API (Grok)',
-        state: 'connected',
-        installed: true,
-        binaryPath: null,
-        officialCredentialPresent: false,
-        errorCode: null,
-        lastDiscoveredAt: '2026-08-28T02:00:00.000Z',
-        secretReference: 'connector:xai-api',
-        command: null,
-        permissionDescription: 'Store a dedicated management key.',
-        credentialOwner: 'agent-usage',
-        experimental: false,
-        expectedCoverage: ['tokens', 'actual-cost', 'history'],
-        target: {
-          provider: { id: 'grok', displayName: 'Grok' },
-          billingDomain: { id: 'xai-api', displayName: 'xAI API' }
-        },
-        secretConfigured: true
-      })
-    });
-  });
-  const beforeAction = { ...requestCounts };
-  await xaiApi.getByRole('textbox', { name: /Management API key/ }).fill('browser-fake-key');
-  await xaiApi.getByRole('button', { name: 'Connect' }).click();
-  expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-fake-key' });
-  await expect(xaiApi.getByText('Connected')).toHaveCount(1);
-  await expect(xaiApi).not.toContainText('browser-fake-key');
-  await expect.poll(() => requestCounts.connectors).toBeGreaterThan(beforeAction.connectors);
-  expect(requestCounts.overview).toBeGreaterThan(beforeAction.overview);
-  expect(requestCounts.doctor).toBeGreaterThan(beforeAction.doctor);
-
-  await xaiApi.getByRole('textbox', { name: /Management API key/ }).fill('browser-replacement-key');
-  await xaiApi.getByRole('button', { name: 'Replace credential' }).click();
-  expect(xaiActionBody).toEqual({ action: 'connect', secret: 'browser-replacement-key' });
+  await expect(page.getByTestId('settings-connector-xai-api')).toHaveCount(0);
+  const codexConnector = page.getByTestId('settings-connector-codex');
+  await expect(codexConnector.locator('.settings-connector-logo')).toBeVisible();
+  await expect(codexConnector).not.toContainText('Official client · Subscription');
   await page.getByRole('button', { name: 'Close settings' }).click();
 
   const openCode = page.getByTestId('connector-opencode-go');
