@@ -11,8 +11,6 @@
     DoctorReport,
     HistoryWindow,
     MonitoringSettings,
-    PlanBillingPeriod,
-    PlanSettings,
     ProcessingStatus,
     ProviderOverview,
     QuotaBucket,
@@ -43,12 +41,9 @@
   import ModelDetailChart from '$lib/ModelDetailChart.svelte';
   import ModelBreakdownTreemap from '$lib/ModelBreakdownTreemap.svelte';
   import ModelTrendStackedChart from '$lib/ModelTrendStackedChart.svelte';
-  import PlanValueChart from '$lib/PlanValueChart.svelte';
   import ProviderShareChart from '$lib/ProviderShareChart.svelte';
   import QuotaTimelineChart from '$lib/QuotaTimelineChart.svelte';
   import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
-  import { buildPlanValueRanking, type PlanValueFormatters } from '$lib/plan-value.js';
-  import { trendSegmentColor } from '$lib/usage-trend.js';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
   import '$lib/dashboard-polish.css';
 
@@ -63,14 +58,6 @@
   const DEFAULT_AGENT_PROVIDER_IDS = new Set(
     DEFAULT_AGENT_PROVIDERS.map((provider) => provider.id)
   );
-
-  interface PlanDraft {
-    selection: string;
-    amount: string;
-    currency: string;
-    billingPeriod: PlanBillingPeriod;
-    anchorDate: string;
-  }
 
   let locale: Locale = 'en';
   let metaDescription: string;
@@ -104,10 +91,6 @@
   let modelDetailPanel: HTMLElement | null = null;
   let timeZone = 'UTC';
   let monitoring: MonitoringSettings | null = null;
-  let planSettings: PlanSettings | null = null;
-  let planError = false;
-  let planDrafts: Record<string, PlanDraft> = {};
-  let pendingPlanDomain: string | null = null;
   const defaultRateProviders = [
     { id: 'grok', label: 'Grok' },
     { id: 'dsh', label: 'DeepSeek (dsh)' },
@@ -186,28 +169,6 @@
   // A manual refresh only queues background collection, so the workbench stays
   // busy until that work lands rather than for the request alone.
   $: workbenchBusy = workbenchLoading || refreshing || processingBusy;
-  $: planValueCurrency = effectiveOverview?.workbench?.comparisonCurrency ?? selectedCurrency;
-  $: planValueFormatters = createPlanValueFormatters(planValueCurrency, locale);
-  // Only billing domains that can actually hold a declared price are offered:
-  // OpenCode local history, for one, is cross-Provider local usage with no plan.
-  $: planEligibleKeys = new Set(
-    (planSettings?.domains ?? []).map((domain) =>
-      planDomainKey(domain.providerId, domain.billingDomainId)
-    )
-  );
-  $: planValueUnconfigured = (
-    effectiveOverview?.workbench?.planValue?.unconfiguredDomains ?? []
-  ).filter((domain) =>
-    planEligibleKeys.has(planDomainKey(domain.providerId, domain.billingDomainId))
-  );
-  $: planValueRanking = effectiveOverview?.workbench?.planValue
-    ? buildPlanValueRanking(
-        effectiveOverview.workbench.planValue,
-        trendSegmentColor,
-        planValueFormatters,
-        t('planCustom')
-      )
-    : [];
 
   onMount(async () => {
     initTheme();
@@ -221,7 +182,6 @@
       loadAgentProviders(),
       loadConnectors(),
       loadMonitoring(),
-      loadPlanSettings(),
       loadCustomRates(),
       loadRetention(),
       loadProcessing()
@@ -411,101 +371,6 @@
       monitoringError = false;
     } catch {
       monitoringError = true;
-    }
-  }
-
-  async function loadPlanSettings(): Promise<void> {
-    try {
-      const response = await fetch('/api/plans');
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      planSettings = (await response.json()) as PlanSettings;
-      planDrafts = planDraftsFor(planSettings);
-      planError = false;
-    } catch {
-      planError = true;
-    }
-  }
-
-  function planDomainKey(providerId: string, billingDomainId: string): string {
-    return `${providerId}:${billingDomainId}`;
-  }
-
-  function planDraftsFor(settings: PlanSettings): Record<string, PlanDraft> {
-    const subscriptions = new Map(
-      settings.subscriptions.map((subscription) => [
-        planDomainKey(subscription.providerId, subscription.billingDomainId),
-        subscription
-      ])
-    );
-    return Object.fromEntries(
-      settings.domains.map((domain) => {
-        const key = planDomainKey(domain.providerId, domain.billingDomainId);
-        const subscription = subscriptions.get(key);
-        const selection = subscription
-          ? (subscription.priceSource === 'catalog-preset' && subscription.planId) || 'custom'
-          : 'none';
-        return [
-          key,
-          {
-            selection,
-            amount: subscription ? String(subscription.amount) : '',
-            currency: subscription?.currency ?? 'USD',
-            billingPeriod: subscription?.billingPeriod ?? 'monthly',
-            anchorDate: subscription?.anchorDate ?? ''
-          }
-        ];
-      })
-    );
-  }
-
-  function updatePlanDraft(key: string, changes: Partial<PlanDraft>): void {
-    const current = planDrafts[key];
-    if (!current) return;
-    const next = { ...current, ...changes };
-    if (changes.selection && changes.selection !== 'custom' && changes.selection !== 'none') {
-      const preset = planSettings?.domains
-        .flatMap((domain) => domain.presets)
-        .find((entry) => entry.id === changes.selection);
-      if (preset) {
-        next.amount = String(preset.amount);
-        next.currency = preset.currency;
-        next.billingPeriod = preset.billingPeriod;
-      }
-    }
-    planDrafts = { ...planDrafts, [key]: next };
-  }
-
-  async function savePlanDraft(providerId: string, billingDomainId: string): Promise<void> {
-    const key = planDomainKey(providerId, billingDomainId);
-    const draft = planDrafts[key];
-    if (!draft) return;
-    const amount = Number(draft.amount);
-    const plan =
-      draft.selection === 'none'
-        ? null
-        : {
-            planId: draft.selection === 'custom' ? null : draft.selection,
-            amount: Number.isFinite(amount) && amount > 0 ? amount : undefined,
-            currency: draft.currency,
-            billingPeriod: draft.billingPeriod,
-            anchorDate: draft.anchorDate === '' ? null : draft.anchorDate
-          };
-    pendingPlanDomain = key;
-    try {
-      const response = await fetch('/api/plans', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ providerId, billingDomainId, plan })
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      planSettings = (await response.json()) as PlanSettings;
-      planDrafts = planDraftsFor(planSettings);
-      planError = false;
-      await loadOverview();
-    } catch {
-      planError = true;
-    } finally {
-      pendingPlanDomain = null;
     }
   }
 
@@ -1519,26 +1384,6 @@
     }).format(amount);
   }
 
-  function formatPlanPeriodRange(start: string, end: string): string {
-    const format = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' });
-    return `${format.format(new Date(start))} – ${format.format(new Date(end))}`;
-  }
-
-  function createPlanValueFormatters(currency: string, activeLocale: Locale): PlanValueFormatters {
-    return {
-      money: (amount) => (amount === null ? t('notAvailable') : formatMoney(amount, currency)),
-      tokens: (value) =>
-        value === null ? t('notAvailable') : `${formatCompactNumber(value)} ${t('tokens')}`,
-      ratio: (value, bound) => {
-        if (value === null) return t('notAvailable');
-        const formatted = `${new Intl.NumberFormat(activeLocale, {
-          maximumFractionDigits: value < 10 ? 1 : 0
-        }).format(value)}x`;
-        return bound === 'lower' ? `≥ ${formatted}` : formatted;
-      }
-    };
-  }
-
   function selectUsageMetric(metric: 'tokens' | 'retail-equivalent'): void {
     selectedTrendMetric = metric;
   }
@@ -2178,180 +2023,6 @@
                 {/key}
               </div>
 
-              {#if workbench.planValue}
-                <section
-                  class="plan-value"
-                  data-testid="plan-value"
-                  aria-labelledby="plan-value-heading"
-                  aria-busy={workbenchBusy}
-                >
-                  <div class="plan-value-heading">
-                    <h3 id="plan-value-heading">{t('planValue')}</h3>
-                    <small>{t('planValueSubtitle')}</small>
-                  </div>
-
-                  {#if workbench.planValue.entries.length === 0}
-                    <div class="plan-value-empty" data-testid="plan-value-empty">
-                      <p>{t('planValueEmpty')}</p>
-                      <button type="button" on:click={() => openSettings('plans')}>
-                        {t('planValueEmptyAction')}
-                      </button>
-                    </div>
-                  {:else}
-                    <div class="plan-value-body">
-                      <PlanValueChart
-                        planValue={workbench.planValue}
-                        {locale}
-                        formatters={planValueFormatters}
-                      />
-
-                      <ol class="plan-value-ranking" data-testid="plan-value-ranking">
-                        {#each planValueRanking as row (row.key)}
-                          <li data-testid="plan-value-row">
-                            <div class="plan-value-row-heading">
-                              <span class="plan-value-name">
-                                <span class="plan-value-swatch" style={`background:${row.color}`}
-                                ></span>
-                                <strong>{row.name}</strong>
-                                <small>{row.planLabel}</small>
-                              </span>
-                              <span
-                                class="plan-value-ratio"
-                                class:plan-value-below={row.ratio !== null && !row.beatsBreakEven}
-                                data-testid="plan-value-ratio">{row.ratioLabel}</span
-                              >
-                            </div>
-                            <div
-                              class="plan-value-meter"
-                              role="img"
-                              aria-label={`${t('planValueRatio')} ${row.ratioLabel}`}
-                            >
-                              <span
-                                class="plan-value-meter-fill"
-                                style={`width:${row.meterPercent}%;background:${row.color}`}
-                              ></span>
-                              <span
-                                class="plan-value-break-even"
-                                style={`left:${row.breakEvenPercent}%`}
-                                title={t('planValueBreakEven')}
-                              ></span>
-                            </div>
-                            <dl class="plan-value-facts">
-                              <div>
-                                <dt>{t('planValuePaid')}</dt>
-                                <dd>{row.paidLabel}</dd>
-                              </div>
-                              <div>
-                                <dt>{t('planValueWorth')}</dt>
-                                <dd>{row.worthLabel}</dd>
-                              </div>
-                              <div>
-                                <dt>{t('planValueEffectiveUnitPrice')}</dt>
-                                <dd>{row.effectiveUnitPriceLabel}</dd>
-                              </div>
-                              <div>
-                                <dt>{t('planValueRetailUnitPrice')}</dt>
-                                <dd>{row.retailUnitPriceLabel}</dd>
-                              </div>
-                              {#if row.savingsLabel}
-                                <div>
-                                  <dt>
-                                    {row.savingsIsLoss
-                                      ? t('planValueOverpaid')
-                                      : t('planValueSavings')}
-                                  </dt>
-                                  <dd>{row.savingsLabel} · {t('planValuePerMillion')}</dd>
-                                </div>
-                              {/if}
-                            </dl>
-                            {#if row.period}
-                              <div class="plan-value-period" data-testid="plan-value-period">
-                                <div class="plan-value-period-heading">
-                                  <span>
-                                    {t('planPeriodLabel')} · {formatPlanPeriodRange(
-                                      row.period.start,
-                                      row.period.end
-                                    )}
-                                  </span>
-                                  <span data-testid="plan-value-period-progress">
-                                    {Math.floor(row.period.elapsedDays)}/{Math.round(
-                                      row.period.totalDays
-                                    )}
-                                    {t('planPeriodDays')}
-                                  </span>
-                                </div>
-                                <div
-                                  class="plan-value-meter plan-value-period-meter"
-                                  role="img"
-                                  aria-label={`${t('planPeriodEarnedBack')} ${
-                                    row.period.earnedLabel
-                                  } / ${row.period.periodCostLabel}`}
-                                >
-                                  <span
-                                    class="plan-value-meter-fill"
-                                    style={`width:${row.period.earnedPercent}%;background:${row.color}`}
-                                  ></span>
-                                  <span
-                                    class="plan-value-pace"
-                                    style={`left:${row.period.elapsedPercent}%`}
-                                    title={row.period.onPace
-                                      ? t('planPeriodOnPace')
-                                      : t('planPeriodBehindPace')}
-                                  ></span>
-                                </div>
-                                <small class:plan-value-behind={!row.period.onPace}>
-                                  {t('planPeriodEarnedBack')}
-                                  {row.period.earnedLabel} / {row.period.periodCostLabel} · {row
-                                    .period.onPace
-                                    ? t('planPeriodOnPace')
-                                    : t('planPeriodBehindPace')}
-                                </small>
-                              </div>
-                            {/if}
-                            {#if row.bound === 'lower'}
-                              <p class="plan-value-caveat">{t('planValuePartial')}</p>
-                            {:else if row.bound === 'unavailable'}
-                              <p class="plan-value-caveat">{t('planValueUnavailable')}</p>
-                            {/if}
-                          </li>
-                        {/each}
-                      </ol>
-                    </div>
-                    <p class="plan-value-note">{t('planValueWindowNote')}</p>
-                  {/if}
-
-                  {#if workbench.planValue.meteredDomains.length > 0 || planValueUnconfigured.length > 0}
-                    <ul class="plan-value-aside" data-testid="plan-value-aside">
-                      {#each workbench.planValue.meteredDomains as domain (`${domain.providerId}:${domain.billingDomainId}`)}
-                        <li>
-                          <strong
-                            >{domain.providerDisplayName} · {domain.billingDomainDisplayName}</strong
-                          >
-                          <span>{t('planValueMetered')}</span>
-                          <span
-                            >{t('actualCost')} · {formatMoney(
-                              domain.actualCost.amount,
-                              workbench.comparisonCurrency
-                            )}</span
-                          >
-                        </li>
-                      {/each}
-                      {#each planValueUnconfigured as domain (`${domain.providerId}:${domain.billingDomainId}`)}
-                        <li>
-                          <strong
-                            >{domain.providerDisplayName} · {domain.billingDomainDisplayName}</strong
-                          >
-                          <span>{t('planValueUnconfigured')}</span>
-                          <button type="button" on:click={() => openSettings('plans')}>
-                            {t('planValueEmptyAction')}
-                          </button>
-                        </li>
-                      {/each}
-                    </ul>
-                  {/if}
-                </section>
-              {/if}
-
               <section
                 class="model-ranking"
                 data-testid="usage-breakdown"
@@ -2551,13 +2222,6 @@
           </button>
           <button
             type="button"
-            class:active={settingsTarget === 'plans'}
-            on:click={() => openSettings('plans', false)}
-          >
-            {t('plans')}
-          </button>
-          <button
-            type="button"
             class:active={settingsTarget === 'rates'}
             on:click={() => openSettings('rates', false)}
           >
@@ -2664,126 +2328,6 @@
                 </article>
               {/each}
             </div>
-          </section>
-
-          <section
-            class="plans-section"
-            aria-labelledby="plans-heading"
-            data-settings-target="plans"
-            data-testid="settings-plans"
-            class:settings-target-active={settingsTarget === 'plans'}
-            tabindex="-1"
-          >
-            <div class="settings-section-heading">
-              <h2 id="plans-heading">{t('plans')}</h2>
-              <p>{t('plansSubtitle')}</p>
-            </div>
-            {#if planError}
-              <p class="settings-error" role="status">{t('plansUnavailable')}</p>
-            {/if}
-            {#if planSettings}
-              <div class="plan-settings">
-                {#each planSettings.domains as domain (`${domain.providerId}:${domain.billingDomainId}`)}
-                  {@const key = planDomainKey(domain.providerId, domain.billingDomainId)}
-                  {@const draft = planDrafts[key]}
-                  {@const saved = planSettings.subscriptions.find(
-                    (subscription) =>
-                      subscription.providerId === domain.providerId &&
-                      subscription.billingDomainId === domain.billingDomainId
-                  )}
-                  <article
-                    data-testid={`plan-domain-${domain.providerId}-${domain.billingDomainId}`}
-                  >
-                    <div class="plan-settings-heading">
-                      <strong>{domain.providerDisplayName}</strong>
-                      <small>{domain.billingDomainDisplayName}</small>
-                    </div>
-                    {#if draft}
-                      <label>
-                        <span>{t('planPreset')}</span>
-                        <select
-                          value={draft.selection}
-                          on:change={(event) =>
-                            updatePlanDraft(key, { selection: event.currentTarget.value })}
-                        >
-                          <option value="none">{t('planNone')}</option>
-                          {#each domain.presets as preset (preset.id)}
-                            <option value={preset.id}>{preset.displayName}</option>
-                          {/each}
-                          <option value="custom">{t('planCustom')}</option>
-                        </select>
-                      </label>
-                      {#if draft.selection !== 'none'}
-                        <div class="plan-settings-price">
-                          <label>
-                            <span>{t('planAmount')}</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={draft.amount}
-                              on:input={(event) =>
-                                updatePlanDraft(key, { amount: event.currentTarget.value })}
-                            />
-                          </label>
-                          <label>
-                            <span>{t('planCurrency')}</span>
-                            <input
-                              type="text"
-                              maxlength="3"
-                              value={draft.currency}
-                              on:input={(event) =>
-                                updatePlanDraft(key, {
-                                  currency: event.currentTarget.value.toUpperCase()
-                                })}
-                            />
-                          </label>
-                          <label>
-                            <span>{t('planPeriod')}</span>
-                            <select
-                              value={draft.billingPeriod}
-                              on:change={(event) =>
-                                updatePlanDraft(key, {
-                                  billingPeriod: event.currentTarget.value as PlanBillingPeriod
-                                })}
-                            >
-                              <option value="monthly">{t('planPeriodMonthly')}</option>
-                              <option value="annual">{t('planPeriodAnnual')}</option>
-                            </select>
-                          </label>
-                        </div>
-                        <label>
-                          <span>{t('planAnchorDate')}</span>
-                          <input
-                            type="date"
-                            value={draft.anchorDate}
-                            on:input={(event) =>
-                              updatePlanDraft(key, { anchorDate: event.currentTarget.value })}
-                          />
-                          <small>{t('planAnchorHint')}</small>
-                        </label>
-                      {/if}
-                      <div class="plan-settings-actions">
-                        <button
-                          type="button"
-                          disabled={pendingPlanDomain === key}
-                          on:click={() => savePlanDraft(domain.providerId, domain.billingDomainId)}
-                        >
-                          {draft.selection === 'none' ? t('planClear') : t('planSave')}
-                        </button>
-                        {#if saved}
-                          <small>
-                            {saved.priceSource === 'catalog-preset'
-                              ? t('planPresetSource')
-                              : t('planUserEntered')}
-                          </small>
-                        {/if}
-                      </div>
-                    {/if}
-                  </article>
-                {/each}
-              </div>
-            {/if}
           </section>
 
           <section
@@ -3678,307 +3222,6 @@
     font-size: 0.95rem;
     font-variant-numeric: tabular-nums;
     font-weight: 550;
-  }
-
-  .plan-value {
-    position: relative;
-    margin-top: 14px;
-    padding: 20px;
-    border: 1px solid var(--border-soft);
-    border-radius: 18px;
-    background: var(--surface-subtle);
-  }
-
-  .plan-value-heading {
-    display: grid;
-    gap: 5px;
-    margin-bottom: 14px;
-  }
-
-  .plan-value-heading h3 {
-    margin: 0;
-    color: var(--text-strong);
-    font-size: 0.9rem;
-  }
-
-  .plan-value-heading small {
-    color: var(--muted);
-    font-size: 0.64rem;
-  }
-
-  .plan-value-body {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
-    gap: 18px;
-    align-items: start;
-  }
-
-  .plan-value-ranking {
-    display: grid;
-    gap: 14px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .plan-value-ranking li {
-    display: grid;
-    gap: 8px;
-    padding: 12px 14px;
-    border: 1px solid rgba(122, 136, 164, 0.14);
-    border-radius: 14px;
-    background: var(--surface-inset);
-  }
-
-  .plan-value-row-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .plan-value-name {
-    display: flex;
-    align-items: baseline;
-    gap: 7px;
-    min-width: 0;
-  }
-
-  .plan-value-name strong {
-    color: var(--text-strong);
-    font-size: 0.78rem;
-    font-weight: 560;
-  }
-
-  .plan-value-name small {
-    overflow: hidden;
-    color: var(--muted);
-    font-size: 0.64rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .plan-value-swatch {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    align-self: center;
-    flex: none;
-  }
-
-  .plan-value-ratio {
-    color: var(--text-strong);
-    font-size: 1.05rem;
-    font-variant-numeric: tabular-nums;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-  }
-
-  .plan-value-ratio.plan-value-below {
-    color: var(--muted);
-  }
-
-  .plan-value-meter {
-    position: relative;
-    height: 6px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--border) 55%, transparent);
-  }
-
-  .plan-value-meter-fill {
-    display: block;
-    height: 100%;
-    border-radius: 999px;
-  }
-
-  .plan-value-break-even {
-    position: absolute;
-    top: -3px;
-    bottom: -3px;
-    width: 1px;
-    background: var(--muted);
-  }
-
-  .plan-value-period {
-    display: grid;
-    gap: 6px;
-    padding-top: 9px;
-    border-top: 1px solid var(--border-soft);
-  }
-
-  .plan-value-period-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    color: var(--muted);
-    font-size: 0.62rem;
-  }
-
-  .plan-value-period-meter {
-    height: 5px;
-  }
-
-  .plan-value-pace {
-    position: absolute;
-    top: -4px;
-    bottom: -4px;
-    width: 2px;
-    border-radius: 1px;
-    background: var(--text-strong);
-    opacity: 0.55;
-  }
-
-  .plan-value-period small {
-    color: var(--muted);
-    font-size: 0.62rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .plan-value-period small.plan-value-behind {
-    color: color-mix(in srgb, var(--muted) 55%, #d98b6a);
-  }
-
-  .plan-settings label small {
-    color: var(--muted);
-    font-size: 0.58rem;
-    line-height: 1.4;
-  }
-
-  .plan-value-facts {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    gap: 10px;
-    margin: 0;
-  }
-
-  .plan-value-facts dt {
-    color: var(--muted);
-    font-size: 0.6rem;
-  }
-
-  .plan-value-facts dd {
-    margin: 3px 0 0;
-    color: var(--text-strong);
-    font-size: 0.72rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .plan-value-caveat,
-  .plan-value-note {
-    margin: 8px 2px 0;
-    color: var(--muted);
-    font-size: 0.63rem;
-    line-height: 1.45;
-  }
-
-  .plan-value-empty {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    flex-wrap: wrap;
-    padding: 18px;
-    border: 1px dashed var(--border);
-    border-radius: 14px;
-  }
-
-  .plan-value-empty p {
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.74rem;
-  }
-
-  .plan-value-aside {
-    display: grid;
-    gap: 8px;
-    margin: 14px 0 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .plan-value-aside li {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding-top: 8px;
-    border-top: 1px solid var(--border-soft);
-    color: var(--muted);
-    font-size: 0.66rem;
-  }
-
-  .plan-value-aside strong {
-    color: var(--text-strong);
-    font-weight: 550;
-  }
-
-  .plan-settings {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 12px;
-  }
-
-  .plan-settings article {
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--border-soft);
-    border-radius: 14px;
-    background: var(--surface-inset);
-  }
-
-  .plan-settings-heading {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-
-  .plan-settings-heading strong {
-    color: var(--text-strong);
-    font-size: 0.78rem;
-  }
-
-  .plan-settings-heading small {
-    color: var(--muted);
-    font-size: 0.64rem;
-  }
-
-  .plan-settings label {
-    display: grid;
-    gap: 5px;
-    color: var(--muted);
-    font-size: 0.63rem;
-  }
-
-  .plan-settings-price {
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .plan-settings input,
-  .plan-settings select {
-    width: 100%;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    background: var(--surface-subtle);
-    color: var(--text-strong);
-    font-size: 0.72rem;
-  }
-
-  .plan-settings-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .plan-settings-actions small {
-    color: var(--muted);
-    font-size: 0.6rem;
   }
 
   .custom-rates-container {
@@ -5762,18 +5005,6 @@
 
     .model-ranking {
       padding: 16px;
-    }
-
-    .plan-value {
-      padding: 16px;
-    }
-
-    .plan-value-body {
-      grid-template-columns: 1fr;
-    }
-
-    .plan-settings-price {
-      grid-template-columns: 1fr;
     }
 
     .usage-totals {

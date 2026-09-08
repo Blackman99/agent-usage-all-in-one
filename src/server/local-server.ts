@@ -30,23 +30,6 @@ const monitoringSettingsSchema = z
     startAtLogin: z.boolean().optional()
   })
   .refine((value) => Object.keys(value).length > 0, 'At least one setting is required');
-const planSubscriptionSchema = z.object({
-  providerId: z.string().min(1),
-  billingDomainId: z.string().min(1),
-  plan: z
-    .object({
-      planId: z.string().min(1).nullable(),
-      amount: z.number().positive().finite().optional(),
-      currency: z.string().length(3).optional(),
-      billingPeriod: z.enum(['monthly', 'annual']).optional(),
-      anchorDate: z
-        .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/)
-        .nullable()
-        .optional()
-    })
-    .nullable()
-});
 const customModelRateSchema = z.object({
   id: z.string().optional(),
   providerId: z.string().min(1),
@@ -260,21 +243,6 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
         }
         const input = clearDataSchema.parse(await readJsonBody(request));
         sendJson(response, 200, await options.application.clearData(input));
-        return;
-      }
-
-      if (request.method === 'GET' && requestUrl.pathname === '/api/plans') {
-        sendJson(response, 200, await options.application.getPlanSettings());
-        return;
-      }
-
-      if (request.method === 'PATCH' && requestUrl.pathname === '/api/plans') {
-        if (!validMutationOrigin(authentication, request, origin)) {
-          sendJson(response, 403, { error: 'invalid-origin' });
-          return;
-        }
-        const input = planSubscriptionSchema.parse(await readJsonBody(request));
-        sendJson(response, 200, await options.application.updatePlanSubscription(input));
         return;
       }
 

@@ -1,7 +1,9 @@
 # ADR 014: Plan value ratio for subscription billing domains
 
-- Status: accepted
+- Status: retired (feature removed)
 - Date: 2026-08-30
+
+> Note: The subscription plan value feature, settings, and read models have been removed.
 
 ## Context
 
