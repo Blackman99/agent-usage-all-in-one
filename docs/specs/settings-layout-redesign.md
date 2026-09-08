@@ -110,7 +110,7 @@ Redesign the settings panel into a centered, modern two-column modal window:
 - [x] Ticket 2: Category Content Isolation & Diagnostics First-Class View — Delivers per-tab view isolation, dedicated Diagnostics panel with i18n nav labels, and deep-link element scrolling/highlighting (Blocked by: Ticket 1)
 - [x] Ticket 3: Custom Rates Collapsible Form & Compact Presentation — Delivers collapsible "+ Add Rate" form toggle, compact overrides list, and updated form styling (Blocked by: Ticket 2)
 - [x] Ticket 4: Responsive Layout Adaptation & Visual Polish — Delivers <768px top tab bar conversion, full-width responsive controls, and refined dark theme styles (Blocked by: Ticket 3)
-- [ ] Ticket 5: E2E Test Suite Alignment & Regression Coverage — Delivers updated and expanded settings tests in `tests/e2e/dashboard.spec.ts` (Blocked by: Ticket 4)
+- [x] Ticket 5: E2E Test Suite Alignment & Regression Coverage — Delivers updated and expanded settings tests in `tests/e2e/dashboard.spec.ts` (Blocked by: Ticket 4)
 - [ ] Ticket 6: Release & Documentation Compliance — Delivers changeset file and updated README documentation (Blocked by: Ticket 5)
 
 ## Baseline

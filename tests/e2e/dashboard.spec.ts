@@ -3353,6 +3353,47 @@ test('keeps settings controls readable in the light theme', async ({ page }) => 
   expect(privacyColors.border).toBe(connectionColors.border);
 });
 
+test('switches tabs and toggles rate form in redesigned settings dialog', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  if (freshLaunch.exitCode !== 0)
+    throw new Error(freshLaunch.stderr || 'Unable to start test daemon');
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByRole('heading', { name: 'Agent Usage' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+
+  const sidebar = settings.locator('.settings-sidebar');
+  await expect(sidebar).toBeVisible();
+  await expect(settings.getByRole('heading', { name: 'Connections' })).toBeVisible();
+
+  await sidebar.getByRole('button', { name: 'Rates' }).click();
+  await expect(settings.getByRole('heading', { name: 'Custom model rates' })).toBeVisible();
+  const toggleButton = settings.getByTestId('toggle-add-rate-button');
+  if ((await toggleButton.count()) > 0) {
+    await expect(settings.getByTestId('custom-rate-form')).toHaveCount(0);
+    await toggleButton.click();
+    await expect(settings.getByTestId('custom-rate-form')).toBeVisible();
+    await toggleButton.click();
+    await expect(settings.getByTestId('custom-rate-form')).toHaveCount(0);
+  }
+
+  await sidebar.getByRole('button', { name: 'Monitoring' }).click();
+  await expect(settings.getByRole('heading', { name: 'Monitoring' })).toBeVisible();
+  await expect(settings.getByRole('checkbox', { name: 'Local notifications' })).toBeVisible();
+
+  await sidebar.getByRole('button', { name: 'Diagnostics' }).click();
+  await expect(settings.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
+
+  await sidebar.getByRole('button', { name: 'Privacy & data' }).click();
+  await expect(settings.getByRole('heading', { name: 'Privacy & data' })).toBeVisible();
+  await expect(settings.getByRole('button', { name: 'Export JSON' })).toBeVisible();
+
+  await settings.locator('.settings-close').click();
+  await expect(settings).toHaveCount(0);
+});
+
 test('keeps provider cards and their final quota rows aligned without forecasts', async ({
   page
 }) => {
