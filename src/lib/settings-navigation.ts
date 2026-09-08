@@ -60,7 +60,7 @@ export function resolveSettingsTab(target: string | null | undefined): SettingsT
   if (target.startsWith('connector')) {
     return 'connections';
   }
-  if (target === 'rates') {
+  if (target === 'rates' || target.startsWith('rate:') || target.startsWith('rates:')) {
     return 'rates';
   }
   if (target === 'monitoring') {

@@ -10,5 +10,7 @@ describe('internationalization catalogs', () => {
     expect(translate('zh-CN', 'privacy')).toBe('隐私与数据');
     expect(translate('en', 'diagnosticsNav')).toBe('Diagnostics');
     expect(translate('zh-CN', 'diagnosticsNav')).toBe('系统诊断');
+    expect(translate('en', 'customRateAddToggle')).toBe('+ Add Rate');
+    expect(translate('zh-CN', 'customRateAddToggle')).toBe('+ 添加费率');
   });
 });

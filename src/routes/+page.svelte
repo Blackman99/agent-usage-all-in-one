@@ -46,6 +46,12 @@
   import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
   import { resolveSettingsTab, type SettingsTab } from '$lib/settings-navigation.js';
+  import {
+    createDefaultRateDraft,
+    formatRateDomain,
+    formatRatePerMillion,
+    resolveRateProviderChoice
+  } from '$lib/custom-rates-presentation.js';
   import '$lib/dashboard-polish.css';
 
   const DEFAULT_AGENT_PROVIDERS: AgentProviderIndex['providers'] = [
@@ -105,14 +111,8 @@
   let customRates: CustomModelRate[] = [];
   let customRatesError = false;
   let loadingRates = false;
-  let newRateDraft = {
-    providerId: 'grok',
-    billingDomainId: '',
-    model: '',
-    inputRate: '',
-    outputRate: '',
-    cacheReadRate: '0'
-  };
+  let showAddRateForm = false;
+  let newRateDraft = createDefaultRateDraft({ providerId: 'grok' });
   let savingRate = false;
   let editingRateId: string | null = null;
   let editRateDraft = {
@@ -418,14 +418,8 @@
         })
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      newRateDraft = {
-        providerId: provider,
-        billingDomainId: '',
-        model: '',
-        inputRate: '',
-        outputRate: '',
-        cacheReadRate: '0'
-      };
+      newRateDraft = createDefaultRateDraft({ providerId: provider });
+      showAddRateForm = false;
       await loadCustomRates();
       await loadOverview();
     } catch (err) {
@@ -433,6 +427,14 @@
     } finally {
       savingRate = false;
     }
+  }
+
+  function toggleAddRateForm(): void {
+    showAddRateForm = !showAddRateForm;
+  }
+
+  function cancelAddRate(): void {
+    showAddRateForm = false;
   }
 
   function startEditRate(rate: CustomModelRate): void {
@@ -502,12 +504,13 @@
     modelName: string
   ): void {
     void closeModelDetail();
-    rateProviderChoice = defaultRateProviders.some((p) => p.id === providerId)
-      ? providerId
-      : 'custom';
-    newRateDraft.providerId = providerId;
-    newRateDraft.billingDomainId = !domainId || domainId === '*' ? '' : domainId;
-    newRateDraft.model = modelName;
+    rateProviderChoice = resolveRateProviderChoice(providerId, defaultRateProviders);
+    newRateDraft = createDefaultRateDraft({
+      providerId,
+      billingDomainId: !domainId || domainId === '*' ? '' : domainId,
+      model: modelName
+    });
+    showAddRateForm = true;
     void openSettings('rates');
   }
 
@@ -730,6 +733,9 @@
     settingsOpen = true;
     settingsTarget = target;
     settingsTab = resolveSettingsTab(target);
+    if (target === 'rates:add') {
+      showAddRateForm = true;
+    }
     void loadCustomRates();
     if (syncUrl) {
       const url = new URL(window.location.href);
@@ -2364,17 +2370,29 @@
                 <div class="settings-section-heading">
                   <div class="heading-with-action">
                     <h2 id="rates-heading">{t('customRates')}</h2>
-                    <button
-                      type="button"
-                      class="rates-refresh-button"
-                      title={t('customRateRefreshTitle')}
-                      aria-label={t('customRateRefreshTitle')}
-                      disabled={loadingRates}
-                      on:click={loadCustomRates}
-                    >
-                      <span class:spin={loadingRates} aria-hidden="true">↻</span>
-                      {t('customRateRefresh')}
-                    </button>
+                    <div class="rates-header-actions">
+                      <button
+                        type="button"
+                        class="rates-refresh-button"
+                        title={t('customRateRefreshTitle')}
+                        aria-label={t('customRateRefreshTitle')}
+                        disabled={loadingRates}
+                        on:click={loadCustomRates}
+                      >
+                        <span class:spin={loadingRates} aria-hidden="true">↻</span>
+                        {t('customRateRefresh')}
+                      </button>
+                      <button
+                        type="button"
+                        class="add-rate-toggle-button"
+                        data-testid="toggle-add-rate-button"
+                        aria-expanded={showAddRateForm}
+                        aria-controls="custom-rate-form"
+                        on:click={toggleAddRateForm}
+                      >
+                        {showAddRateForm ? t('customRateCancel') : t('customRateAddToggle')}
+                      </button>
+                    </div>
                   </div>
                   <p>{t('customRatesSubtitle')}</p>
                 </div>
@@ -2383,96 +2401,127 @@
                 {/if}
 
                 <div class="custom-rates-container">
-                  <form class="custom-rate-form" on:submit|preventDefault={saveCustomRate}>
-                    <div class="custom-rate-inputs">
-                      <label>
-                        <span>{t('customRateProvider')}</span>
-                        <select
-                          bind:value={rateProviderChoice}
-                          on:change={handleProviderChoiceChange}
-                        >
-                          {#each defaultRateProviders as p (p.id)}
-                            <option value={p.id}>{p.label} ({p.id})</option>
-                          {/each}
-                          <option value="custom">{t('customRateProviderOther')}</option>
-                        </select>
-                      </label>
-                      {#if rateProviderChoice === 'custom'}
+                  {#if showAddRateForm}
+                    <form
+                      id="custom-rate-form"
+                      class="custom-rate-form"
+                      data-testid="custom-rate-form"
+                      on:submit|preventDefault={saveCustomRate}
+                    >
+                      <div class="custom-rate-inputs">
                         <label>
-                          <span>{t('customRateProvider')} ID</span>
+                          <span>{t('customRateProvider')}</span>
+                          <select
+                            bind:value={rateProviderChoice}
+                            on:change={handleProviderChoiceChange}
+                          >
+                            {#each defaultRateProviders as p (p.id)}
+                              <option value={p.id}>{p.label} ({p.id})</option>
+                            {/each}
+                            <option value="custom">{t('customRateProviderOther')}</option>
+                          </select>
+                        </label>
+                        {#if rateProviderChoice === 'custom'}
+                          <label>
+                            <span>{t('customRateProvider')} ID</span>
+                            <input
+                              type="text"
+                              bind:value={newRateDraft.providerId}
+                              placeholder={t('customRateProviderCustomPlaceholder')}
+                              required
+                            />
+                          </label>
+                        {/if}
+                        <label>
+                          <span>{t('customRateDomain')}</span>
                           <input
                             type="text"
-                            bind:value={newRateDraft.providerId}
-                            placeholder={t('customRateProviderCustomPlaceholder')}
+                            bind:value={newRateDraft.billingDomainId}
+                            placeholder={t('customRateDomainWildcard')}
+                          />
+                        </label>
+                        <label>
+                          <span>{t('customRateModel')}</span>
+                          <input
+                            type="text"
+                            bind:value={newRateDraft.model}
+                            placeholder="e.g. gpt-4o, qwen-max"
                             required
                           />
                         </label>
-                      {/if}
-                      <label>
-                        <span>{t('customRateDomain')}</span>
-                        <input
-                          type="text"
-                          bind:value={newRateDraft.billingDomainId}
-                          placeholder={t('customRateDomainWildcard')}
-                        />
-                      </label>
-                      <label>
-                        <span>{t('customRateModel')}</span>
-                        <input
-                          type="text"
-                          bind:value={newRateDraft.model}
-                          placeholder="e.g. gpt-4o, qwen-max"
-                          required
-                        />
-                      </label>
-                      <label>
-                        <span>{t('customRateInput')}</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.0001"
-                          bind:value={newRateDraft.inputRate}
-                          placeholder="2.0"
-                          required
-                        />
-                      </label>
-                      <label>
-                        <span>{t('customRateOutput')}</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.0001"
-                          bind:value={newRateDraft.outputRate}
-                          placeholder="8.0"
-                          required
-                        />
-                      </label>
-                      <label>
-                        <span>{t('customRateCacheRead')}</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.0001"
-                          bind:value={newRateDraft.cacheReadRate}
-                          placeholder="0.5"
-                        />
-                      </label>
-                    </div>
-                    <div class="custom-rate-actions">
-                      <button type="submit" disabled={savingRate}>
-                        {savingRate ? t('customRateUpdating') : t('customRateAdd')}
-                      </button>
-                    </div>
-                  </form>
+                        <label>
+                          <span>{t('customRateInput')}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            bind:value={newRateDraft.inputRate}
+                            placeholder="2.0"
+                            required
+                          />
+                        </label>
+                        <label>
+                          <span>{t('customRateOutput')}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            bind:value={newRateDraft.outputRate}
+                            placeholder="8.0"
+                            required
+                          />
+                        </label>
+                        <label>
+                          <span>{t('customRateCacheRead')}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            bind:value={newRateDraft.cacheReadRate}
+                            placeholder="0.5"
+                          />
+                        </label>
+                      </div>
+                      <div class="custom-rate-actions">
+                        <button type="submit" class="button-primary" disabled={savingRate}>
+                          {savingRate ? t('customRateUpdating') : t('customRateAdd')}
+                        </button>
+                        <button
+                          type="button"
+                          class="button-secondary"
+                          disabled={savingRate}
+                          on:click={cancelAddRate}
+                        >
+                          {t('customRateCancel')}
+                        </button>
+                      </div>
+                    </form>
+                  {/if}
 
                   {#if loadingRates && customRates.length === 0}
                     <small class="custom-rate-empty">{t('loading')}</small>
                   {:else if customRates.length === 0}
-                    <small class="custom-rate-empty">{t('customRateEmpty')}</small>
+                    <div class="custom-rate-empty-container">
+                      <p class="custom-rate-empty">{t('customRateEmpty')}</p>
+                      {#if !showAddRateForm}
+                        <button
+                          type="button"
+                          class="add-rate-button-empty"
+                          data-testid="empty-add-custom-rate-button"
+                          on:click={() => (showAddRateForm = true)}
+                        >
+                          {t('customRateAddToggle')}
+                        </button>
+                      {/if}
+                    </div>
                   {:else}
-                    <div class="custom-rates-list">
+                    <div class="custom-rates-list" data-testid="custom-rates-list">
                       {#each customRates as rate (rate.id)}
-                        <article class="custom-rate-card" data-testid={`custom-rate-${rate.id}`}>
+                        <article
+                          class="custom-rate-card"
+                          data-testid={`custom-rate-${rate.id}`}
+                          class:settings-target-active={settingsTarget === `rate:${rate.id}`}
+                        >
                           {#if editingRateId === rate.id}
                             <form
                               class="custom-rate-edit-form"
@@ -2481,8 +2530,10 @@
                               <div class="custom-rate-edit-header">
                                 <strong>{rate.model}</strong>
                                 <small
-                                  >{rate.providerId} · {rate.billingDomainId ??
-                                    t('customRateDomainWildcard')}</small
+                                  >{rate.providerId} · {formatRateDomain(
+                                    rate.billingDomainId,
+                                    t('customRateDomainWildcard')
+                                  )}</small
                                 >
                               </div>
                               <div class="custom-rate-edit-fields">
@@ -2540,26 +2591,28 @@
                           {:else}
                             <div class="custom-rate-header">
                               <div class="custom-rate-title-row">
-                                <strong>{rate.model}</strong>
+                                <strong class="custom-rate-model-name">{rate.model}</strong>
                                 <span class="custom-rate-provider-badge">{rate.providerId}</span>
                               </div>
-                              <small
-                                >{rate.providerId} · {rate.billingDomainId ??
-                                  t('customRateDomainWildcard')}</small
+                              <small class="custom-rate-domain-label"
+                                >{rate.providerId} · {formatRateDomain(
+                                  rate.billingDomainId,
+                                  t('customRateDomainWildcard')
+                                )}</small
                               >
                             </div>
                             <div class="custom-rate-details">
                               <div class="rate-metric">
                                 <small>{t('customRateInput')}:</small>
-                                <b>${rate.ratesPerMillion.input}/M</b>
+                                <b>{formatRatePerMillion(rate.ratesPerMillion.input)}</b>
                               </div>
                               <div class="rate-metric">
                                 <small>{t('customRateOutput')}:</small>
-                                <b>${rate.ratesPerMillion.output}/M</b>
+                                <b>{formatRatePerMillion(rate.ratesPerMillion.output)}</b>
                               </div>
                               <div class="rate-metric">
                                 <small>{t('customRateCacheRead')}:</small>
-                                <b>${rate.ratesPerMillion.cacheRead}/M</b>
+                                <b>{formatRatePerMillion(rate.ratesPerMillion.cacheRead)}</b>
                               </div>
                             </div>
                             <div class="custom-rate-footer">
@@ -3307,6 +3360,32 @@
     border-color: var(--border);
   }
 
+  .rates-header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .add-rate-toggle-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border: 1px solid var(--accent);
+    border-radius: 7px;
+    background: var(--accent-subtle, rgba(99, 102, 241, 0.12));
+    color: var(--accent-text, #818cf8);
+    font-size: 0.68rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .add-rate-toggle-button:hover {
+    background: var(--accent);
+    color: #ffffff;
+  }
+
   .model-custom-rate-prompt {
     margin-top: 8px;
   }
@@ -3361,6 +3440,11 @@
     font-size: 0.72rem;
   }
 
+  .custom-rate-actions {
+    display: flex;
+    gap: 8px;
+  }
+
   .custom-rate-actions button,
   .custom-rate-card-actions button {
     padding: 5px 12px;
@@ -3370,6 +3454,54 @@
     color: var(--text-strong);
     font-size: 0.7rem;
     cursor: pointer;
+  }
+
+  .custom-rate-actions button:hover,
+  .custom-rate-card-actions button:hover {
+    border-color: var(--text-soft);
+  }
+
+  .custom-rate-actions .button-primary {
+    background: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+  }
+
+  .custom-rate-actions .button-primary:hover {
+    filter: brightness(1.1);
+  }
+
+  .custom-rate-empty-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 28px 16px;
+    border: 1px dashed var(--border-soft);
+    border-radius: 12px;
+    background: var(--surface-subtle);
+  }
+
+  .custom-rate-empty-container p {
+    margin: 0;
+  }
+
+  .add-rate-button-empty {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-inset);
+    color: var(--text-strong);
+    font-size: 0.72rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .add-rate-button-empty:hover {
+    border-color: var(--accent);
+    color: var(--accent-text, #818cf8);
   }
 
   .custom-rate-empty {
@@ -3384,12 +3516,19 @@
   }
 
   .custom-rate-card {
-    display: grid;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
     gap: 8px;
     padding: 12px;
     border: 1px solid var(--border-soft);
     border-radius: 12px;
     background: var(--surface-inset);
+    transition: border-color 0.15s ease;
+  }
+
+  .custom-rate-card:hover {
+    border-color: var(--border);
   }
 
   .custom-rate-header {
@@ -3427,23 +3566,30 @@
 
   .custom-rate-details {
     display: grid;
-    gap: 4px;
-    color: var(--muted);
-    font-size: 0.66rem;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    font-size: 0.64rem;
   }
 
   .rate-metric {
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .rate-metric small {
     color: var(--muted);
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
   }
 
   .rate-metric b {
     color: var(--text-strong);
+    font-size: 0.68rem;
     font-weight: 600;
   }
 

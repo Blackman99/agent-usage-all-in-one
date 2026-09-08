@@ -48,6 +48,8 @@ describe('settings navigation routing', () => {
     expect(isTargetInTab('diagnostic:codex', 'diagnostics')).toBe(true);
     expect(isTargetInTab('diagnostic:codex', 'connections')).toBe(false);
     expect(isTargetInTab('rates', 'rates')).toBe(true);
+    expect(isTargetInTab('rates:add', 'rates')).toBe(true);
+    expect(isTargetInTab('rate:custom-1', 'rates')).toBe(true);
     expect(isTargetInTab('rates', 'privacy')).toBe(false);
     expect(isTargetInTab('monitoring', 'monitoring')).toBe(true);
     expect(isTargetInTab('privacy', 'privacy')).toBe(true);
@@ -80,6 +82,8 @@ describe('settings navigation routing', () => {
 
   it('resolves rates target to rates tab', () => {
     expect(resolveSettingsTab('rates')).toBe('rates');
+    expect(resolveSettingsTab('rates:add')).toBe('rates');
+    expect(resolveSettingsTab('rate:custom-1')).toBe('rates');
   });
 
   it('resolves monitoring target to monitoring tab', () => {
