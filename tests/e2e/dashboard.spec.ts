@@ -466,9 +466,9 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
   await settingsButton.click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await expect(settings).toBeVisible();
-  await expect(settings.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await expect(settings.getByTestId('settings-panel-connections')).toBeVisible();
   await settings.getByRole('button', { name: 'Diagnostics' }).click();
-  await expect(settings.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
+  await expect(settings.getByTestId('settings-panel-diagnostics')).toBeVisible();
   await expect(settings.getByTestId('settings-diagnostic-codex')).toBeVisible();
   await settings.getByRole('button', { name: 'Monitoring' }).click();
   const notificationSetting = page.getByRole('checkbox', { name: 'Local notifications' });
@@ -2419,7 +2419,9 @@ test('switches the complete catalog to Simplified Chinese without translating pr
   await expect(page.getByRole('heading', { name: '连接' })).toHaveCount(0);
   await expect(page.getByText('连接设置').first()).toBeVisible();
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '隐私与数据' })).toBeVisible();
+  const settingsDialog = page.getByRole('dialog', { name: '设置' });
+  await expect(settingsDialog).toBeVisible();
+  await expect(settingsDialog.getByRole('button', { name: '隐私与数据' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Claude Code' })).toBeVisible();
   const demoCard = page.locator('.provider-card').filter({ hasText: 'Demo Agent' });
   await expect(demoCard).toContainText('完整');
@@ -3366,10 +3368,10 @@ test('switches tabs and toggles rate form in redesigned settings dialog', async 
 
   const sidebar = settings.locator('.settings-sidebar');
   await expect(sidebar).toBeVisible();
-  await expect(settings.getByRole('heading', { name: 'Connections' })).toBeVisible();
+  await expect(settings.getByTestId('settings-panel-connections')).toBeVisible();
 
   await sidebar.getByRole('button', { name: 'Rates' }).click();
-  await expect(settings.getByRole('heading', { name: 'Custom model rates' })).toBeVisible();
+  await expect(settings.getByTestId('settings-rates')).toBeVisible();
   const toggleButton = settings.getByTestId('toggle-add-rate-button');
   if ((await toggleButton.count()) > 0) {
     await expect(settings.getByTestId('custom-rate-form')).toHaveCount(0);
@@ -3380,14 +3382,14 @@ test('switches tabs and toggles rate form in redesigned settings dialog', async 
   }
 
   await sidebar.getByRole('button', { name: 'Monitoring' }).click();
-  await expect(settings.getByRole('heading', { name: 'Monitoring' })).toBeVisible();
+  await expect(settings.getByTestId('settings-panel-monitoring')).toBeVisible();
   await expect(settings.getByRole('checkbox', { name: 'Local notifications' })).toBeVisible();
 
   await sidebar.getByRole('button', { name: 'Diagnostics' }).click();
-  await expect(settings.getByRole('heading', { name: 'Diagnostics' })).toBeVisible();
+  await expect(settings.getByTestId('settings-panel-diagnostics')).toBeVisible();
 
   await sidebar.getByRole('button', { name: 'Privacy & data' }).click();
-  await expect(settings.getByRole('heading', { name: 'Privacy & data' })).toBeVisible();
+  await expect(settings.getByTestId('settings-panel-privacy')).toBeVisible();
   await expect(settings.getByRole('button', { name: 'Export JSON' })).toBeVisible();
 
   await settings.locator('.settings-close').click();

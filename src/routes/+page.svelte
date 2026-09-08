@@ -2273,15 +2273,11 @@
             {#if settingsTab === 'connections'}
               <section
                 class="settings-tab-panel connections-section"
-                aria-labelledby="settings-connections-heading"
+                aria-label={t('connections')}
                 data-settings-target="connections"
                 data-testid="settings-panel-connections"
                 tabindex="-1"
               >
-                <div class="settings-section-heading">
-                  <h2 id="settings-connections-heading">{t('connections')}</h2>
-                  <p>{t('connectionsSubtitle')}</p>
-                </div>
                 {#if connectorsError}
                   <p class="settings-error" role="status">{t('connectorsUnavailable')}</p>
                 {/if}
@@ -2361,40 +2357,36 @@
             {:else if settingsTab === 'rates'}
               <section
                 class="settings-tab-panel rates-section"
-                aria-labelledby="rates-heading"
+                aria-label={t('customRates')}
                 data-settings-target="rates"
                 data-testid="settings-rates"
                 class:settings-target-active={settingsTarget === 'rates'}
                 tabindex="-1"
               >
-                <div class="settings-section-heading">
-                  <div class="heading-with-action">
-                    <h2 id="rates-heading">{t('customRates')}</h2>
-                    <div class="rates-header-actions">
-                      <button
-                        type="button"
-                        class="rates-refresh-button"
-                        title={t('customRateRefreshTitle')}
-                        aria-label={t('customRateRefreshTitle')}
-                        disabled={loadingRates}
-                        on:click={loadCustomRates}
-                      >
-                        <span class:spin={loadingRates} aria-hidden="true">↻</span>
-                        {t('customRateRefresh')}
-                      </button>
-                      <button
-                        type="button"
-                        class="add-rate-toggle-button"
-                        data-testid="toggle-add-rate-button"
-                        aria-expanded={showAddRateForm}
-                        aria-controls="custom-rate-form"
-                        on:click={toggleAddRateForm}
-                      >
-                        {showAddRateForm ? t('customRateCancel') : t('customRateAddToggle')}
-                      </button>
-                    </div>
+                <div class="rates-toolbar">
+                  <div class="rates-header-actions">
+                    <button
+                      type="button"
+                      class="rates-refresh-button"
+                      title={t('customRateRefreshTitle')}
+                      aria-label={t('customRateRefreshTitle')}
+                      disabled={loadingRates}
+                      on:click={loadCustomRates}
+                    >
+                      <span class:spin={loadingRates} aria-hidden="true">↻</span>
+                      {t('customRateRefresh')}
+                    </button>
+                    <button
+                      type="button"
+                      class="add-rate-toggle-button"
+                      data-testid="toggle-add-rate-button"
+                      aria-expanded={showAddRateForm}
+                      aria-controls="custom-rate-form"
+                      on:click={toggleAddRateForm}
+                    >
+                      {showAddRateForm ? t('customRateCancel') : t('customRateAddToggle')}
+                    </button>
                   </div>
-                  <p>{t('customRatesSubtitle')}</p>
                 </div>
                 {#if customRatesError}
                   <p class="settings-error" role="status">{t('customRatesUnavailable')}</p>
@@ -2645,15 +2637,11 @@
             {:else if settingsTab === 'monitoring'}
               <section
                 class="settings-tab-panel monitoring-section"
-                aria-labelledby="monitoring-heading"
+                aria-label={t('monitoring')}
                 data-settings-target="monitoring"
                 data-testid="settings-panel-monitoring"
                 tabindex="-1"
               >
-                <div class="settings-section-heading">
-                  <h2 id="monitoring-heading">{t('monitoring')}</h2>
-                  <p>{t('monitoringSubtitle')}</p>
-                </div>
                 {#if monitoringError}
                   <p class="settings-error" role="status">{t('monitoringUnavailable')}</p>
                 {/if}
@@ -2694,15 +2682,11 @@
             {:else if settingsTab === 'diagnostics'}
               <section
                 class="settings-tab-panel diagnostics-section"
-                aria-labelledby="diagnostics-heading"
+                aria-label={t('diagnosticsNav')}
                 data-settings-target="diagnostics"
                 data-testid="settings-panel-diagnostics"
                 tabindex="-1"
               >
-                <div class="settings-section-heading">
-                  <h2 id="diagnostics-heading">{t('diagnostics')}</h2>
-                  <p>{t('diagnosticsSubtitle')}</p>
-                </div>
                 {#if diagnosticsError}
                   <p class="settings-error" role="status">{t('diagnosticsUnavailable')}</p>
                 {/if}
@@ -2738,24 +2722,22 @@
             {:else if settingsTab === 'privacy'}
               <section
                 class="settings-tab-panel privacy-section"
-                aria-labelledby="privacy-heading"
+                aria-label={t('privacy')}
                 data-settings-target="privacy"
                 data-testid="settings-panel-privacy"
                 tabindex="-1"
               >
-                <div class="settings-section-heading">
-                  <h2 id="privacy-heading">{t('privacy')}</h2>
-                  <p>{t('privacySubtitle')}</p>
-                </div>
                 {#if retentionError}
                   <p class="settings-error" role="status">{t('retentionUnavailable')}</p>
                 {:else if retention}
-                  <small>
-                    {retention.rawRetentionDays}
-                    {t('retentionDays')} · {retention.rawObservations}
-                    {t('rawObservations')} · {retention.dailyAggregates}
-                    {t('dailyAggregates')}
-                  </small>
+                  <div class="retention-info-bar">
+                    <small>
+                      {retention.rawRetentionDays}
+                      {t('retentionDays')} · {retention.rawObservations}
+                      {t('rawObservations')} · {retention.dailyAggregates}
+                      {t('dailyAggregates')}
+                    </small>
+                  </div>
                 {/if}
                 {#if privacyActionError}
                   <p class="settings-error" role="status">{t('privacyActionUnavailable')}</p>
@@ -3334,12 +3316,6 @@
   .custom-rates-container {
     display: grid;
     gap: 14px;
-  }
-
-  .heading-with-action {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
   }
 
   .rates-refresh-button {
@@ -3940,19 +3916,6 @@
     background: rgba(14, 17, 24, 0.78);
   }
 
-  .privacy-section h2,
-  .privacy-section p {
-    margin: 0;
-  }
-
-  .privacy-section > div > p:not(.eyebrow),
-  .privacy-section small {
-    display: block;
-    margin-top: 7px;
-    color: #8f98a8;
-    font-size: 0.72rem;
-  }
-
   .privacy-actions {
     display: flex;
     flex-wrap: wrap;
@@ -4040,17 +4003,6 @@
     border: 1px solid rgba(122, 136, 164, 0.17);
     border-radius: 17px;
     background: rgba(14, 17, 24, 0.78);
-  }
-
-  .monitoring-section h2,
-  .monitoring-section p {
-    margin: 0;
-  }
-
-  .monitoring-section > div > p:last-child {
-    margin-top: 7px;
-    color: #8f98a8;
-    font-size: 0.74rem;
   }
 
   .monitoring-controls {
@@ -4857,40 +4809,39 @@
   }
 
   .settings-content {
-    display: grid;
-    gap: 16px;
-    padding: 24px 30px 48px;
-  }
-
-  .settings-content > section {
-    padding: 20px;
-    border: 1px solid var(--border-soft);
-    border-radius: 16px;
-    background: var(--surface);
-  }
-
-  .settings-section-heading {
-    display: grid;
-    gap: 6px;
-    margin-bottom: 16px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--border-soft);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 28px 40px;
+    min-height: 100%;
   }
 
   .settings-dialog .settings-content > section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
     margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .rates-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .retention-info-bar {
+    padding: 10px 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
     background: var(--surface-subtle);
-  }
-
-  .settings-section-heading h2,
-  .settings-section-heading p {
-    margin: 0;
-  }
-
-  .settings-section-heading p {
-    color: #929baa;
-    font-size: 0.74rem;
-    line-height: 1.45;
+    color: var(--muted);
+    font-size: 0.72rem;
   }
 
   .settings-connections {
@@ -4938,13 +4889,6 @@
   .settings-dialog .monitoring-controls,
   .settings-dialog .privacy-actions {
     justify-content: flex-start;
-  }
-
-  .settings-dialog .privacy-section > small {
-    display: block;
-    margin-bottom: 12px;
-    color: #8f98a8;
-    font-size: 0.72rem;
   }
 
   .settings-target-active,
@@ -5002,12 +4946,9 @@
   .ranking-identity small,
   .breakdown-header,
   .usage-totals dt,
-  .privacy-section > div > p:not(.eyebrow),
-  .privacy-section small,
   .diagnostics-grid span,
   .diagnostics-grid small,
   .diagnostics-grid p,
-  .monitoring-section > div > p:last-child,
   .connection-meta,
   .coverage-list,
   .inline-connection summary,
@@ -5019,11 +4960,9 @@
   .quota-meta,
   dt,
   .settings-sidebar-subtitle,
-  .settings-section-heading p,
   .settings-connector-title span,
   .settings-connections small,
-  .settings-connections article > p,
-  .settings-dialog .privacy-section > small {
+  .settings-connections article > p {
     color: var(--muted);
   }
 
