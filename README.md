@@ -23,6 +23,9 @@ The dashboard has two primary tabs:
   totals first, charts Provider share and the interactive daily trend, then shows
   model rankings with visual share bars and the public API retail equivalent of
   eligible token usage.
+- **Settings** provides a centered two-column modal organized into five dedicated
+  categories: Connections, Custom model rates, Monitoring, Diagnostics, and
+  Data & privacy.
 
 Actual charges, provider-reported estimates, fixed subscription fees, and API
 retail equivalents are separate evidence. The API retail equivalent is not a bill
