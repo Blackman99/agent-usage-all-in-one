@@ -2667,7 +2667,7 @@
                 {/if}
                 {#if diagnostics}
                   <div class="diagnostics-grid">
-                    {#each diagnostics.connectors.filter((diagnostic) => !isAutomaticallyManagedCategory(diagnostic.category)) as diagnostic (diagnostic.id)}
+                    {#each diagnostics.connectors.filter((diagnostic) => diagnostic.id !== 'xai-api' && !isAutomaticallyManagedCategory(diagnostic.category)) as diagnostic (diagnostic.id)}
                       <article
                         class:diagnostic-degraded={diagnostic.status === 'degraded'}
                         class:settings-target-active={settingsTarget ===

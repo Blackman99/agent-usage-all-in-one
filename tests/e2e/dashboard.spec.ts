@@ -1220,7 +1220,7 @@ test('renders Grok shared weekly quota without duplicating telemetry or inventin
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('button', { name: 'Diagnostics' }).click();
-  await expect(page.getByTestId('settings-diagnostic-xai-api')).toBeVisible();
+  await expect(page.getByTestId('settings-diagnostic-xai-api')).toHaveCount(0);
   await expect(page.getByTestId('settings-diagnostic-grok')).toHaveCount(0);
   await page.getByRole('button', { name: 'Close settings' }).click();
   await expectProviderHasNoTokenDetail(provider);
