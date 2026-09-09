@@ -23,17 +23,18 @@ const html = `<!DOCTYPE html>
 <meta charset="utf-8">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
+  html, body {
     width: 2400px;
-    height: 2400px;
+    min-height: 100%;
     background: radial-gradient(circle at 50% 12%, #131d36 0%, #090e1c 55%, #050811 100%);
+  }
+  body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color: #e4e8f3;
-    padding: 64px 80px;
-    overflow: hidden;
+    padding: 48px 80px 56px;
     display: flex;
     flex-direction: column;
-    gap: 36px;
+    gap: 28px;
   }
 
   /* Header */
@@ -110,7 +111,7 @@ const html = `<!DOCTYPE html>
   .grid-2col {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 36px;
+    gap: 28px;
   }
 
   .panel-card {
@@ -238,11 +239,68 @@ const html = `<!DOCTYPE html>
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 24px;
+    margin-bottom: 18px;
     padding: 18px 22px;
     background: #141d30;
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 18px;
+  }
+
+  .usage-wall {
+    margin-bottom: 18px;
+    padding: 14px 16px 12px;
+    background: #141d30;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+  }
+  .usage-wall-heading {
+    margin-bottom: 10px;
+    color: #e2e8f0;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .usage-wall-months {
+    display: flex;
+    gap: 11px;
+    margin: 0 0 6px 22px;
+    color: #7d90b8;
+    font-size: 11px;
+  }
+  .usage-wall-body {
+    display: flex;
+    gap: 8px;
+  }
+  .usage-wall-weekdays {
+    display: grid;
+    grid-template-rows: repeat(7, 8px);
+    gap: 3px;
+    color: #7d90b8;
+    font-size: 10px;
+    line-height: 8px;
+  }
+  .usage-wall-weeks {
+    display: flex;
+    gap: 3px;
+  }
+  .usage-wall-week {
+    display: grid;
+    grid-template-rows: repeat(7, 8px);
+    gap: 3px;
+  }
+  .usage-wall-cell {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: #2d333b;
+  }
+  .usage-wall-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 8px;
+    color: #7d90b8;
+    font-size: 11px;
   }
   .kpi-main h2 {
     font-size: 40px;
@@ -311,7 +369,7 @@ const html = `<!DOCTYPE html>
     background: #0f1626;
     border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 28px;
-    padding: 34px;
+    padding: 28px;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
     position: relative;
   }
@@ -364,7 +422,7 @@ const html = `<!DOCTYPE html>
     background: #0f1626;
     border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 28px;
-    padding: 34px;
+    padding: 28px;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
     position: relative;
   }
@@ -602,6 +660,45 @@ const html = `<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="usage-wall">
+      <div class="usage-wall-heading">981.2M recorded Tokens in the last year</div>
+      <div class="usage-wall-months">
+        <span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span>
+        <span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span>
+        <span>May</span><span>Jun</span><span>Jul</span><span>Aug</span>
+      </div>
+      <div class="usage-wall-body">
+        <div class="usage-wall-weekdays">
+          <span></span><span>Mon</span><span></span><span>Wed</span><span></span><span>Fri</span><span></span>
+        </div>
+        <div class="usage-wall-weeks">
+          ${Array.from({ length: 53 }, (_, week) => {
+            const cells = Array.from({ length: 7 }, (_, day) => {
+              const seed = (week * 7 + day) * 17;
+              const empty = week === 0 && day < 4;
+              const future = week === 52 && day > 4;
+              if (empty || future) {
+                return '<span class="usage-wall-cell" style="visibility:hidden"></span>';
+              }
+              const level = seed % 11 === 0 ? 0 : (seed % 5) + 1;
+              const colors = ['#2d333b', '#0e4429', '#006d32', '#26a641', '#39d353'];
+              return `<span class="usage-wall-cell" style="background:${colors[Math.min(4, level - 1)]}"></span>`;
+            }).join('');
+            return `<div class="usage-wall-week">${cells}</div>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="usage-wall-legend">
+        <span>Less</span>
+        <span class="usage-wall-cell" style="background:#2d333b"></span>
+        <span class="usage-wall-cell" style="background:#0e4429"></span>
+        <span class="usage-wall-cell" style="background:#006d32"></span>
+        <span class="usage-wall-cell" style="background:#26a641"></span>
+        <span class="usage-wall-cell" style="background:#39d353"></span>
+        <span>More</span>
+      </div>
+    </div>
+
     <div class="charts-duo">
       <div class="donut-wrap">
         <svg viewBox="0 0 100 100" width="170" height="170">
@@ -804,10 +901,12 @@ async function run() {
   await page.setContent(html, { waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
   const outPath = join(root, 'static/brand/agent-usage-showcase.jpg');
+  const body = page.locator('body');
   await page.screenshot({
     path: outPath,
     type: 'jpeg',
-    quality: 92
+    quality: 92,
+    clip: await body.boundingBox()
   });
   console.log('Successfully written showcase image to:', outPath);
   await browser.close();
