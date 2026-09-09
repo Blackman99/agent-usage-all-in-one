@@ -1830,6 +1830,7 @@ test('supports hover, time-axis zoom, drag panning, and reset on the cost trend'
   const plot = workbench.getByTestId('trend-plot');
   await expect(plot).toHaveAttribute('data-total-buckets', '7');
   await expect(plot).toHaveAttribute('data-visible-buckets', '7');
+  await plot.scrollIntoViewIfNeeded();
 
   const plotBox = await plot.boundingBox();
   if (!plotBox) throw new Error('Trend plot has no visible bounds.');
@@ -1869,7 +1870,9 @@ test('downloads a redacted export and clears only the selected local scope', asy
   await page.goto(freshLaunch.stdout.trim());
 
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const privacy = page.getByRole('dialog', { name: 'Settings' }).getByRole('region', {
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByRole('button', { name: 'Privacy & data' }).click();
+  const privacy = settings.getByRole('region', {
     name: 'Privacy & data'
   });
   await expect(privacy).toBeVisible();

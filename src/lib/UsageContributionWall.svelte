@@ -26,6 +26,7 @@
   $: presentation = buildUsageWallPresentation(wall, locale, formatTokens, interpolate);
   $: monthByWeek = new Map(presentation.monthLabels.map((label) => [label.weekIndex, label.label]));
   $: weekIndexes = presentation.weeks.map((_week, weekIndex) => weekIndex);
+  $: tabbableDate = wall.end;
 
   async function showTooltip(event: FocusEvent | PointerEvent, day: UsageWallCell): Promise<void> {
     const cell = event.currentTarget as HTMLElement;
@@ -58,6 +59,31 @@
 
   function hideTooltip(): void {
     hover = null;
+  }
+
+  function moveFocus(current: HTMLElement, key: string): void {
+    const cells = [
+      ...(current
+        .closest('.usage-wall-weeks')
+        ?.querySelectorAll<HTMLButtonElement>('button.usage-wall-cell') ?? [])
+    ];
+    const index = cells.indexOf(current as HTMLButtonElement);
+    if (index < 0) return;
+    const nextIndex =
+      key === 'ArrowRight' || key === 'ArrowDown'
+        ? index + 1
+        : key === 'ArrowLeft' || key === 'ArrowUp'
+          ? index - 1
+          : key === 'Home'
+            ? 0
+            : key === 'End'
+              ? cells.length - 1
+              : index;
+    const next = cells[nextIndex];
+    if (!next || next === current) return;
+    current.tabIndex = -1;
+    next.tabIndex = 0;
+    next.focus();
   }
 </script>
 
@@ -101,12 +127,26 @@
                   type="button"
                   class="usage-wall-cell"
                   role="gridcell"
+                  tabindex={day.date === tabbableDate ? 0 : -1}
                   data-level={day.level}
                   aria-label={day.accessibleName}
                   on:pointerenter={(event) => showTooltip(event, day)}
                   on:focus={(event) => showTooltip(event, day)}
                   on:pointerleave={hideTooltip}
                   on:blur={hideTooltip}
+                  on:keydown={(event) => {
+                    if (
+                      event.key === 'ArrowRight' ||
+                      event.key === 'ArrowLeft' ||
+                      event.key === 'ArrowDown' ||
+                      event.key === 'ArrowUp' ||
+                      event.key === 'Home' ||
+                      event.key === 'End'
+                    ) {
+                      event.preventDefault();
+                      moveFocus(event.currentTarget, event.key);
+                    }
+                  }}
                 ></button>
               {:else}
                 <span class="usage-wall-cell usage-wall-cell-absent" aria-hidden="true"></span>

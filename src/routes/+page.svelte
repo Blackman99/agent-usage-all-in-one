@@ -2244,6 +2244,9 @@
         tabindex="-1"
         bind:this={settingsPanel}
       >
+        <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
+          >×</button
+        >
         <nav class="settings-sidebar" aria-label="Settings Categories">
           <div class="settings-sidebar-header">
             <p class="eyebrow">{t('settings')}</p>
@@ -2325,9 +2328,6 @@
                 </button>
               {/if}
             </div>
-            <button class="settings-close" aria-label={t('closeSettings')} on:click={closeSettings}
-              >×</button
-            >
           </header>
 
           <div class="settings-content">
@@ -4795,7 +4795,7 @@
     align-items: center;
     justify-content: flex-end;
     gap: 12px;
-    padding: 16px 24px 8px;
+    padding: 16px 64px 8px 24px;
     flex-shrink: 0;
     min-height: 52px;
   }
@@ -4807,7 +4807,10 @@
   }
 
   .settings-close {
-    position: static;
+    position: absolute;
+    top: 16px;
+    right: 24px;
+    z-index: 2;
     flex-shrink: 0;
     width: 32px;
     height: 32px;
