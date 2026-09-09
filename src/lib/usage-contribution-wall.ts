@@ -29,6 +29,27 @@ export interface UsageWallPresentation {
   moreLabel: string;
 }
 
+export interface UsageWallRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface UsageWallSize {
+  width: number;
+  height: number;
+}
+
+export interface UsageWallTooltipPlacement {
+  left: number;
+  top: number;
+  placement: 'above' | 'below';
+}
+
+const TOOLTIP_GAP_PX = 8;
+const TOOLTIP_EDGE_PAD_PX = 8;
+
 type TranslateValues = (key: MessageKey, values?: Record<string, string>) => string;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -86,6 +107,30 @@ export function buildUsageWallPresentation(
     legendLevels: [0, 1, 2, 3, 4],
     lessLabel: translate('usageWallLess'),
     moreLabel: translate('usageWallMore')
+  };
+}
+
+export function usageWallTooltipPlacement(
+  cell: UsageWallRect,
+  tooltip: UsageWallSize,
+  viewport: UsageWallSize
+): UsageWallTooltipPlacement {
+  const centeredLeft = cell.left + cell.width / 2 - tooltip.width / 2;
+  const left = Math.max(
+    TOOLTIP_EDGE_PAD_PX,
+    Math.min(centeredLeft, viewport.width - tooltip.width - TOOLTIP_EDGE_PAD_PX)
+  );
+  const aboveTop = cell.top - tooltip.height - TOOLTIP_GAP_PX;
+  if (aboveTop >= TOOLTIP_EDGE_PAD_PX) {
+    return { left, top: aboveTop, placement: 'above' };
+  }
+  return {
+    left,
+    top: Math.min(
+      cell.top + cell.height + TOOLTIP_GAP_PX,
+      Math.max(TOOLTIP_EDGE_PAD_PX, viewport.height - tooltip.height - TOOLTIP_EDGE_PAD_PX)
+    ),
+    placement: 'below'
   };
 }
 

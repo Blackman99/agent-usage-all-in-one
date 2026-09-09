@@ -1496,7 +1496,19 @@ test('shows an empty usage contribution wall above the Tokens analysis grid', as
   await expect(firstCell).toBeVisible();
   await expect(firstCell).toHaveAttribute('aria-label', 'No usage on Aug 28, 2025');
   await firstCell.hover();
-  await expect(wall.getByTestId('usage-wall-tooltip')).toHaveText('No usage on Aug 28, 2025');
+  const tooltip = wall.getByTestId('usage-wall-tooltip');
+  await expect(tooltip).toHaveText('No usage on Aug 28, 2025');
+  const tooltipBox = await tooltip.boundingBox();
+  const viewport = page.viewportSize();
+  expect(tooltipBox).toBeTruthy();
+  expect(viewport).toBeTruthy();
+  expect(tooltipBox!.x).toBeGreaterThanOrEqual(0);
+  expect(tooltipBox!.y).toBeGreaterThanOrEqual(0);
+  expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(viewport!.width);
+  expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(await tooltip.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true
+  );
   const emptyCells = wall.locator('.usage-wall-cell[data-level="0"]');
   expect(await emptyCells.count()).toBeGreaterThan(300);
   await expect(emptyCells.first()).toHaveCSS('visibility', 'visible');

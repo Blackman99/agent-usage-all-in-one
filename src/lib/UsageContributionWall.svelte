@@ -1,14 +1,19 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { UsageWall } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
-  import { buildUsageWallPresentation, type UsageWallCell } from '$lib/usage-contribution-wall.js';
+  import {
+    buildUsageWallPresentation,
+    usageWallTooltipPlacement,
+    type UsageWallCell
+  } from '$lib/usage-contribution-wall.js';
 
   export let wall: UsageWall;
   export let locale: Locale = detectLocale('');
   export let formatTokens: (value: number) => string;
   export let updating = false;
 
-  let calendarEl: HTMLElement | null = null;
+  let tooltipEl: HTMLElement | null = null;
   let hover: { text: string; left: number; top: number } | null = null;
 
   function interpolate(key: MessageKey, values?: Record<string, string>): string {
@@ -21,19 +26,32 @@
   $: presentation = buildUsageWallPresentation(wall, locale, formatTokens, interpolate);
   $: monthByWeek = new Map(presentation.monthLabels.map((label) => [label.weekIndex, label.label]));
 
-  function showTooltip(event: FocusEvent | PointerEvent, day: UsageWallCell): void {
+  async function showTooltip(event: FocusEvent | PointerEvent, day: UsageWallCell): Promise<void> {
     const cell = event.currentTarget as HTMLElement;
-    const root = calendarEl;
-    if (!root) {
-      hover = { text: day.accessibleName, left: 0, top: 0 };
-      return;
-    }
     const cellRect = cell.getBoundingClientRect();
-    const rootRect = root.getBoundingClientRect();
+    const viewport = {
+      width: window.innerWidth,
+      height: window.innerHeight
+    };
+    const estimated = tooltipEl?.getBoundingClientRect();
+    const tooltipSize = {
+      width: estimated?.width || Math.min(240, Math.max(160, day.accessibleName.length * 7)),
+      height: estimated?.height || (day.accessibleName.includes('·') ? 48 : 36)
+    };
     hover = {
       text: day.accessibleName,
-      left: cellRect.left - rootRect.left + root.scrollLeft + cellRect.width / 2,
-      top: cellRect.top - rootRect.top + root.scrollTop
+      ...usageWallTooltipPlacement(cellRect, tooltipSize, viewport)
+    };
+    await tick();
+    if (!tooltipEl || hover?.text !== day.accessibleName) return;
+    const measured = tooltipEl.getBoundingClientRect();
+    hover = {
+      text: day.accessibleName,
+      ...usageWallTooltipPlacement(
+        cellRect,
+        { width: measured.width, height: measured.height },
+        viewport
+      )
     };
   }
 
@@ -56,7 +74,7 @@
   <div class="usage-wall-header">
     <h3 id="usage-wall-heading" data-testid="usage-wall-heading">{presentation.heading}</h3>
   </div>
-  <div class="usage-wall-scroll" bind:this={calendarEl}>
+  <div class="usage-wall-scroll">
     <div class="usage-wall-calendar" role="grid" aria-label={translate(locale, 'usageWallLabel')}>
       <span class="usage-wall-month-spacer" aria-hidden="true"></span>
       <div class="usage-wall-months" data-testid="usage-wall-months" aria-hidden="true">
@@ -96,18 +114,19 @@
           </div>
         {/each}
       </div>
-      {#if hover}
-        <div
-          class="usage-wall-tooltip"
-          data-testid="usage-wall-tooltip"
-          role="tooltip"
-          style={`left: ${hover.left}px; top: ${hover.top}px`}
-        >
-          {hover.text}
-        </div>
-      {/if}
     </div>
   </div>
+  {#if hover}
+    <div
+      bind:this={tooltipEl}
+      class="usage-wall-tooltip"
+      data-testid="usage-wall-tooltip"
+      role="tooltip"
+      style={`left: ${hover.left}px; top: ${hover.top}px`}
+    >
+      {hover.text}
+    </div>
+  {/if}
   <div class="usage-wall-legend" data-testid="usage-wall-legend">
     <span>{presentation.lessLabel}</span>
     {#each presentation.legendLevels as level (level)}
@@ -241,12 +260,11 @@
   }
 
   .usage-wall-tooltip {
-    position: absolute;
-    z-index: 2;
+    position: fixed;
+    z-index: 40;
     width: max-content;
-    max-width: 240px;
+    max-width: min(240px, calc(100vw - 16px));
     padding: 8px 10px;
-    transform: translate(-50%, calc(-100% - 8px));
     border: 1px solid var(--border);
     border-radius: 8px;
     background: color-mix(in srgb, var(--surface) 94%, transparent);

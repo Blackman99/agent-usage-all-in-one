@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { translate } from '../../src/lib/i18n.js';
 import {
   buildUsageWallPresentation,
+  usageWallTooltipPlacement,
   type UsageWallDay
 } from '../../src/lib/usage-contribution-wall.js';
 
@@ -148,5 +149,23 @@ describe('usage contribution wall presentation', () => {
       level: 4,
       accessibleName: '12.4K recorded Tokens on Aug 28, 2026 · Codex'
     });
+  });
+
+  it('keeps the hover tooltip inside the viewport and flips below a top-row cell', () => {
+    expect(
+      usageWallTooltipPlacement(
+        { left: 800, top: 120, width: 11, height: 11 },
+        { width: 240, height: 48 },
+        { width: 900, height: 600 }
+      )
+    ).toEqual({ left: 652, top: 64, placement: 'above' });
+
+    expect(
+      usageWallTooltipPlacement(
+        { left: 40, top: 20, width: 11, height: 11 },
+        { width: 180, height: 40 },
+        { width: 400, height: 300 }
+      )
+    ).toEqual({ left: 8, top: 39, placement: 'below' });
   });
 });
