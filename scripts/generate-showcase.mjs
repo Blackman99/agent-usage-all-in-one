@@ -138,10 +138,40 @@ const html = `<!DOCTYPE html>
   }
   .panel-top-controls {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     align-items: center;
     gap: 12px;
     margin-bottom: 24px;
+  }
+  .panel-top-left,
+  .panel-top-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .range-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: #172238;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    font-size: 13px;
+    color: #8da0c4;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .range-pill strong {
+    color: #e2e8f0;
+    font-weight: 700;
+  }
+  .control-divider {
+    width: 1px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.12);
+    flex-shrink: 0;
   }
   .control-pill {
     padding: 6px 16px;
@@ -236,9 +266,10 @@ const html = `<!DOCTYPE html>
 
   /* Token KPI Row */
   .kpi-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 28px;
     margin-bottom: 18px;
     padding: 18px 22px;
     background: #141d30;
@@ -247,11 +278,9 @@ const html = `<!DOCTYPE html>
   }
 
   .usage-wall {
-    margin-bottom: 18px;
-    padding: 14px 16px 12px;
-    background: #141d30;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 16px;
+    min-width: 0;
+    padding: 0 0 0 24px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
   }
   .usage-wall-heading {
     margin-bottom: 10px;
@@ -303,33 +332,11 @@ const html = `<!DOCTYPE html>
     font-size: 11px;
   }
   .kpi-main h2 {
-    font-size: 40px;
+    font-size: 46px;
     font-weight: 800;
+    letter-spacing: -1.5px;
     color: #fff;
-    margin-bottom: 4px;
-  }
-  .kpi-main p {
-    font-size: 13px;
-    color: #7d90b8;
-  }
-  .kpi-stats {
-    display: flex;
-    gap: 24px;
-  }
-  .stat-item {
-    text-align: right;
-  }
-  .stat-label {
-    font-size: 12px;
-    color: #7b8dae;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 2px;
-  }
-  .stat-val {
-    font-size: 19px;
-    font-weight: 700;
-    color: #e2e8f0;
+    line-height: 1;
   }
 
   /* Donut and trend chart */
@@ -513,12 +520,16 @@ const html = `<!DOCTYPE html>
   <div class="panel-card">
     <div class="panel-tag">Agent Quotas</div>
     <div class="panel-top-controls">
-      <div class="control-pill active">Agent usage</div>
-      <div class="control-pill">Tokens & costs</div>
-      <div class="control-pill">Settings</div>
-      <div class="control-pill">● System</div>
-      <div class="control-pill">EN</div>
-      <div class="control-pill">↻ Refresh</div>
+      <div class="panel-top-left">
+        <div class="control-pill active">Agent usage</div>
+        <div class="control-pill">Tokens & costs</div>
+      </div>
+      <div class="panel-top-right">
+        <div class="control-pill">Settings</div>
+        <div class="control-pill">● System</div>
+        <div class="control-pill">EN</div>
+        <div class="control-pill">↻ Refresh</div>
+      </div>
     </div>
 
     <div class="quota-grid">
@@ -628,39 +639,32 @@ const html = `<!DOCTYPE html>
   <div class="panel-card">
     <div class="panel-tag">Tokens & Model Costs</div>
     <div class="panel-top-controls">
-      <div class="control-pill">24h</div>
-      <div class="control-pill active">7d</div>
-      <div class="control-pill">30d</div>
-      <div class="control-pill">CNY</div>
-      <div class="control-pill active">USD</div>
+      <div class="panel-top-left">
+        <div class="control-pill">Agent usage</div>
+        <div class="control-pill active">Tokens & costs</div>
+        <div class="range-pill"><strong>Usage</strong> / Aug 27 – Sep 2</div>
+      </div>
+      <div class="panel-top-right">
+        <div class="control-pill active">Cost</div>
+        <div class="control-pill">Tokens</div>
+        <div class="control-pill">24h</div>
+        <div class="control-pill active">7d</div>
+        <div class="control-pill">30d</div>
+        <div class="control-pill">CNY</div>
+        <div class="control-pill active">USD</div>
+        <div class="control-divider"></div>
+        <div class="control-pill">Settings</div>
+        <div class="control-pill">● System</div>
+        <div class="control-pill">EN</div>
+        <div class="control-pill">↻ Refresh</div>
+      </div>
     </div>
 
     <div class="kpi-row">
       <div class="kpi-main">
         <h2>$440.10</h2>
-        <p>API retail equivalent value · 7-day range</p>
       </div>
-      <div class="kpi-stats">
-        <div class="stat-item">
-          <div class="stat-label">Total Tokens</div>
-          <div class="stat-val">981.2M</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Input</div>
-          <div class="stat-val">668.5M</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Output</div>
-          <div class="stat-val">133.6M</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Cache Read</div>
-          <div class="stat-val">388.0M</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="usage-wall">
+      <div class="usage-wall">
       <div class="usage-wall-heading">981.2M recorded Tokens in the last year</div>
       <div class="usage-wall-months">
         <span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span>
@@ -696,6 +700,7 @@ const html = `<!DOCTYPE html>
         <span class="usage-wall-cell" style="background:#26a641"></span>
         <span class="usage-wall-cell" style="background:#39d353"></span>
         <span>More</span>
+      </div>
       </div>
     </div>
 

@@ -19,12 +19,14 @@ The dashboard has two primary tabs:
 
 - **Agent usage** preserves each provider's native five-hour, weekly, monthly,
   All models, and Fable-only quota labels and reset times.
-- **Tokens & model costs** supports 24-hour, 7-day, and 30-day ranges. It puts
-  totals first, then a GitHub-style last-year usage wall of headline-included
-  recorded Tokens, charts Provider share and the interactive daily trend, and
-  shows model rankings with visual share bars and the public API retail
-  equivalent of eligible token usage. The year wall is independent of the
-  selected 24-hour, 7-day, or 30-day window.
+- **Tokens & model costs** supports 24-hour, 7-day, and 30-day ranges. The
+  selected window, metric, and currency sit in the same sticky header as the
+  primary tabs. The summary board leads with the headline amount beside a
+  GitHub-style last-year usage wall of headline-included recorded Tokens, then
+  charts Provider share and the interactive daily trend, and shows model
+  rankings with visual share bars and the public API retail equivalent of
+  eligible token usage. The year wall is independent of the selected 24-hour,
+  7-day, or 30-day window.
 - **Settings** provides a centered two-column modal organized into five dedicated
   categories: Connections, Custom model rates, Monitoring, Diagnostics, and
   Data & privacy.
