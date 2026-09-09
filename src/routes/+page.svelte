@@ -1510,47 +1510,103 @@
 {#key locale}
   <main class="shell" inert={settingsOpen || selectedModelEntry !== null}>
     <header class="product-header">
-      <img class="product-logo" src="/brand/agent-usage-logo.svg" alt={t('bannerAlt')} />
-      <h1 class="visually-hidden">{t('title')}</h1>
-      <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
-        <button
-          id="agent-usage-tab"
-          type="button"
-          role="tab"
-          aria-selected={activeDashboardView === 'agents'}
-          aria-controls="agent-usage-panel"
-          tabindex={activeDashboardView === 'agents' ? 0 : -1}
-          on:click={() => (activeDashboardView = 'agents')}
-          on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
-        >
-        <button
-          id="token-model-costs-tab"
-          type="button"
-          role="tab"
-          aria-selected={activeDashboardView === 'models'}
-          aria-controls="token-model-costs-panel"
-          tabindex={activeDashboardView === 'models' ? 0 : -1}
-          on:click={() => (activeDashboardView = 'models')}
-          on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
-        >
+      <div class="header-left">
+        <div class="header-brand">
+          <img class="product-logo" src="/brand/agent-usage-logo.svg" alt={t('bannerAlt')} />
+          <h1 class="visually-hidden">{t('title')}</h1>
+          <div class="dashboard-tabs" role="tablist" aria-label={t('mainViews')}>
+            <button
+              id="agent-usage-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeDashboardView === 'agents'}
+              aria-controls="agent-usage-panel"
+              tabindex={activeDashboardView === 'agents' ? 0 : -1}
+              on:click={() => (activeDashboardView = 'agents')}
+              on:keydown={handleTablistKeydown}>{t('agentUsageTab')}</button
+            >
+            <button
+              id="token-model-costs-tab"
+              type="button"
+              role="tab"
+              aria-selected={activeDashboardView === 'models'}
+              aria-controls="token-model-costs-panel"
+              tabindex={activeDashboardView === 'models' ? 0 : -1}
+              on:click={() => (activeDashboardView = 'models')}
+              on:keydown={handleTablistKeydown}>{t('tokenModelCostsTab')}</button
+            >
+          </div>
+        </div>
+        {#if activeDashboardView === 'models' && effectiveOverview?.workbench}
+          <div class="header-range" data-testid="header-range">
+            <span class="header-range-label">{t('usage')}</span>
+            <span class="header-range-sep">/</span>
+            <span class="header-range-dates"
+              >{formatWorkbenchRange(effectiveOverview.workbench)}</span
+            >
+          </div>
+        {/if}
       </div>
-      <div class="header-actions">
-        <button class="settings-toggle" bind:this={settingsButton} on:click={() => openSettings()}>
-          {t('settings')}
-        </button>
-        <button class="theme-toggle" on:click={toggleTheme} aria-label={t('themeToggleAria')}>
-          <span class="theme-icon" aria-hidden="true"
-            >{$themePreference === 'system' ? '◐' : $activeTheme === 'dark' ? '☾' : '☀'}</span
+
+      <div class="header-right">
+        {#if activeDashboardView === 'models'}
+          <div class="usage-toolbar workbench-controls">
+            <div class="segmented-control" role="group" aria-label={t('trendMetric')}>
+              <button
+                type="button"
+                aria-pressed={selectedTrendMetric === 'retail-equivalent'}
+                on:click={() => selectUsageMetric('retail-equivalent')}>{t('cost')}</button
+              >
+              <button
+                type="button"
+                aria-pressed={selectedTrendMetric === 'tokens'}
+                on:click={() => selectUsageMetric('tokens')}>{t('tokens')}</button
+              >
+            </div>
+            <div class="history-toolbar" aria-label={t('history')}>
+              {#each ['24h', '7d', '30d'] as window (window)}
+                <button
+                  type="button"
+                  aria-pressed={selectedWindow === window}
+                  on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
+                >
+              {/each}
+            </div>
+            <div class="segmented-control" role="group" aria-label={t('displayCurrency')}>
+              {#each ['CNY', 'USD'] as currency (currency)}
+                <button
+                  type="button"
+                  aria-pressed={selectedCurrency === currency}
+                  on:click={() => selectCurrency(currency as 'CNY' | 'USD')}>{currency}</button
+                >
+              {/each}
+            </div>
+          </div>
+          <span class="header-divider" aria-hidden="true"></span>
+        {/if}
+
+        <div class="header-actions">
+          <button
+            class="settings-toggle"
+            bind:this={settingsButton}
+            on:click={() => openSettings()}
           >
-          {themeLabel($themePreference)}
-        </button>
-        <button class="locale-toggle" on:click={toggleLocale}>
-          {locale === 'en' ? '中文' : 'EN'}
-        </button>
-        <button class="refresh" on:click={refresh} disabled={refreshing}>
-          <span class:spin={refreshing} aria-hidden="true">↻</span>
-          {refreshing ? t('refreshing') : t('refresh')}
-        </button>
+            {t('settings')}
+          </button>
+          <button class="theme-toggle" on:click={toggleTheme} aria-label={t('themeToggleAria')}>
+            <span class="theme-icon" aria-hidden="true"
+              >{$themePreference === 'system' ? '◐' : $activeTheme === 'dark' ? '☾' : '☀'}</span
+            >
+            {themeLabel($themePreference)}
+          </button>
+          <button class="locale-toggle" on:click={toggleLocale}>
+            {locale === 'en' ? '中文' : 'EN'}
+          </button>
+          <button class="refresh" on:click={refresh} disabled={refreshing}>
+            <span class:spin={refreshing} aria-hidden="true">↻</span>
+            {refreshing ? t('refreshing') : t('refresh')}
+          </button>
+        </div>
       </div>
     </header>
 
@@ -1874,47 +1930,9 @@
               data-testid="token-money-workbench"
               aria-labelledby="token-money-workbench-heading"
             >
-              <div class="usage-toolbar">
-                <div>
-                  <h2 id="token-money-workbench-heading">{t('tokenMoneyWorkbench')}</h2>
-                  <p>
-                    <strong>{t('usage')}</strong><span>/</span>{formatWorkbenchRange(workbench)}
-                  </p>
-                </div>
-                <div class="workbench-controls">
-                  <div class="segmented-control" role="group" aria-label={t('trendMetric')}>
-                    <button
-                      type="button"
-                      aria-pressed={selectedTrendMetric === 'retail-equivalent'}
-                      on:click={() => selectUsageMetric('retail-equivalent')}>{t('cost')}</button
-                    >
-                    <button
-                      type="button"
-                      aria-pressed={selectedTrendMetric === 'tokens'}
-                      on:click={() => selectUsageMetric('tokens')}>{t('tokens')}</button
-                    >
-                  </div>
-                  <div class="history-toolbar" aria-label={t('history')}>
-                    {#each ['24h', '7d', '30d'] as window (window)}
-                      <button
-                        type="button"
-                        aria-pressed={selectedWindow === window}
-                        on:click={() => selectWindow(window as HistoryWindow)}>{window}</button
-                      >
-                    {/each}
-                  </div>
-                  <div class="segmented-control" role="group" aria-label={t('displayCurrency')}>
-                    {#each ['CNY', 'USD'] as currency (currency)}
-                      <button
-                        type="button"
-                        aria-pressed={selectedCurrency === currency}
-                        on:click={() => selectCurrency(currency as 'CNY' | 'USD')}
-                        >{currency}</button
-                      >
-                    {/each}
-                  </div>
-                </div>
-              </div>
+              <h2 id="token-money-workbench-heading" class="visually-hidden">
+                {t('tokenMoneyWorkbench')}
+              </h2>
 
               <section
                 class="usage-summary-board"
@@ -2920,17 +2938,75 @@
   }
 
   .product-header {
-    display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr);
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 18px;
-    min-height: 68px;
-    padding: 10px 12px 10px 10px;
+    gap: 16px;
+    min-height: 64px;
+    padding: 10px 14px 10px 10px;
     border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
     border-radius: 22px;
     background: color-mix(in srgb, var(--surface) 88%, transparent);
     box-shadow: var(--shadow-soft);
     backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .header-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .header-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface-inset) 60%, transparent);
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .header-range-label {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+
+  .header-range-sep {
+    color: var(--muted);
+    opacity: 0.5;
+  }
+
+  .header-range-dates {
+    color: var(--text-soft);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .header-divider {
+    display: inline-block;
+    width: 1px;
+    height: 22px;
+    margin: 0 4px;
+    background: color-mix(in srgb, var(--border) 80%, transparent);
+    flex-shrink: 0;
   }
 
   .product-logo {
@@ -2976,8 +3052,10 @@
   .refresh {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 10px;
     min-height: 38px;
+    width: 146px;
     padding: 0 15px;
     border: 1px solid #2c3342;
     border-radius: 999px;
@@ -3083,56 +3161,16 @@
     box-shadow: var(--shadow-soft);
   }
 
-  .usage-toolbar {
+  .usage-toolbar.workbench-controls {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-  }
-
-  .usage-toolbar {
-    margin-bottom: 18px;
-    padding: 2px 2px 18px;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .usage-toolbar h2,
-  .usage-toolbar p {
-    margin: 0;
-  }
-
-  .usage-toolbar h2 {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-  }
-
-  .usage-toolbar p {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: #929baa;
-    font-size: 0.78rem;
-  }
-
-  .usage-toolbar p strong {
-    color: #eef1f6;
-    font-size: 0.92rem;
-    font-weight: 600;
-  }
-
-  .usage-toolbar p span {
-    color: #626b79;
+    gap: 8px;
   }
 
   .workbench-controls {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 7px;
+    align-items: center;
+    gap: 8px;
   }
 
   .segmented-control {
@@ -4884,7 +4922,6 @@
   .domain-tabs button,
   .eyebrow,
   .section-label,
-  .usage-toolbar p,
   .ranking-identity small,
   .breakdown-header,
   .diagnostics-grid span,
@@ -4904,7 +4941,6 @@
     color: var(--muted);
   }
 
-  .usage-toolbar p strong,
   .usage-headline > strong,
   .ranking-heading h3,
   .ranking-identity strong,
@@ -5105,23 +5141,35 @@
     }
 
     .product-header {
-      grid-template-areas:
-        'logo actions'
-        'tabs tabs';
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 10px 12px;
-      padding: 9px;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 10px 12px;
       border-radius: 20px;
     }
 
+    .header-left {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+    }
+
     .product-logo {
-      grid-area: logo;
       width: 44px;
       height: 44px;
+      flex-shrink: 0;
     }
 
     .dashboard-tabs {
-      grid-area: tabs;
+      flex: 1;
       width: 100%;
     }
 
@@ -5131,10 +5179,28 @@
       padding: 0 10px;
     }
 
+    .header-range {
+      width: 100%;
+      justify-content: center;
+      box-sizing: border-box;
+    }
+
+    .header-right {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .header-divider {
+      display: none;
+    }
+
     .header-actions {
-      grid-area: actions;
       flex-wrap: wrap;
-      justify-content: flex-end;
+      justify-content: space-between;
+      gap: 6px;
+      width: 100%;
     }
 
     .refresh,
@@ -5142,6 +5208,11 @@
     .settings-toggle,
     .theme-toggle {
       min-height: 36px;
+      flex: 1 1 calc(25% - 6px);
+      min-width: 0;
+      padding: 0 8px;
+      text-align: center;
+      justify-content: center;
     }
 
     .settings-content {
@@ -5156,10 +5227,12 @@
     .usage-toolbar {
       align-items: flex-start;
       flex-direction: column;
+      width: 100%;
     }
 
     .workbench-controls {
       justify-content: flex-start;
+      width: 100%;
     }
 
     .token-money-workbench {

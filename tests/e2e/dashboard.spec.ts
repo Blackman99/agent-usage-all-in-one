@@ -385,10 +385,7 @@ test('shows persisted provider usage and refreshes from the dashboard', async ({
   await expect(demoProvider.locator('.token-total')).toHaveCount(0);
   await expect(page.locator('.quota-meta')).toContainText(/in 3 hours/);
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await page
-    .getByTestId('token-money-workbench')
-    .getByRole('button', { name: 'Tokens', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(page.getByTestId('usage-headline').locator('strong')).toHaveAttribute(
     'aria-label',
     /[\d,]+ Tokens/
@@ -1427,7 +1424,7 @@ test('keeps the workbench steady during manual and window refreshes', async ({ p
   await expect(workbench.getByTestId('usage-contribution-wall')).toBeVisible();
   await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
   const settledBoxes = await workbenchPanelBoxes(page);
-  const settledToolbarBox = await workbench.locator('.usage-toolbar').boundingBox();
+  const settledToolbarBox = await page.locator('.usage-toolbar').boundingBox();
 
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Refreshing…', exact: true })).toBeVisible();
@@ -1436,14 +1433,14 @@ test('keeps the workbench steady during manual and window refreshes', async ({ p
   await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toBeVisible();
   await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toBeVisible();
   const manualRefreshStatusCount = await page.getByTestId('model-costs-refresh-status').count();
-  const refreshingToolbarBox = await workbench.locator('.usage-toolbar').boundingBox();
+  const refreshingToolbarBox = await page.locator('.usage-toolbar').boundingBox();
   releaseManualRefresh();
   await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
   expect(manualRefreshStatusCount).toBe(0);
   expect(refreshingToolbarBox).toEqual(settledToolbarBox);
   expect(await workbenchPanelBoxes(page)).toEqual(settledBoxes);
 
-  await workbench.getByRole('button', { name: '30d' }).click();
+  await page.getByRole('button', { name: '30d' }).click();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
   await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toBeVisible();
   await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toBeVisible();
@@ -1588,7 +1585,7 @@ test('keeps the usage contribution wall independent of 24h/7d/30d and refresh-st
     )
     .toBe(true);
 
-  await workbench.getByRole('button', { name: '30d' }).click();
+  await page.getByRole('button', { name: '30d' }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('¥9.00');
   expect(wallRequests).toHaveLength(initialWallRequests);
 
@@ -1673,32 +1670,29 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   const providerShareData = workbench.getByRole('table', { name: 'Provider share' });
   await expect(providerShareData).toContainText('History Agent');
   await expect(providerShareData).not.toContainText('Unknown Agent');
-  await workbench.getByRole('button', { name: 'Tokens', exact: true }).click();
+  await page.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
   await expect(providerShareData).toContainText('700 Tokens');
   await expect(providerShareData).not.toContainText('Unknown Agent');
-  await workbench.getByRole('button', { name: '24h' }).click();
+  await page.getByRole('button', { name: '24h' }).click();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
   await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toBeVisible();
   await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toBeVisible();
-  await expect(workbench.getByRole('button', { name: '24h' })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
+  await expect(page.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true');
   await expect(workbench.getByTestId('usage-headline')).toBeVisible();
   releaseDelayedWindowRequest();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
   await expect(workbench.getByTestId('usage-headline')).toContainText('100');
-  await workbench.getByRole('button', { name: '7d' }).click();
+  await page.getByRole('button', { name: '7d' }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
-  await workbench.getByRole('button', { name: '30d' }).click();
+  await page.getByRole('button', { name: '30d' }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('3,000');
   await expect(workbench.getByTestId('usage-contribution-wall')).toBeVisible();
   await expect(workbench.getByTestId('usage-totals')).toHaveCount(0);
   await expect(workbench.getByText('Subscription', { exact: true })).toHaveCount(0);
-  await workbench.getByRole('button', { name: 'USD' }).click();
+  await page.getByRole('button', { name: 'USD' }).click();
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
-  await workbench.getByRole('button', { name: 'Cost', exact: true }).click();
+  await page.getByRole('button', { name: 'Cost', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
   const trendTable = workbench.getByRole('table', { name: 'Trend data' });
   await expect(trendTable).toContainText('Gap');
@@ -1709,10 +1703,7 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await expect(workbench.getByRole('button', { name: 'USD' })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
+  await expect(page.getByRole('button', { name: 'USD' })).toHaveAttribute('aria-pressed', 'true');
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
 });
 
@@ -1857,7 +1848,6 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(rows.first().locator('img')).toHaveAttribute('src', '/brands/claude.svg');
 
   await page
-    .getByTestId('token-money-workbench')
     .getByRole('button', {
       name: 'Tokens',
       exact: true
@@ -1872,7 +1862,6 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(ranking.getByText('Unclassified usage')).toHaveCount(0);
 
   await page
-    .getByTestId('token-money-workbench')
     .getByRole('button', {
       name: 'Cost',
       exact: true
@@ -1892,14 +1881,8 @@ test('shows isolated model ranking and returns focus after keyboard detail revie
   await expect(ranking.getByRole('button', { name: 'Day', exact: true })).toHaveCount(0);
   await expect(ranking.getByRole('button', { name: 'Model', exact: true })).toHaveCount(0);
   await expect(ranking.getByTestId('day-breakdown-row')).toHaveCount(0);
-  await page
-    .getByTestId('token-money-workbench')
-    .getByRole('button', { name: 'Tokens', exact: true })
-    .click();
-  await page
-    .getByTestId('token-money-workbench')
-    .getByRole('button', { name: 'Cost', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Tokens', exact: true }).click();
+  await page.getByRole('button', { name: 'Cost', exact: true }).click();
 
   const fableRow = rows.filter({ hasText: 'fable-model' });
   await fableRow.focus();
@@ -2122,10 +2105,7 @@ test('follows system theme and keeps the usage dashboard responsive with local o
     '/brands/grok-dark.svg'
   );
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await page
-    .getByTestId('token-money-workbench')
-    .getByRole('button', { name: 'Tokens', exact: true })
-    .click();
+  await page.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(page.getByTestId('usage-headline')).toContainText('12.4K');
   await expect(page.getByTestId('usage-headline').locator('strong')).toHaveAttribute(
     'aria-label',
