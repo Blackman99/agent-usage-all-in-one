@@ -1424,6 +1424,7 @@ test('keeps the workbench steady during manual and window refreshes', async ({ p
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByTestId('usage-headline')).toBeVisible();
+  await expect(workbench.getByTestId('usage-contribution-wall')).toBeVisible();
   await expect(workbench.getByTestId('usage-trend-chart')).toBeVisible();
   const settledBoxes = await workbenchPanelBoxes(page);
   const settledToolbarBox = await workbench.locator('.usage-toolbar').boundingBox();
@@ -1692,9 +1693,8 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
   await workbench.getByRole('button', { name: '30d' }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('3,000');
-  await expect(workbench.getByTestId('usage-totals')).toContainText('Input');
-  await expect(workbench.getByTestId('usage-totals')).toContainText('Output');
-  await expect(workbench.getByTestId('usage-totals')).toContainText('Cache read');
+  await expect(workbench.getByTestId('usage-contribution-wall')).toBeVisible();
+  await expect(workbench.getByTestId('usage-totals')).toHaveCount(0);
   await expect(workbench.getByText('Subscription', { exact: true })).toHaveCount(0);
   await workbench.getByRole('button', { name: 'USD' }).click();
   await expect.poll(() => requestedCurrencies.at(-1)).toBe('USD');
@@ -1716,40 +1716,11 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.getByTestId('usage-headline')).toContainText('$1.25');
 });
 
-test('shows known token categories when classification coverage is partial', async ({ page }) => {
+test('shows the usage contribution wall inside the summary board without raw totals', async ({
+  page
+}) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
-  const overview = historyOverviewFixture('30d', 120, 'USD') as {
-    workbench: {
-      tokenBreakdown: {
-        status: 'available' | 'partial' | 'unavailable';
-        tokenTotals: {
-          total: number;
-          input: number;
-          output: number;
-          reasoning: number;
-          cacheRead: number;
-          cacheWrite: number;
-        };
-        classificationCoverage: number | null;
-        authorities: string[];
-        lastObservedAt: string | null;
-      };
-    };
-  };
-  overview.workbench.tokenBreakdown = {
-    status: 'partial',
-    tokenTotals: {
-      total: 120,
-      input: 50,
-      output: 20,
-      reasoning: 10,
-      cacheRead: 15,
-      cacheWrite: 5
-    },
-    classificationCoverage: 100 / 120,
-    authorities: ['local-observation'],
-    lastObservedAt: '2026-08-29T03:47:00.000Z'
-  };
+  const overview = historyOverviewFixture('30d', 120, 'USD');
 
   await page.route('**/api/overview**', async (route) => {
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(overview) });
@@ -1757,45 +1728,11 @@ test('shows known token categories when classification coverage is partial', asy
 
   await page.goto(freshLaunch.stdout.trim());
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  const totals = page.getByTestId('usage-totals');
+  const summaryBoard = page.getByTestId('usage-summary-board');
 
-  await expect(totals.getByText('Input', { exact: true }).locator('..').locator('dd')).toHaveText(
-    '50'
-  );
-  await expect(totals.getByText('Output', { exact: true }).locator('..').locator('dd')).toHaveText(
-    '20'
-  );
-  await expect(
-    totals.getByText('Reasoning', { exact: true }).locator('..').locator('dd')
-  ).toHaveText('10');
-  await expect(
-    totals.getByText('Cache read', { exact: true }).locator('..').locator('dd')
-  ).toHaveText('15');
-  await expect(
-    totals.getByText('Cache write', { exact: true }).locator('..').locator('dd')
-  ).toHaveText('5');
-  // Classification coverage is no longer printed beside the totals.
-  await expect(totals).not.toContainText('83.3%');
-
-  overview.workbench.tokenBreakdown = {
-    status: 'unavailable',
-    tokenTotals: {
-      total: 0,
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cacheRead: 0,
-      cacheWrite: 0
-    },
-    classificationCoverage: null,
-    authorities: [],
-    lastObservedAt: null
-  };
-  await page.reload();
-  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
-  await expect(
-    page.getByTestId('usage-totals').getByText('Input', { exact: true }).locator('..').locator('dd')
-  ).toHaveText('Unavailable');
+  await expect(summaryBoard.getByTestId('usage-headline')).toContainText('$1.25');
+  await expect(summaryBoard.getByTestId('usage-contribution-wall')).toBeVisible();
+  await expect(page.getByTestId('usage-totals')).toHaveCount(0);
 });
 
 test('supports hover, time-axis zoom, drag panning, and reset on the cost trend', async ({
@@ -3848,7 +3785,7 @@ async function workbenchPanelBoxes(
     };
     return {
       headline: box('[data-testid="usage-headline"]'),
-      totals: box('[data-testid="usage-totals"]'),
+      wall: box('[data-testid="usage-contribution-wall"]'),
       providerShare: box('[data-testid="usage-analysis-grid"] .usage-summary'),
       trend: box('[data-testid="usage-trend-chart"]'),
       breakdown: box('[data-testid="usage-breakdown"] .ranking-heading')

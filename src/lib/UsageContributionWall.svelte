@@ -12,6 +12,7 @@
   export let locale: Locale = detectLocale('');
   export let formatTokens: (value: number) => string;
   export let updating = false;
+  export let embedded = false;
 
   let tooltipEl: HTMLElement | null = null;
   let hover: { text: string; left: number; top: number } | null = null;
@@ -89,6 +90,7 @@
 
 <section
   class="usage-contribution-wall"
+  class:usage-contribution-wall-embedded={embedded}
   data-testid="usage-contribution-wall"
   aria-labelledby="usage-wall-heading"
   aria-busy={updating}
@@ -189,6 +191,24 @@
     border: 1px solid var(--border-soft);
     border-radius: 18px;
     background: var(--surface-subtle);
+  }
+
+  .usage-contribution-wall.usage-contribution-wall-embedded {
+    min-width: 0;
+    margin-bottom: 0;
+    padding: 0 0 0 28px;
+    border: 0;
+    border-left: 1px solid var(--border-soft);
+    border-radius: 0;
+    background: transparent;
+  }
+
+  @media (max-width: 900px) {
+    .usage-contribution-wall.usage-contribution-wall-embedded {
+      padding: 18px 0 0;
+      border-top: 1px solid var(--border-soft);
+      border-left: 0;
+    }
   }
 
   .panel-progress {

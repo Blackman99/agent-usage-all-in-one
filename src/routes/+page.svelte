@@ -1953,73 +1953,16 @@
                   </strong>
                 </div>
 
-                <div
-                  class="usage-totals"
-                  data-testid="usage-totals"
-                  aria-labelledby="usage-totals-heading"
-                >
-                  <h3 id="usage-totals-heading">{t('usageTotals')}</h3>
-                  <dl>
-                    <div>
-                      <dt>{t('recordedTokens')}</dt>
-                      <dd>
-                        {workbench.recordedTokens === null
-                          ? t('notAvailable')
-                          : formatCompactNumber(workbench.recordedTokens)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('input')}</dt>
-                      <dd>
-                        {workbench.tokenBreakdown.status !== 'unavailable'
-                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.input)
-                          : t('notAvailable')}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('output')}</dt>
-                      <dd>
-                        {workbench.tokenBreakdown.status !== 'unavailable'
-                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.output)
-                          : t('notAvailable')}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('reasoning')}</dt>
-                      <dd>
-                        {workbench.tokenBreakdown.status !== 'unavailable'
-                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.reasoning)
-                          : t('notAvailable')}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('cacheRead')}</dt>
-                      <dd>
-                        {workbench.tokenBreakdown.status !== 'unavailable'
-                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheRead)
-                          : t('notAvailable')}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{t('cacheWrite')}</dt>
-                      <dd>
-                        {workbench.tokenBreakdown.status !== 'unavailable'
-                          ? formatCompactNumber(workbench.tokenBreakdown.tokenTotals.cacheWrite)
-                          : t('notAvailable')}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
+                {#if usageWall}
+                  <UsageContributionWall
+                    wall={usageWall}
+                    {locale}
+                    formatTokens={formatCompactNumber}
+                    updating={usageWallLoading}
+                    embedded={true}
+                  />
+                {/if}
               </section>
-
-              {#if usageWall}
-                <UsageContributionWall
-                  wall={usageWall}
-                  {locale}
-                  formatTokens={formatCompactNumber}
-                  updating={usageWallLoading}
-                />
-              {/if}
 
               <div
                 class="usage-overview-grid"
@@ -3229,7 +3172,7 @@
   .usage-summary-board {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(230px, 0.3fr) minmax(0, 1fr);
+    grid-template-columns: minmax(200px, auto) minmax(0, 1fr);
     gap: 28px;
     align-items: center;
     margin-bottom: 14px;
@@ -3284,46 +3227,6 @@
   .provider-share-heading small {
     color: var(--muted);
     font-size: 0.64rem;
-  }
-
-  .usage-totals {
-    min-width: 0;
-    padding-left: 26px;
-    border-left: 1px solid var(--border-soft);
-  }
-
-  .usage-totals h3 {
-    margin: 0 0 18px;
-    color: #e6eaf2;
-    font-size: 0.84rem;
-    font-weight: 550;
-  }
-
-  .usage-totals dl {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 18px;
-    margin: 0;
-  }
-
-  .usage-totals dl div {
-    display: grid;
-    gap: 7px;
-    padding-left: 12px;
-    border-left: 2px solid color-mix(in srgb, var(--primary) 38%, var(--border));
-  }
-
-  .usage-totals dt {
-    color: #7f8897;
-    font-size: 0.66rem;
-  }
-
-  .usage-totals dd {
-    margin: 0;
-    color: #e9ecf2;
-    font-size: 0.95rem;
-    font-variant-numeric: tabular-nums;
-    font-weight: 550;
   }
 
   .custom-rates-container {
@@ -4495,21 +4398,6 @@
     background: #c2413b;
   }
 
-  dt {
-    overflow: hidden;
-    color: #858e9e;
-    font-size: 0.68rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  dd {
-    margin: 7px 0 0;
-    font-size: clamp(0.92rem, 2vw, 1.18rem);
-    font-variant-numeric: tabular-nums;
-    font-weight: 650;
-  }
-
   .state {
     padding: 48px;
     color: #a9b0bf;
@@ -4999,7 +4887,6 @@
   .usage-toolbar p,
   .ranking-identity small,
   .breakdown-header,
-  .usage-totals dt,
   .diagnostics-grid span,
   .diagnostics-grid small,
   .diagnostics-grid p,
@@ -5012,7 +4899,6 @@
   .freshness,
   .quota-copy span,
   .quota-meta,
-  dt,
   .settings-sidebar-subtitle,
   .settings-connector-title span {
     color: var(--muted);
@@ -5020,8 +4906,6 @@
 
   .usage-toolbar p strong,
   .usage-headline > strong,
-  .usage-totals h3,
-  .usage-totals dd,
   .ranking-heading h3,
   .ranking-identity strong,
   .ranking-value strong,
@@ -5302,19 +5186,9 @@
       padding: 16px;
     }
 
-    .usage-totals {
-      padding: 18px 0 0;
-      border-top: 1px solid var(--border-soft);
-      border-left: 0;
-    }
-
     .provider-card {
       padding: 20px;
       border-radius: 22px;
-    }
-
-    .usage-totals dl {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .ranking-heading {

@@ -207,7 +207,7 @@
 }
 
 .shell .usage-summary-board {
-  grid-template-columns: minmax(350px, 0.58fr) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, auto) minmax(0, 1fr);
   gap: 30px;
   margin-bottom: 16px;
   padding: 26px;
@@ -233,41 +233,13 @@
   font-weight: 600;
 }
 
-.shell .usage-headline > small,
-.shell .usage-totals-evidence {
+.shell .usage-headline > small {
   font-size: 0.7rem;
   line-height: 1.5;
 }
 
-.shell .usage-totals {
+.shell .usage-contribution-wall.usage-contribution-wall-embedded {
   padding-left: 30px;
-}
-
-.shell .usage-totals h3 {
-  margin-bottom: 20px;
-  font-size: 0.9rem;
-}
-
-.shell .usage-totals dl {
-  gap: 18px 14px;
-}
-
-.shell .usage-totals dl div {
-  gap: 8px;
-  min-width: 0;
-  padding-left: 13px;
-}
-
-.shell .usage-totals dt {
-  font-size: 0.69rem;
-  line-height: 1.35;
-}
-
-.shell .usage-totals dd {
-  overflow: hidden;
-  font-size: 1rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .shell .usage-overview-grid {
@@ -385,11 +357,12 @@
 
 @media (max-width: 1180px) {
   .shell .usage-summary-board {
-    grid-template-columns: minmax(290px, 0.48fr) minmax(0, 1fr);
+    grid-template-columns: minmax(200px, auto) minmax(0, 1fr);
+    gap: 20px;
   }
 
-  .shell .usage-totals dl {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .shell .usage-contribution-wall.usage-contribution-wall-embedded {
+    padding-left: 20px;
   }
 }
 
@@ -399,8 +372,8 @@
     grid-template-columns: 1fr;
   }
 
-  .shell .usage-totals {
-    padding: 22px 0 0;
+  .shell .usage-contribution-wall.usage-contribution-wall-embedded {
+    padding: 20px 0 0;
     border-top: 1px solid var(--border-soft);
     border-left: 0;
   }
@@ -475,14 +448,6 @@
     max-width: 100%;
     font-size: clamp(1.4rem, 7vw, 2.4rem);
     letter-spacing: -0.045em;
-  }
-
-  .shell .usage-totals dl {
-    gap: 16px 10px;
-  }
-
-  .shell .usage-totals dl div {
-    padding-left: 10px;
   }
 
   .shell .usage-overview-grid .workbench-trend {
