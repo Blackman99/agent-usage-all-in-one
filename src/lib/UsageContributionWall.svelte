@@ -25,6 +25,7 @@
 
   $: presentation = buildUsageWallPresentation(wall, locale, formatTokens, interpolate);
   $: monthByWeek = new Map(presentation.monthLabels.map((label) => [label.weekIndex, label.label]));
+  $: weekIndexes = presentation.weeks.map((_week, weekIndex) => weekIndex);
 
   async function showTooltip(event: FocusEvent | PointerEvent, day: UsageWallCell): Promise<void> {
     const cell = event.currentTarget as HTMLElement;
@@ -78,7 +79,7 @@
     <div class="usage-wall-calendar" role="grid" aria-label={translate(locale, 'usageWallLabel')}>
       <span class="usage-wall-month-spacer" aria-hidden="true"></span>
       <div class="usage-wall-months" data-testid="usage-wall-months" aria-hidden="true">
-        {#each presentation.weeks as _, weekIndex (weekIndex)}
+        {#each weekIndexes as weekIndex (weekIndex)}
           <span>{monthByWeek.get(weekIndex) ?? ''}</span>
         {/each}
       </div>
