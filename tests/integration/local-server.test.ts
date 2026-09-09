@@ -126,6 +126,68 @@ describe('local HTTP server', () => {
     resolveRebuild();
   });
 
+  it('serves brand images while a background refresh persists collected usage', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-refresh-assets-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const persistSnapshot = repository.saveSnapshot.bind(repository);
+    repository.saveSnapshot = async (snapshot) => {
+      const busyUntil = Date.now() + 400;
+      while (Date.now() < busyUntil) {
+        // A large connector persist occupies the event loop the same way.
+      }
+      await persistSnapshot(snapshot);
+    };
+    let releaseCollection!: () => void;
+    const collectionGate = new Promise<void>((resolve) => {
+      releaseCollection = resolve;
+    });
+    let collectionStarted!: () => void;
+    const collectionBegan = new Promise<void>((resolve) => {
+      collectionStarted = resolve;
+    });
+    const connector: Connector = {
+      id: 'codex',
+      async collect() {
+        collectionStarted();
+        await collectionGate;
+        return {
+          provider: { id: 'codex', displayName: 'Codex' },
+          billingDomains: [{ id: 'subscription', displayName: 'Codex subscription' }],
+          quotaBuckets: [],
+          usage: [],
+          costs: [],
+          observedAt: '2026-08-28T02:00:00.000Z'
+        };
+      }
+    };
+    const application = new UsageApplication({ repository, connectors: [connector] });
+    const server = await startLocalServer({
+      application,
+      apiToken: 'refresh-assets-token',
+      staticDirectory: join(process.cwd(), 'static')
+    });
+    servers.push(server);
+
+    const refresh = fetch(`${server.origin}/api/refresh?background=true`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer refresh-assets-token' }
+    });
+    await collectionBegan;
+    expect((await refresh).status).toBe(202);
+
+    const startedAt = performance.now();
+    const imagePromise = fetch(`${server.origin}/brands/openai.svg`);
+    releaseCollection();
+    const image = await imagePromise;
+    expect(image.status).toBe(200);
+    expect(image.headers.get('content-type')).toBe('image/svg+xml');
+    expect(await image.text()).toContain('<svg');
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    await application.startBackgroundProcessing({ userInitiated: true });
+    repository.close();
+  });
+
   it('redacts credentials from adapter error responses', async () => {
     const application = {
       async getOverview() {

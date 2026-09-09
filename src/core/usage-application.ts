@@ -288,10 +288,10 @@ export class UsageApplication {
     const runtimeStates = new Map(
       this.#repository.getConnectorRuntimeStates().map((state) => [state.id, state])
     );
-    await Promise.all(
+    const collected = await Promise.all(
       this.#connectors.map(async (connector) => {
         if (connector.consentId && connectorStates.get(connector.consentId) !== 'connected') {
-          return;
+          return null;
         }
         const now = this.#clock();
         const runtime = runtimeStates.get(connector.id);
@@ -300,7 +300,7 @@ export class UsageApplication {
           runtime?.nextAllowedAt &&
           new Date(runtime.nextAllowedAt).getTime() > now.getTime()
         ) {
-          return;
+          return null;
         }
         const policy = this.#connectorPolicies[connector.id] ?? {
           minimumIntervalMs: 0,
@@ -312,55 +312,30 @@ export class UsageApplication {
             policy.timeoutMs,
             `${connector.id} timed out`
           );
-          this.#repository.saveSnapshot(this.#withRetailCosts(snapshot));
-          if (snapshot.warnings && snapshot.warnings.length > 0) {
-            const failure = redactFailure(combineFailures(snapshot.warnings));
-            this.#repository.recordFailure(snapshot.provider, this.#clock().toISOString(), failure);
-            this.#saveConnectorDiagnostic(
-              connector,
-              snapshot.provider.id,
-              snapshot.billingDomains[0]?.id ??
-                defaultBillingDomain(connector.id, this.#connectorDefinitions),
-              failure
-            );
-            this.#recordConnectorOutcome(
-              connector.id,
-              now,
-              policy,
-              false,
-              runtime?.failureCount ?? 0
-            );
-          } else {
-            this.#saveHealthyConnectorDiagnostic(
-              connector,
-              snapshot.provider.id,
-              snapshot.billingDomains[0]?.id ??
-                defaultBillingDomain(connector.id, this.#connectorDefinitions),
-              snapshot.observedAt
-            );
-            this.#recordConnectorOutcome(
-              connector.id,
-              now,
-              policy,
-              true,
-              runtime?.failureCount ?? 0
-            );
-          }
+          return { ok: true as const, connector, now, runtime, policy, snapshot };
         } catch (error) {
-          const providerId = providerForConnector(connector.id, this.#connectorDefinitions);
-          const failure = redactFailure(safeConnectorFailure(error));
-          this.#repository.recordFailure(
-            {
-              id: providerId,
-              displayName: displayNameForProvider(providerId, connector.displayName)
-            },
-            this.#clock().toISOString(),
-            failure
-          );
+          return { ok: false as const, connector, now, runtime, policy, error };
+        }
+      })
+    );
+    // Collection can finish while a dashboard image request is still in
+    // flight. Wait through poll so the local server can accept and finish
+    // that request before persist occupies the event loop.
+    if (collected.some((result) => result !== null)) await yieldForPendingHttp();
+    for (const result of collected) {
+      if (!result) continue;
+      const { connector, now, runtime, policy } = result;
+      if (result.ok) {
+        const snapshot = result.snapshot;
+        await this.#repository.saveSnapshot(this.#withRetailCosts(snapshot));
+        if (snapshot.warnings && snapshot.warnings.length > 0) {
+          const failure = redactFailure(combineFailures(snapshot.warnings));
+          this.#repository.recordFailure(snapshot.provider, this.#clock().toISOString(), failure);
           this.#saveConnectorDiagnostic(
             connector,
-            providerId,
-            defaultBillingDomain(connector.id, this.#connectorDefinitions),
+            snapshot.provider.id,
+            snapshot.billingDomains[0]?.id ??
+              defaultBillingDomain(connector.id, this.#connectorDefinitions),
             failure
           );
           this.#recordConnectorOutcome(
@@ -370,9 +345,42 @@ export class UsageApplication {
             false,
             runtime?.failureCount ?? 0
           );
+        } else {
+          this.#saveHealthyConnectorDiagnostic(
+            connector,
+            snapshot.provider.id,
+            snapshot.billingDomains[0]?.id ??
+              defaultBillingDomain(connector.id, this.#connectorDefinitions),
+            snapshot.observedAt
+          );
+          this.#recordConnectorOutcome(
+            connector.id,
+            now,
+            policy,
+            true,
+            runtime?.failureCount ?? 0
+          );
         }
-      })
-    );
+        continue;
+      }
+      const providerId = providerForConnector(connector.id, this.#connectorDefinitions);
+      const failure = redactFailure(safeConnectorFailure(result.error));
+      this.#repository.recordFailure(
+        {
+          id: providerId,
+          displayName: displayNameForProvider(providerId, connector.displayName)
+        },
+        this.#clock().toISOString(),
+        failure
+      );
+      this.#saveConnectorDiagnostic(
+        connector,
+        providerId,
+        defaultBillingDomain(connector.id, this.#connectorDefinitions),
+        failure
+      );
+      this.#recordConnectorOutcome(connector.id, now, policy, false, runtime?.failureCount ?? 0);
+    }
     if (this.#repository.getMonitoringSettings().notificationsEnabled) {
       await this.#sendNotificationTransitions();
     }
@@ -802,9 +810,9 @@ export class UsageApplication {
     if (snapshot.usage.length === 0 && snapshot.costs.length === 0) {
       throw new Error('Telemetry payload contained no supported metrics');
     }
-    await this.#queueDatabaseWrite(() => {
-      this.#repository.saveSnapshot(this.#withRetailCosts(snapshot), { preserveFailure: true });
-    });
+    await this.#queueDatabaseWrite(() =>
+      this.#repository.saveSnapshot(this.#withRetailCosts(snapshot), { preserveFailure: true })
+    );
   }
 
   #queueDatabaseWrite<T>(action: () => T | Promise<T>): Promise<T> {
@@ -991,6 +999,16 @@ function createProcessingStatus(startedAt: string, hardRebuild: boolean): Proces
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+const PENDING_HTTP_YIELD_MS = 20;
+
+function yieldForPendingHttp(): Promise<void> {
+  // Localhost image fetches still take a few milliseconds to reach poll.
+  // A 0/1ms timer fires first and lets persist occupy the event loop.
+  return new Promise((resolve) => {
+    setTimeout(resolve, PENDING_HTTP_YIELD_MS);
+  });
 }
 
 function providerForConnector(id: string, definitions: ConnectorDefinition[]): string {

@@ -850,7 +850,10 @@ export interface CustomModelRateInput {
 }
 
 export interface UsageRepository {
-  saveSnapshot(snapshot: ConnectorSnapshot, options?: { preserveFailure?: boolean }): void;
+  saveSnapshot(
+    snapshot: ConnectorSnapshot,
+    options?: { preserveFailure?: boolean }
+  ): void | Promise<void>;
   recordFailure(provider: ProviderIdentity, failedAt: string, failure: ConnectorFailure): void;
   getOverview(now: Date, query?: UsageQuery): UsageOverview;
   getUsageWall?(now: Date, query?: Pick<UsageQuery, 'timeZone'>): UsageWall;

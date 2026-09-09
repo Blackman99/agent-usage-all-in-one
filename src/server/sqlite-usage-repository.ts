@@ -498,7 +498,10 @@ export class SqliteUsageRepository implements UsageRepository {
     this.#migrate();
   }
 
-  saveSnapshot(snapshot: ConnectorSnapshot, options: { preserveFailure?: boolean } = {}): void {
+  async saveSnapshot(
+    snapshot: ConnectorSnapshot,
+    options: { preserveFailure?: boolean } = {}
+  ): Promise<void> {
     this.#database.exec('BEGIN IMMEDIATE');
     try {
       const providerSql = options.preserveFailure
