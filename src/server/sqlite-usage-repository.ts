@@ -42,7 +42,8 @@ import type {
   UsageQuery,
   UsageRepository,
   UsageWall,
-  UsageWallDay
+  UsageWallDay,
+  UsageWallProvider
 } from '../core/types.js';
 import { normalizeTokenObservation } from '../core/token-normalization.js';
 import { clampPercent } from '../core/quota-normalization.js';
@@ -1075,20 +1076,121 @@ export class SqliteUsageRepository implements UsageRepository {
     const timeZone = validTimeZone(query.timeZone) ? query.timeZone! : 'UTC';
     const today = localDay(now.toISOString(), timeZone);
     const start = addLocalDays(today, -365);
+    const startInstant = zonedStartOfDay(start, timeZone);
+    const endExclusiveInstant = zonedStartOfDay(addLocalDays(today, 1), timeZone);
+    const providers = this.#database
+      .prepare('SELECT id, display_name FROM providers ORDER BY id')
+      .all() as unknown as Array<Pick<ProviderRow, 'id' | 'display_name'>>;
+    const visibleProviders = this.#hideDemoProvider
+      ? providers.filter((provider) => provider.id !== 'demo')
+      : providers;
+    const headlineDomains = new Map<string, { displayName: string; domainId: string }>();
+    for (const provider of visibleProviders) {
+      const domains = this.#database
+        .prepare(
+          `SELECT id, display_name, last_success_at
+           FROM billing_domains WHERE provider_id = ? ORDER BY id`
+        )
+        .all(provider.id) as unknown as BillingDomainRow[];
+      const summaryBillingDomainId = selectSummaryBillingDomainId(provider.id, domains);
+      if (!summaryBillingDomainId) continue;
+      headlineDomains.set(`${provider.id}:${summaryBillingDomainId}`, {
+        displayName: provider.display_name,
+        domainId: summaryBillingDomainId
+      });
+    }
+
+    const totals = new Map<
+      string,
+      { recordedTokens: number; providers: Map<string, UsageWallProvider> }
+    >();
+    const addContribution = (
+      date: string,
+      providerId: string,
+      displayName: string,
+      recordedTokens: number
+    ) => {
+      if (date < start || date > today || recordedTokens <= 0) return;
+      const current = totals.get(date) ?? { recordedTokens: 0, providers: new Map() };
+      current.recordedTokens += recordedTokens;
+      current.providers.set(providerId, { providerId, displayName });
+      totals.set(date, current);
+    };
+
+    const observationRows = this.#database
+      .prepare(
+        `SELECT provider_id, billing_domain_id, observed_at, total_tokens
+         FROM usage_observations
+         WHERE observed_at >= ? AND observed_at < ? AND ${additiveUsagePredicate()}
+         ORDER BY observed_at, id`
+      )
+      .all(startInstant, endExclusiveInstant) as unknown as Array<{
+      provider_id: string;
+      billing_domain_id: string;
+      observed_at: string;
+      total_tokens: number;
+    }>;
+    for (const row of observationRows) {
+      const headline = headlineDomains.get(`${row.provider_id}:${row.billing_domain_id}`);
+      if (!headline) continue;
+      addContribution(
+        localDay(row.observed_at, timeZone),
+        row.provider_id,
+        headline.displayName,
+        Number(row.total_tokens)
+      );
+    }
+
+    const aggregateRows = this.#database
+      .prepare(
+        `SELECT provider_id, billing_domain_id, day_utc, total_tokens
+         FROM daily_usage_aggregates
+         WHERE day_utc >= ? AND day_utc <= ?
+         ORDER BY day_utc, provider_id, billing_domain_id`
+      )
+      .all(start, today) as unknown as Array<{
+      provider_id: string;
+      billing_domain_id: string;
+      day_utc: string;
+      total_tokens: number;
+    }>;
+    for (const row of aggregateRows) {
+      const headline = headlineDomains.get(`${row.provider_id}:${row.billing_domain_id}`);
+      if (!headline) continue;
+      addContribution(
+        localDay(`${row.day_utc}T12:00:00.000Z`, timeZone),
+        row.provider_id,
+        headline.displayName,
+        Number(row.total_tokens)
+      );
+    }
+
+    const positiveTotals = [...totals.values()]
+      .map((day) => day.recordedTokens)
+      .filter((value) => value > 0)
+      .sort((left, right) => left - right);
     const days: UsageWallDay[] = [];
+    let recordedTokens = 0;
     for (let cursor = start; cursor <= today; cursor = addLocalDays(cursor, 1)) {
+      const contribution = totals.get(cursor);
+      const dayTokens = contribution?.recordedTokens ?? 0;
+      recordedTokens += dayTokens;
       days.push({
         date: cursor,
-        recordedTokens: 0,
-        level: 0,
-        providers: []
+        recordedTokens: dayTokens,
+        level: usageWallLevel(dayTokens, positiveTotals),
+        providers: contribution
+          ? [...contribution.providers.values()].sort((left, right) =>
+              left.providerId.localeCompare(right.providerId)
+            )
+          : []
       });
     }
     return {
       timeZone,
       start,
       end: today,
-      recordedTokens: 0,
+      recordedTokens,
       days
     };
   }
@@ -3760,6 +3862,47 @@ function addLocalDays(date: string, days: number): string {
   const next = new Date(`${date}T00:00:00.000Z`);
   next.setUTCDate(next.getUTCDate() + days);
   return next.toISOString().slice(0, 10);
+}
+
+function zonedStartOfDay(date: string, timeZone: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const desiredUtc = Date.UTC(year, month - 1, day);
+  let result = desiredUtc;
+  for (let iteration = 0; iteration < 2; iteration += 1) {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(result);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((candidate) => candidate.type === type)?.value);
+    const representedUtc = Date.UTC(
+      part('year'),
+      part('month') - 1,
+      part('day'),
+      part('hour'),
+      part('minute'),
+      part('second')
+    );
+    result += desiredUtc - representedUtc;
+  }
+  return new Date(result).toISOString();
+}
+
+function usageWallLevel(recordedTokens: number, positiveTotals: number[]): UsageWallDay['level'] {
+  if (recordedTokens <= 0 || positiveTotals.length === 0) return 0;
+  const index = positiveTotals.findIndex((value) => value >= recordedTokens);
+  const rank = index === -1 ? positiveTotals.length - 1 : index;
+  const ratio = (rank + 1) / positiveTotals.length;
+  if (ratio <= 0.25) return 1;
+  if (ratio <= 0.5) return 2;
+  if (ratio <= 0.75) return 3;
+  return 4;
 }
 
 function localDay(observedAt: string, timeZone: string): string {

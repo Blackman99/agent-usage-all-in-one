@@ -174,7 +174,7 @@ Prefer one focused unit module for the calendar projection (week columns, omitte
 ## Plan
 
 - [x] Ticket 1: Empty year wall tracer — Delivers `GET /api/usage-wall` empty-year read model, Sunday-start calendar projection, Tokens & model costs wall with compact “0 recorded Tokens in the last year” heading, Less/More legend, and bilingual strings (Blocked by: none)
-- [ ] Ticket 2: Headline Token days, today, aggregates, and quartiles — Delivers daily cells from live observations plus compacted `daily_usage_aggregates`, sibling-domain exclusion, today’s in-progress Tokens, omitted future/padding days, quartile levels 0–4, and tooltips that list headline Providers (Blocked by: Ticket 1)
+- [x] Ticket 2: Headline Token days, today, aggregates, and quartiles — Delivers daily cells from live observations plus compacted `daily_usage_aggregates`, sibling-domain exclusion, today’s in-progress Tokens, omitted future/padding days, quartile levels 0–4, and tooltips that list headline Providers (Blocked by: Ticket 1)
 - [ ] Ticket 3: Window independence, refresh, access, and layout — Delivers wall fetch independent of 24h/7d/30d, refresh/collection update without wiping squares, focusable day cells whose accessible names match tooltips, horizontal scroll at GitHub cell size, and no wall on Agent usage (Blocked by: Ticket 2)
 - [ ] Ticket 4: Release & Documentation Compliance — Delivers Changeset and bilingual documentation updates (README.md and README.zh-CN.md) (Blocked by: Ticket 3)
 
