@@ -1454,6 +1454,55 @@ test('keeps the workbench steady during manual and window refreshes', async ({ p
   expect(await workbenchPanelBoxes(page)).toEqual(settledBoxes);
 });
 
+test('shows an empty usage contribution wall above the Tokens analysis grid', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/usage-wall**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        timeZone: 'UTC',
+        start: '2025-08-28',
+        end: '2026-08-28',
+        recordedTokens: 0,
+        days: Array.from({ length: 366 }, (_, index) => {
+          const date = new Date(Date.UTC(2025, 7, 28 + index)).toISOString().slice(0, 10);
+          return { date, recordedTokens: 0, level: 0, providers: [] };
+        })
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 700))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByTestId('usage-contribution-wall')).toHaveCount(0);
+
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  const wall = workbench.getByTestId('usage-contribution-wall');
+  await expect(wall).toBeVisible();
+  await expect(wall.getByTestId('usage-wall-heading')).toContainText(
+    '0 recorded Tokens in the last year'
+  );
+  await expect(wall.getByTestId('usage-wall-legend')).toContainText('Less');
+  await expect(wall.getByTestId('usage-wall-legend')).toContainText('More');
+  await expect(wall.getByRole('gridcell').first()).toBeVisible();
+  await expect(wall.getByRole('gridcell').first()).toHaveAttribute(
+    'aria-label',
+    'No usage on Aug 28, 2025'
+  );
+
+  const wallBox = await wall.boundingBox();
+  const analysisBox = await workbench.getByTestId('usage-analysis-grid').boundingBox();
+  expect(wallBox).toBeTruthy();
+  expect(analysisBox).toBeTruthy();
+  expect(wallBox!.y + wallBox!.height).toBeLessThanOrEqual(analysisBox!.y + 1);
+});
+
 test('switches 24-hour, 7-day, and 30-day token and cost history without mixing cost kinds', async ({
   page
 }) => {

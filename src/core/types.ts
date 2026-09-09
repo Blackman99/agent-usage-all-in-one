@@ -153,6 +153,26 @@ export interface CostRecord {
 
 export type HistoryWindow = '24h' | '7d' | '30d';
 
+export interface UsageWallProvider {
+  providerId: string;
+  displayName: string;
+}
+
+export interface UsageWallDay {
+  date: string;
+  recordedTokens: number;
+  level: 0 | 1 | 2 | 3 | 4;
+  providers: UsageWallProvider[];
+}
+
+export interface UsageWall {
+  timeZone: string;
+  start: string;
+  end: string;
+  recordedTokens: number;
+  days: UsageWallDay[];
+}
+
 export interface UsageQuery {
   window?: HistoryWindow;
   timeZone?: string;
@@ -833,6 +853,7 @@ export interface UsageRepository {
   saveSnapshot(snapshot: ConnectorSnapshot, options?: { preserveFailure?: boolean }): void;
   recordFailure(provider: ProviderIdentity, failedAt: string, failure: ConnectorFailure): void;
   getOverview(now: Date, query?: UsageQuery): UsageOverview;
+  getUsageWall?(now: Date, query?: Pick<UsageQuery, 'timeZone'>): UsageWall;
   getAgentProviderIndex?(now: Date): AgentProviderIndex;
   getProviderOverview?(now: Date, providerId: string, query?: UsageQuery): ProviderOverview | null;
   saveExchangeRateSnapshot(snapshot: ExchangeRateSnapshot): void;

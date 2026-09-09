@@ -18,6 +18,7 @@ import type {
   StartAtLoginManager,
   TelemetryIngestor,
   UsageOverview,
+  UsageWall,
   UsageExportArtifact,
   UsageExportRequest,
   UsageQuery,
@@ -703,6 +704,13 @@ export class UsageApplication {
 
   async getOverview(query: UsageQuery = {}): Promise<UsageOverview> {
     return this.#repository.getOverview(this.#clock(), query);
+  }
+
+  async getUsageWall(query: Pick<UsageQuery, 'timeZone'> = {}): Promise<UsageWall> {
+    if (!this.#repository.getUsageWall) {
+      throw new Error('Usage wall is unavailable');
+    }
+    return this.#repository.getUsageWall(this.#clock(), query);
   }
 
   async getAgentProviderIndex(): Promise<AgentProviderIndex> {

@@ -15,7 +15,8 @@
     ProviderOverview,
     QuotaBucket,
     RetentionStatus,
-    UsageOverview
+    UsageOverview,
+    UsageWall
   } from '$core/types.js';
   import { clampPercent } from '$core/quota-normalization.js';
   import type {
@@ -45,6 +46,7 @@
   import QuotaTimelineChart from '$lib/QuotaTimelineChart.svelte';
   import type { QuotaTimelineProvider } from '$lib/quota-timeline.js';
   import UsageTrendChart from '$lib/UsageTrendChart.svelte';
+  import UsageContributionWall from '$lib/UsageContributionWall.svelte';
   import { resolveSettingsTab, type SettingsTab } from '$lib/settings-navigation.js';
   import {
     createDefaultRateDraft,
@@ -69,6 +71,7 @@
   let locale: Locale = 'en';
   let metaDescription: string;
   let overview: UsageOverview | null = null;
+  let usageWall: UsageWall | null = null;
   let agentProviderIndex: AgentProviderIndex['providers'] = DEFAULT_AGENT_PROVIDERS;
   let agentProviders: Record<string, ProviderOverview> = {};
   let agentProviderLoading: Record<string, boolean> = Object.fromEntries(
@@ -181,6 +184,7 @@
     selectedCurrency = storedCurrency();
     await Promise.all([
       loadOverview(),
+      loadUsageWall(),
       loadAgentProviders(),
       loadConnectors(),
       loadMonitoring(),
@@ -227,6 +231,17 @@
       dark: 'themeDark'
     };
     return t(keys[preference]);
+  }
+
+  async function loadUsageWall(): Promise<void> {
+    try {
+      const parameters = new URLSearchParams({ timeZone });
+      const response = await fetch(`/api/usage-wall?${parameters}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      usageWall = (await response.json()) as UsageWall;
+    } catch {
+      if (!usageWall) usageWall = null;
+    }
   }
 
   async function loadOverview(): Promise<void> {
@@ -332,7 +347,7 @@
           : '/api/refresh?background=true';
       const response = await fetch(endpoint, { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await Promise.all([loadOverview(), loadAgentProviders(), loadDiagnostics()]);
+      await Promise.all([loadOverview(), loadUsageWall(), loadAgentProviders(), loadDiagnostics()]);
       await loadProcessing();
       startProcessingPolling();
       refreshError = false;
@@ -1987,6 +2002,14 @@
                 </div>
               </section>
 
+              {#if usageWall}
+                <UsageContributionWall
+                  wall={usageWall}
+                  {locale}
+                  formatTokens={formatCompactNumber}
+                />
+              {/if}
+
               <div
                 class="usage-overview-grid"
                 data-testid="usage-analysis-grid"
@@ -2893,6 +2916,11 @@
     --danger-border: #d8a29e;
     --danger-text: #922f2b;
     --focus: #315fd3;
+    --wall-level-0: #ebedf0;
+    --wall-level-1: #9be9a8;
+    --wall-level-2: #40c463;
+    --wall-level-3: #30a14e;
+    --wall-level-4: #216e39;
     color-scheme: light dark;
     background: var(--page);
     font-family:
@@ -5062,6 +5090,11 @@
     --warning-text: #f0bd83;
     --danger-bg: #241416;
     --danger-border: #71363a;
+    --wall-level-0: #161b22;
+    --wall-level-1: #0e4429;
+    --wall-level-2: #006d32;
+    --wall-level-3: #26a641;
+    --wall-level-4: #39d353;
     --danger-text: #ffaaa5;
     --focus: #9bb1ff;
   }

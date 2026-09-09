@@ -40,7 +40,9 @@ import type {
   TokenUsageScope,
   UsageOverview,
   UsageQuery,
-  UsageRepository
+  UsageRepository,
+  UsageWall,
+  UsageWallDay
 } from '../core/types.js';
 import { normalizeTokenObservation } from '../core/token-normalization.js';
 import { clampPercent } from '../core/quota-normalization.js';
@@ -1067,6 +1069,28 @@ export class SqliteUsageRepository implements UsageRepository {
     };
     if (!query.auditEvidence) dropAuditEvidence(overviews);
     return overview;
+  }
+
+  getUsageWall(now: Date, query: Pick<UsageQuery, 'timeZone'> = {}): UsageWall {
+    const timeZone = validTimeZone(query.timeZone) ? query.timeZone! : 'UTC';
+    const today = localDay(now.toISOString(), timeZone);
+    const start = addLocalDays(today, -365);
+    const days: UsageWallDay[] = [];
+    for (let cursor = start; cursor <= today; cursor = addLocalDays(cursor, 1)) {
+      days.push({
+        date: cursor,
+        recordedTokens: 0,
+        level: 0,
+        providers: []
+      });
+    }
+    return {
+      timeZone,
+      start,
+      end: today,
+      recordedTokens: 0,
+      days
+    };
   }
 
   getAgentProviderIndex(now: Date): AgentProviderIndex {
@@ -3730,6 +3754,12 @@ function mapUnclassifiedObservation(row: UsageHistoryRow): HistoryModelObservati
       cacheWrite: Number(row.cache_write_tokens)
     }
   };
+}
+
+function addLocalDays(date: string, days: number): string {
+  const next = new Date(`${date}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
 }
 
 function localDay(observedAt: string, timeZone: string): string {

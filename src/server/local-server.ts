@@ -174,6 +174,17 @@ export async function startLocalServer(options: LocalServerOptions): Promise<Loc
         return;
       }
 
+      if (request.method === 'GET' && requestUrl.pathname === '/api/usage-wall') {
+        sendJson(
+          response,
+          200,
+          await options.application.getUsageWall({
+            timeZone: requestUrl.searchParams.get('timeZone') ?? undefined
+          })
+        );
+        return;
+      }
+
       if (request.method === 'POST' && requestUrl.pathname === '/api/refresh') {
         if (authentication === 'browser' && request.headers.origin !== origin) {
           sendJson(response, 403, { error: 'invalid-origin' });
