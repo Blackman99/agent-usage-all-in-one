@@ -1,5 +1,13 @@
 # agent-usage-all-in-one
 
+## 0.8.1
+
+### Patch Changes
+
+- 60aa37e: Merge the workbench controls and range into the top product header to eliminate redundant vertical toolbar space.
+- 68b9518: Keep dashboard brand images responding while a refresh persists collected usage.
+- 859db7e: Embed the last-year usage contribution wall directly inside the workbench summary board in place of the raw totals grid.
+
 ## 0.8.0
 
 ### Minor Changes
