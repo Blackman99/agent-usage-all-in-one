@@ -63,6 +63,23 @@ describe('usage contribution wall presentation', () => {
       null
     ]);
     expect(presentation.weeks).toHaveLength(53);
+    expect(presentation.monthLabels.map((label) => label.label)).toEqual([
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug'
+    ]);
+    expect(presentation.monthLabels[0]?.weekIndex).toBe(0);
+    expect(presentation.monthLabels.at(-1)?.weekIndex).toBeGreaterThan(40);
     expect(presentation.heading).toBe('0 recorded Tokens in the last year');
     expect(presentation.lessLabel).toBe('Less');
     expect(presentation.moreLabel).toBe('More');

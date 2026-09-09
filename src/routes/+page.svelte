@@ -2927,7 +2927,7 @@
     --danger-border: #d8a29e;
     --danger-text: #922f2b;
     --focus: #315fd3;
-    --wall-level-0: #ebedf0;
+    --wall-level-0: #dce1e9;
     --wall-level-1: #9be9a8;
     --wall-level-2: #40c463;
     --wall-level-3: #30a14e;
@@ -5101,7 +5101,7 @@
     --warning-text: #f0bd83;
     --danger-bg: #241416;
     --danger-border: #71363a;
-    --wall-level-0: #161b22;
+    --wall-level-0: #2d333b;
     --wall-level-1: #0e4429;
     --wall-level-2: #006d32;
     --wall-level-3: #26a641;

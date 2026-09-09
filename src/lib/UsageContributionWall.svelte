@@ -1,12 +1,15 @@
 <script lang="ts">
   import type { UsageWall } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
-  import { buildUsageWallPresentation } from '$lib/usage-contribution-wall.js';
+  import { buildUsageWallPresentation, type UsageWallCell } from '$lib/usage-contribution-wall.js';
 
   export let wall: UsageWall;
   export let locale: Locale = detectLocale('');
   export let formatTokens: (value: number) => string;
   export let updating = false;
+
+  let calendarEl: HTMLElement | null = null;
+  let hover: { text: string; left: number; top: number } | null = null;
 
   function interpolate(key: MessageKey, values?: Record<string, string>): string {
     return translate(locale, key).replace(
@@ -16,6 +19,27 @@
   }
 
   $: presentation = buildUsageWallPresentation(wall, locale, formatTokens, interpolate);
+  $: monthByWeek = new Map(presentation.monthLabels.map((label) => [label.weekIndex, label.label]));
+
+  function showTooltip(event: FocusEvent | PointerEvent, day: UsageWallCell): void {
+    const cell = event.currentTarget as HTMLElement;
+    const root = calendarEl;
+    if (!root) {
+      hover = { text: day.accessibleName, left: 0, top: 0 };
+      return;
+    }
+    const cellRect = cell.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    hover = {
+      text: day.accessibleName,
+      left: cellRect.left - rootRect.left + root.scrollLeft + cellRect.width / 2,
+      top: cellRect.top - rootRect.top + root.scrollTop
+    };
+  }
+
+  function hideTooltip(): void {
+    hover = null;
+  }
 </script>
 
 <section
@@ -32,8 +56,14 @@
   <div class="usage-wall-header">
     <h3 id="usage-wall-heading" data-testid="usage-wall-heading">{presentation.heading}</h3>
   </div>
-  <div class="usage-wall-scroll">
+  <div class="usage-wall-scroll" bind:this={calendarEl}>
     <div class="usage-wall-calendar" role="grid" aria-label={translate(locale, 'usageWallLabel')}>
+      <span class="usage-wall-month-spacer" aria-hidden="true"></span>
+      <div class="usage-wall-months" data-testid="usage-wall-months" aria-hidden="true">
+        {#each presentation.weeks as _, weekIndex (weekIndex)}
+          <span>{monthByWeek.get(weekIndex) ?? ''}</span>
+        {/each}
+      </div>
       <div class="usage-wall-weekdays" aria-hidden="true">
         <span></span>
         <span>{presentation.weekdayLabels[0]}</span>
@@ -54,7 +84,10 @@
                   role="gridcell"
                   data-level={day.level}
                   aria-label={day.accessibleName}
-                  title={day.accessibleName}
+                  on:pointerenter={(event) => showTooltip(event, day)}
+                  on:focus={(event) => showTooltip(event, day)}
+                  on:pointerleave={hideTooltip}
+                  on:blur={hideTooltip}
                 ></button>
               {:else}
                 <span class="usage-wall-cell usage-wall-cell-absent" aria-hidden="true"></span>
@@ -63,6 +96,16 @@
           </div>
         {/each}
       </div>
+      {#if hover}
+        <div
+          class="usage-wall-tooltip"
+          data-testid="usage-wall-tooltip"
+          role="tooltip"
+          style={`left: ${hover.left}px; top: ${hover.top}px`}
+        >
+          {hover.text}
+        </div>
+      {/if}
     </div>
   </div>
   <div class="usage-wall-legend" data-testid="usage-wall-legend">
@@ -77,6 +120,7 @@
 <style>
   .usage-contribution-wall {
     --wall-cell-size: 11px;
+    --wall-cell-gap: 3px;
     position: relative;
     display: grid;
     gap: 12px;
@@ -114,16 +158,32 @@
   }
 
   .usage-wall-calendar {
+    position: relative;
     display: grid;
     grid-template-columns: max-content 1fr;
-    gap: 8px;
+    gap: 4px 8px;
     min-width: max-content;
+  }
+
+  .usage-wall-months {
+    display: flex;
+    gap: var(--wall-cell-gap);
+    color: var(--muted);
+    font-size: 0.68rem;
+    line-height: 1;
+  }
+
+  .usage-wall-months span {
+    flex: 0 0 var(--wall-cell-size);
+    width: var(--wall-cell-size);
+    overflow: visible;
+    white-space: nowrap;
   }
 
   .usage-wall-weekdays {
     display: grid;
     grid-template-rows: repeat(7, var(--wall-cell-size));
-    gap: 3px;
+    gap: var(--wall-cell-gap);
     color: var(--muted);
     font-size: 0.68rem;
     line-height: var(--wall-cell-size);
@@ -132,7 +192,7 @@
   .usage-wall-weeks {
     display: flex;
     flex: 0 0 auto;
-    gap: 3px;
+    gap: var(--wall-cell-gap);
   }
 
   .usage-wall-week {
@@ -140,7 +200,7 @@
     flex: 0 0 var(--wall-cell-size);
     width: var(--wall-cell-size);
     grid-template-rows: repeat(7, var(--wall-cell-size));
-    gap: 3px;
+    gap: var(--wall-cell-gap);
   }
 
   .usage-wall-cell {
@@ -148,13 +208,20 @@
     height: var(--wall-cell-size);
     flex: 0 0 var(--wall-cell-size);
     padding: 0;
-    border: 0;
+    border: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
     border-radius: 2px;
     background: var(--wall-level-0);
+    outline: none;
+  }
+
+  .usage-wall-cell:focus-visible {
+    box-shadow: 0 0 0 2px var(--focus);
   }
 
   .usage-wall-cell-absent {
     visibility: hidden;
+    border-color: transparent;
+    background: transparent;
   }
 
   .usage-wall-cell[data-level='1'] {
@@ -173,6 +240,24 @@
     background: var(--wall-level-4);
   }
 
+  .usage-wall-tooltip {
+    position: absolute;
+    z-index: 2;
+    width: max-content;
+    max-width: 240px;
+    padding: 8px 10px;
+    transform: translate(-50%, calc(-100% - 8px));
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    box-shadow: var(--shadow-raised);
+    color: var(--text-strong);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    pointer-events: none;
+    backdrop-filter: blur(16px) saturate(1.2);
+  }
+
   .usage-wall-legend {
     display: flex;
     align-items: center;
@@ -186,6 +271,7 @@
     width: var(--wall-cell-size);
     height: var(--wall-cell-size);
     flex: 0 0 var(--wall-cell-size);
+    border: 1px solid color-mix(in srgb, var(--text-strong) 8%, transparent);
     border-radius: 2px;
     background: var(--wall-level-0);
   }
