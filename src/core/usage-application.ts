@@ -353,13 +353,7 @@ export class UsageApplication {
               defaultBillingDomain(connector.id, this.#connectorDefinitions),
             snapshot.observedAt
           );
-          this.#recordConnectorOutcome(
-            connector.id,
-            now,
-            policy,
-            true,
-            runtime?.failureCount ?? 0
-          );
+          this.#recordConnectorOutcome(connector.id, now, policy, true, runtime?.failureCount ?? 0);
         }
         continue;
       }
