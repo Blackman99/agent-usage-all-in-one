@@ -1,5 +1,13 @@
 # agent-usage-all-in-one
 
+## 0.8.0
+
+### Minor Changes
+
+- 741c519: Remove subscription plan value and subscription pricing features, including the workbench plan value chart, value ratio ranking, `/api/plans` API endpoints, and associated configuration in settings.
+- 3252a50: Redesign settings panel into a centered two-column modal with five dedicated category views (Connections, Custom Model Rates, Monitoring, Diagnostics, and Privacy), collapsible custom rate creation form, and responsive top tab navigation.
+- 2b424b4: Add a GitHub-style last-year usage wall to Tokens & model costs. Each day shows headline-included recorded Tokens, independent of the 24-hour, 7-day, and 30-day workbench windows. Month labels, hover tooltips, and empty-day squares fill the year calendar.
+
 ## 0.7.2
 
 ### Patch Changes
