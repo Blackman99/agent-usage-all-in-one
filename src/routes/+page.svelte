@@ -72,6 +72,8 @@
   let metaDescription: string;
   let overview: UsageOverview | null = null;
   let usageWall: UsageWall | null = null;
+  let usageWallLoading = false;
+  let usageWallRequestSequence = 0;
   let agentProviderIndex: AgentProviderIndex['providers'] = DEFAULT_AGENT_PROVIDERS;
   let agentProviders: Record<string, ProviderOverview> = {};
   let agentProviderLoading: Record<string, boolean> = Object.fromEntries(
@@ -234,13 +236,19 @@
   }
 
   async function loadUsageWall(): Promise<void> {
+    const requestSequence = ++usageWallRequestSequence;
+    usageWallLoading = true;
     try {
       const parameters = new URLSearchParams({ timeZone });
       const response = await fetch(`/api/usage-wall?${parameters}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      usageWall = (await response.json()) as UsageWall;
+      const nextWall = (await response.json()) as UsageWall;
+      if (destroyed || requestSequence !== usageWallRequestSequence) return;
+      usageWall = nextWall;
     } catch {
-      if (!usageWall) usageWall = null;
+      if (requestSequence === usageWallRequestSequence && !usageWall) usageWall = null;
+    } finally {
+      if (requestSequence === usageWallRequestSequence) usageWallLoading = false;
     }
   }
 
@@ -571,12 +579,14 @@
       if (processingModuleBecameReady(previous, next, 'usage')) {
         void loadAgentProviders();
         void loadOverview();
+        void loadUsageWall();
       }
       if (processingModuleBecameReady(previous, next, 'pricing')) {
         void loadOverview();
       }
       if (processingModuleBecameReady(previous, next, 'retention')) {
         void loadRetention();
+        void loadUsageWall();
       }
       hardRebuilding =
         next.hardRebuild &&
@@ -2007,6 +2017,7 @@
                   wall={usageWall}
                   {locale}
                   formatTokens={formatCompactNumber}
+                  updating={usageWallLoading}
                 />
               {/if}
 

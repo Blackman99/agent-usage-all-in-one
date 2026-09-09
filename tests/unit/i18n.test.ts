@@ -28,5 +28,11 @@ describe('internationalization catalogs', () => {
     expect(translate('zh-CN', 'usageWallWeekdayWed')).toBe('三');
     expect(translate('en', 'usageWallWeekdayFri')).toBe('Fri');
     expect(translate('zh-CN', 'usageWallWeekdayFri')).toBe('五');
+    expect(translate('en', 'usageWallUpdating')).toBe(
+      'Updating the last-year usage wall. Existing days remain visible.'
+    );
+    expect(translate('zh-CN', 'usageWallUpdating')).toBe(
+      '正在更新过去一年用量墙，已有日期仍保持可见。'
+    );
   });
 });

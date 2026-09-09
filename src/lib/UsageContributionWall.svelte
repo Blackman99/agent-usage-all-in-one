@@ -6,6 +6,7 @@
   export let wall: UsageWall;
   export let locale: Locale = detectLocale('');
   export let formatTokens: (value: number) => string;
+  export let updating = false;
 
   function interpolate(key: MessageKey, values?: Record<string, string>): string {
     return translate(locale, key).replace(
@@ -21,7 +22,13 @@
   class="usage-contribution-wall"
   data-testid="usage-contribution-wall"
   aria-labelledby="usage-wall-heading"
+  aria-busy={updating}
 >
+  {#if updating}
+    <div class="panel-progress" role="status" data-testid="usage-wall-refresh-status">
+      <span class="visually-hidden">{translate(locale, 'usageWallUpdating')}</span>
+    </div>
+  {/if}
   <div class="usage-wall-header">
     <h3 id="usage-wall-heading" data-testid="usage-wall-heading">{presentation.heading}</h3>
   </div>
@@ -69,6 +76,8 @@
 
 <style>
   .usage-contribution-wall {
+    --wall-cell-size: 11px;
+    position: relative;
     display: grid;
     gap: 12px;
     margin-bottom: 14px;
@@ -76,6 +85,21 @@
     border: 1px solid var(--border-soft);
     border-radius: 18px;
     background: var(--surface-subtle);
+  }
+
+  .panel-progress {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .usage-wall-header h3 {
@@ -98,27 +122,31 @@
 
   .usage-wall-weekdays {
     display: grid;
-    grid-template-rows: repeat(7, 11px);
+    grid-template-rows: repeat(7, var(--wall-cell-size));
     gap: 3px;
     color: var(--muted);
     font-size: 0.68rem;
-    line-height: 11px;
+    line-height: var(--wall-cell-size);
   }
 
   .usage-wall-weeks {
     display: flex;
+    flex: 0 0 auto;
     gap: 3px;
   }
 
   .usage-wall-week {
     display: grid;
-    grid-template-rows: repeat(7, 11px);
+    flex: 0 0 var(--wall-cell-size);
+    width: var(--wall-cell-size);
+    grid-template-rows: repeat(7, var(--wall-cell-size));
     gap: 3px;
   }
 
   .usage-wall-cell {
-    width: 11px;
-    height: 11px;
+    width: var(--wall-cell-size);
+    height: var(--wall-cell-size);
+    flex: 0 0 var(--wall-cell-size);
     padding: 0;
     border: 0;
     border-radius: 2px;
@@ -155,8 +183,9 @@
   }
 
   .usage-wall-swatch {
-    width: 11px;
-    height: 11px;
+    width: var(--wall-cell-size);
+    height: var(--wall-cell-size);
+    flex: 0 0 var(--wall-cell-size);
     border-radius: 2px;
     background: var(--wall-level-0);
   }

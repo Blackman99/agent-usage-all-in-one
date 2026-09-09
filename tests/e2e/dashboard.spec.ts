@@ -1503,6 +1503,88 @@ test('shows an empty usage contribution wall above the Tokens analysis grid', as
   expect(wallBox!.y + wallBox!.height).toBeLessThanOrEqual(analysisBox!.y + 1);
 });
 
+test('keeps the usage contribution wall independent of 24h/7d/30d and refresh-stable', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const wallRequests: string[] = [];
+  let wallVersion = 0;
+  let releaseWallRefresh = () => {};
+  const delayedWallRefresh = new Promise<void>((resolve) => {
+    releaseWallRefresh = resolve;
+  });
+  await page.route('**/api/usage-wall**', async (route) => {
+    wallRequests.push(route.request().url());
+    if (wallVersion > 0) await delayedWallRefresh;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        timeZone: 'UTC',
+        start: '2025-08-28',
+        end: '2026-08-28',
+        recordedTokens: wallVersion === 0 ? 0 : 12_400,
+        days: Array.from({ length: 366 }, (_, index) => {
+          const date = new Date(Date.UTC(2025, 7, 28 + index)).toISOString().slice(0, 10);
+          return {
+            date,
+            recordedTokens: date === '2026-08-28' && wallVersion > 0 ? 12_400 : 0,
+            level: date === '2026-08-28' && wallVersion > 0 ? 4 : 0,
+            providers:
+              date === '2026-08-28' && wallVersion > 0
+                ? [{ providerId: 'codex', displayName: 'Codex' }]
+                : []
+          };
+        })
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    const window = new URL(route.request().url()).searchParams.get('window') ?? '7d';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture(window, window === '30d' ? 3000 : 700))
+    });
+  });
+  await page.route('**/api/refresh**', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.setViewportSize({ width: 520, height: 900 });
+  await page.goto(freshLaunch.stdout.trim());
+  await expect(page.getByTestId('usage-contribution-wall')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  const wall = workbench.getByTestId('usage-contribution-wall');
+  await expect(wall).toBeVisible();
+  const initialWallRequests = wallRequests.length;
+  const firstCell = wall.getByRole('gridcell').first();
+  await expect(firstCell).toHaveAttribute('aria-label', 'No usage on Aug 28, 2025');
+  const cellBox = await firstCell.boundingBox();
+  expect(cellBox?.width).toBeGreaterThanOrEqual(11);
+  expect(cellBox?.height).toBeGreaterThanOrEqual(11);
+  await expect
+    .poll(() =>
+      wall
+        .locator('.usage-wall-scroll')
+        .evaluate((element) => element.scrollWidth > element.clientWidth)
+    )
+    .toBe(true);
+
+  await workbench.getByRole('button', { name: '30d' }).click();
+  await expect(workbench.getByTestId('usage-headline')).toContainText('¥9.00');
+  expect(wallRequests).toHaveLength(initialWallRequests);
+
+  wallVersion = 1;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(wall.getByTestId('usage-wall-refresh-status')).toBeVisible();
+  await expect(firstCell).toHaveAttribute('aria-label', 'No usage on Aug 28, 2025');
+  releaseWallRefresh();
+  await expect(wall.getByTestId('usage-wall-heading')).toContainText(
+    '12.4K recorded Tokens in the last year'
+  );
+  await expect(wall.getByTestId('usage-wall-refresh-status')).toHaveCount(0);
+});
+
 test('switches 24-hour, 7-day, and 30-day token and cost history without mixing cost kinds', async ({
   page
 }) => {
