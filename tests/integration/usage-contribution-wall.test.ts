@@ -140,6 +140,64 @@ describe('usage contribution wall', () => {
 
     repository.close();
   });
+
+  it('includes every dsh route and Grok custom endpoint in the year wall', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-wall-custom-routes-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(
+      snapshot('dsh', 'dsh', 'deepseek-official', 'DeepSeek API', [
+        usage('dsh-flash', 'deepseek-official', '2026-08-28T01:00:00.000Z', 100)
+      ])
+    );
+    repository.saveSnapshot(
+      snapshot('dsh', 'dsh', 'my-custom-proxy', 'my-custom-proxy', [
+        usage('dsh-custom', 'my-custom-proxy', '2026-08-28T01:10:00.000Z', 400)
+      ])
+    );
+    repository.saveSnapshot(
+      snapshot('grok', 'Grok', 'grok-build-subscription', 'Build / SuperGrok', [
+        usage('grok-sub', 'grok-build-subscription', '2026-08-28T01:20:00.000Z', 50)
+      ])
+    );
+    repository.saveSnapshot(
+      snapshot('grok', 'Grok', 'custom', 'Custom endpoint', [
+        usage('grok-custom', 'custom', '2026-08-28T01:30:00.000Z', 200)
+      ])
+    );
+    repository.saveSnapshot(
+      snapshot('grok', 'Grok', 'xai-api', 'xAI API', [
+        usage('xai-today', 'xai-api', '2026-08-28T01:40:00.000Z', 9_000)
+      ])
+    );
+
+    const application = new UsageApplication({
+      repository,
+      connectors: [],
+      clock: () => NOW
+    });
+    const server = await startLocalServer({ application, apiToken: 'wall-custom-token' });
+    servers.push(server);
+    const response = await fetch(`${server.origin}/api/usage-wall?timeZone=UTC`, {
+      headers: { authorization: 'Bearer wall-custom-token' }
+    });
+    expect(response.status).toBe(200);
+    const wall = (await response.json()) as {
+      recordedTokens: number;
+      days: Array<{
+        date: string;
+        recordedTokens: number;
+        providers: Array<{ providerId: string }>;
+      }>;
+    };
+
+    const today = wall.days.find((day) => day.date === '2026-08-28');
+    expect(today?.recordedTokens).toBe(750);
+    expect(today?.providers.map((provider) => provider.providerId).sort()).toEqual(['dsh', 'grok']);
+    expect(wall.recordedTokens).toBe(750);
+
+    repository.close();
+  });
 });
 
 function snapshot(

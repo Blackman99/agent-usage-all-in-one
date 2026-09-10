@@ -1096,11 +1096,15 @@ export class SqliteUsageRepository implements UsageRepository {
         )
         .all(provider.id) as unknown as BillingDomainRow[];
       const summaryBillingDomainId = selectSummaryBillingDomainId(provider.id, domains);
-      if (!summaryBillingDomainId) continue;
-      headlineDomains.set(`${provider.id}:${summaryBillingDomainId}`, {
-        displayName: provider.display_name,
-        domainId: summaryBillingDomainId
-      });
+      for (const domain of domains) {
+        if (!billingDomainIncludedInHeadline(provider.id, domain.id, summaryBillingDomainId)) {
+          continue;
+        }
+        headlineDomains.set(`${provider.id}:${domain.id}`, {
+          displayName: provider.display_name,
+          domainId: domain.id
+        });
+      }
     }
 
     const totals = new Map<
@@ -3250,10 +3254,11 @@ function allDomainHistories(providers: ProviderOverview[]): Array<{
       provider,
       domain,
       history: domain.history,
-      includedInHeadline:
-        provider.id === 'dsh' || (provider.id === 'grok' && domain.id !== 'xai-api')
-          ? true
-          : domain.id === provider.summaryBillingDomainId
+      includedInHeadline: billingDomainIncludedInHeadline(
+        provider.id,
+        domain.id,
+        provider.summaryBillingDomainId
+      )
     }))
   );
 }
@@ -4243,6 +4248,16 @@ function tokenCoverage(tokens: TokenRow, excludedObservationCount = 0): Coverage
     tokens.aggregation_temporalities
   );
   return scopes.includes('this-mac') || temporalities.includes('delta') ? 'partial' : 'complete';
+}
+
+function billingDomainIncludedInHeadline(
+  providerId: string,
+  billingDomainId: string,
+  summaryBillingDomainId: string | null
+): boolean {
+  if (providerId === 'dsh') return true;
+  if (providerId === 'grok' && billingDomainId !== 'xai-api') return true;
+  return summaryBillingDomainId !== null && billingDomainId === summaryBillingDomainId;
 }
 
 function selectSummaryBillingDomainId(
