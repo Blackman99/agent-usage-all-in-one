@@ -8,9 +8,21 @@
 [![npm](https://img.shields.io/npm/v/agent-usage-all-in-one.svg)](https://www.npmjs.com/package/agent-usage-all-in-one)
 [![许可证：MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+> **macOS 上的本地多 Agent 用量中心——一个仪表盘，无云端，不自动切换。**
+
 Agent Usage 是一个 macOS 优先、完全在本地运行的用量中心。一次启动即可统一查看
 Codex、Claude Code、OpenCode、Grok、dsh 与 Antigravity 的原生额度窗口、刷新时间、Token、模型排行、
 API 对等费用、历史与诊断。它只提供建议，不会自动切换 Agent。
+
+## 对比说明
+
+![类别对比：各平台官网、Token 导出工具、FinOps 看板与 Agent Usage](docs/design/compare-sheet.png)
+
+按类别对比何时更适合用 Agent Usage，而非各平台官网、导出工具或通用 FinOps 看板：[docs/comparison.md](docs/comparison.md)。
+
+具名竞品对照（ccusage、CodeBurn、Token Monitor、TokenTracker）：[docs/named-competitors.md](docs/named-competitors.md)。
+
+**边界：** 暂不支持 Cursor · 仅 macOS · 对已列出的 Provider 做多 Agent 用量中心（不夸大 “all-in-one”）。
 
 ## 核心页面
 
@@ -50,6 +62,12 @@ pnpm dev
 ## 安装与启动
 
 要求 macOS 和 Node.js 24 或更高版本。
+
+```bash
+npx agent-usage-all-in-one
+```
+
+可选全局安装：
 
 ```bash
 npm install --global agent-usage-all-in-one
