@@ -8,10 +8,22 @@
 [![npm](https://img.shields.io/npm/v/agent-usage-all-in-one.svg)](https://www.npmjs.com/package/agent-usage-all-in-one)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+> **Local multi-agent usage center on macOS — one dashboard, no cloud, no auto-switch.**
+
 Agent Usage is a macOS-first, fully local usage center for Codex, Claude Code,
 OpenCode, Grok, dsh, and Antigravity. One command opens a dashboard for native quota windows,
 reset times, tokens, model rankings, equivalent API cost, history, and diagnostics.
 It offers advice but never switches agents automatically.
+
+## Compared
+
+![Category comparison: provider UIs, token exporters, FinOps dashboards, and Agent Usage](docs/design/compare-sheet.png)
+
+Honest category axes and when to prefer Agent Usage vs provider UIs, exporters, or FinOps dashboards: [docs/comparison.md](docs/comparison.md).
+
+Sourced named competitors (ccusage, CodeBurn, Token Monitor, TokenTracker): [docs/named-competitors.md](docs/named-competitors.md).
+
+**Boundaries:** no Cursor yet · macOS only · multi-agent usage center for listed providers (don’t oversell “all-in-one”).
 
 ## Dashboard
 
@@ -70,6 +82,12 @@ browser closed.
 ## Install and run
 
 Agent Usage requires macOS and Node.js 24 or newer.
+
+```bash
+npx agent-usage-all-in-one
+```
+
+Optional global install:
 
 ```bash
 npm install --global agent-usage-all-in-one
