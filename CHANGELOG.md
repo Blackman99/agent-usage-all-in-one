@@ -1,5 +1,14 @@
 # agent-usage-all-in-one
 
+## 0.8.2
+
+### Patch Changes
+
+- 8f40c92: Document the supported runtime as macOS, Node.js 24, and npm/npx (ADR 017), with Linux and Homebrew/DMG remaining roadmap-only.
+- 6926ddf: Count Grok CLI custom-endpoint sessions that report official `grok-*-build` usage keys under Custom endpoints instead of the SuperGrok pool.
+- aada1b6: Refresh the README dashboard showcase so Tokens & model costs matches the merged header and usage-wall summary board.
+- 4e636e4: Count every headline-included custom route in the last-year usage wall, not only each Provider's summary billing domain.
+
 ## 0.8.1
 
 ### Patch Changes
