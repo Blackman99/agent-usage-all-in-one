@@ -15,7 +15,7 @@
 1. **No Cursor (yet)** — do not imply Cursor usage is covered  
 2. **macOS only** — Node ≥ 24; not Windows/Linux  
 3. **Don’t oversell “all-in-one”** — package name ≠ universal coverage; say “multi-agent usage center” for listed providers  
-4. Keep category matrix in `comparison.md`; use this table when a reader asks “vs X"
+4. Keep category matrix in `comparison.md`; use this table when a reader asks “vs X”
 
 
 ## Opportunity posts (no new repo)
