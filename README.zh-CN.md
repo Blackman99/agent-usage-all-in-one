@@ -61,7 +61,7 @@ pnpm dev
 
 ## 安装与启动
 
-要求 macOS 和 Node.js 24 或更高版本。
+要求 macOS 和 Node.js 24 或更高版本。这是受支持的运行时（内置 `node:sqlite`、钥匙串、LaunchAgent），不是文档疏漏——见 [ADR 017](docs/adr/017-macos-node24-npm-runtime.md) 和 [平台路线图](docs/platform-roadmap.md)。尚未提供 Linux，也没有 Homebrew / DMG。
 
 ```bash
 npx agent-usage-all-in-one
@@ -141,6 +141,12 @@ pnpm test:e2e
 可查阅[官方定价证据](docs/research/official-pricing-sources-2026-08-28.md)、
 [连接验证收据](docs/release/connector-receipts-2026-08-28.md)与
 [开源说明](docs/open-source.md)。
+
+## 路线图愿景（未交付）
+
+Linux、Homebrew 和 DMG 在满足 [docs/platform-roadmap.md](docs/platform-roadmap.md)
+中的条件之前不会进入产品。菜单栏一览见 [issue #19](https://github.com/Blackman99/agent-usage-all-in-one/issues/19)，
+仓库中的示意图只是愿景，不是现有功能。
 
 ## 许可证与社区
 

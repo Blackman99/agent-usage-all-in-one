@@ -33,6 +33,7 @@ mark is original and does not incorporate those Provider marks.
 ## Release provenance
 
 Changesets controls semantic versions and changelogs. GitHub Actions runs the
-quality gate and publishes with npm provenance. Release artifacts include the
-MIT license, this dependency report, security policy, product brand assets, and
-the project-level third-party notices.
+quality gate and publishes with npm provenance. The supported runtime and
+canonical install channel are macOS, Node.js 24, and npm / `npx` (ADR 017).
+Release artifacts include the MIT license, this dependency report, security
+policy, product brand assets, and the project-level third-party notices.

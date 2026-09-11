@@ -10,10 +10,11 @@ Issues becomes the tracker for new public work while historical `.scratch/`
 ticket identifiers remain stable. Changesets owns semantic version proposals,
 release pull requests, changelogs, npm publication, and GitHub releases.
 
-CI runs on macOS with Node.js 24 because the supported P0 runtime and package
-smoke exercise macOS-specific behavior. npm publication is public and records
-GitHub Actions provenance. Secrets are stored only in GitHub/npm release
-configuration and are never committed.
+CI runs on macOS with Node.js 24 because the supported runtime and package
+smoke exercise macOS-specific behavior (ADR 017). npm publication is public and
+records GitHub Actions provenance. Secrets are stored only in GitHub/npm
+release configuration and are never committed. Homebrew, DMG, and Linux CI are
+out of scope until that ADR is superseded.
 
 ## Consequences
 

@@ -6,7 +6,9 @@ accounting are release requirements rather than optional polish.
 
 ## Development
 
-Use macOS, Node.js 24+, and pnpm 10.33.3.
+Use macOS, Node.js 24+, and pnpm 10.33.3. That runtime is the product boundary
+(ADR 017); do not add Linux CI or a second install channel without superseding
+it.
 
 ```bash
 pnpm install

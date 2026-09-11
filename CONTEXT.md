@@ -3,10 +3,13 @@
 ## Product boundary
 
 Agent Usage is a local-first, open-source usage center for individual
-developers. The macOS-first product launches a local web dashboard from one
-command and exposes the same core summary through a CLI. It never switches an
-agent automatically and does not upload private usage data or telemetry to a
-product-owned service.
+developers. The supported product is macOS with Node.js 24 or newer: one command
+launches a local loopback dashboard and exposes the same core summary through a
+CLI. Canonical install is npm / `npx`; Linux, Homebrew, and DMG are not shipped
+(ADR 017, `docs/platform-roadmap.md`). It never switches an agent automatically
+and does not upload private usage data or telemetry to a product-owned service.
+Cursor is not a Provider until a connector can read provider-stated local
+evidence without copying credentials.
 
 The initial products are Codex, Claude Code, OpenCode, Grok, dsh, and Antigravity.
 OpenCode Go quota and OpenCode local history use separate internal Provider

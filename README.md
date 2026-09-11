@@ -83,7 +83,11 @@ browser closed.
 
 ## Install and run
 
-Agent Usage requires macOS and Node.js 24 or newer.
+Agent Usage requires macOS and Node.js 24 or newer. That floor is the supported
+runtime (built-in `node:sqlite`, Keychain, LaunchAgent), not a documentation
+oversight — see [ADR 017](docs/adr/017-macos-node24-npm-runtime.md) and the
+[platform roadmap](docs/platform-roadmap.md). Linux and Homebrew / DMG are not
+shipped.
 
 ![Quick start: install and open the local dashboard in three steps](docs/design/install-3-steps.png)
 
@@ -177,6 +181,9 @@ See the [official pricing evidence](docs/research/official-pricing-sources-2026-
 [open-source notices](docs/open-source.md).
 
 ## Roadmap vision (not shipped)
+
+Linux, Homebrew, and DMG stay off the product until the conditions in
+[docs/platform-roadmap.md](docs/platform-roadmap.md) are met.
 
 > **VISION only — not shipped.** Menu bar / always-available glance is tracked in [issue #19](https://github.com/Blackman99/agent-usage-all-in-one/issues/19). Do not treat the mock as a current feature.
 

@@ -4,7 +4,7 @@
 > No dunking. Goal: help a reader decide when Agent Usage is (and isn’t) the right tool.  
 > Facts from README.md / README.zh-CN.md.
 >
-> **Fact-check 2026-09-11:** Axes match README (macOS-first, local loopback, providers Codex/Claude Code/OpenCode/Grok/dsh/Antigravity, advice-only, API retail ≠ bill, Grok Build/SuperGrok vs xAI API never summed, Node ≥ 24). Named competitors in companion `named-competitors.md` (ccusage / CodeBurn / Token Monitor / TokenTracker / **tokscale ~5.4k**) after 开源对标 scan — P0: no Cursor yet, macOS only, don’t oversell all-in-one.
+> **Fact-check 2026-09-11:** Axes match README (macOS-only, local loopback, providers Codex/Claude Code/OpenCode/Grok/dsh/Antigravity, advice-only, API retail ≠ bill, Grok Build/SuperGrok vs xAI API never summed, Node ≥ 24). Named competitors in companion `named-competitors.md` (ccusage / CodeBurn / Token Monitor / TokenTracker / **tokscale ~5.4k**). P0 honesty: no Cursor yet, macOS only, don’t oversell all-in-one. Runtime and install channel: ADR 017 and `docs/platform-roadmap.md`.
 
 ---
 
