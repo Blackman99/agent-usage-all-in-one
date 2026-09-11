@@ -135,10 +135,34 @@ export function isGrokOfficialModel(model: string | null | undefined): boolean {
   return false;
 }
 
+/** Collapse Grok CLI aliases (`grk-4.6`, `grok-4.6-build`) to one family key. */
+export function grokModelFamilyKey(model: string | null | undefined): string | null {
+  if (!model) return null;
+  let normalized = model.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'grk' || normalized.startsWith('grk-') || normalized.startsWith('grk/')) {
+    normalized = `grok${normalized.slice(3)}`;
+  }
+  for (;;) {
+    const stripped = normalized.replace(/-(high|medium|low|xhigh|build|latest)$/, '');
+    if (stripped === normalized) return normalized;
+    normalized = stripped;
+  }
+}
+
 export function resolveGrokBillingDomain(
   model: string | null | undefined,
-  customEndpoints?: Map<string, string>
+  customEndpoints?: Map<string, string>,
+  selectedModel?: string | null
 ): string {
+  const selectedKey = selectedModel?.trim().toLowerCase() ?? '';
+  if (selectedKey && customEndpoints?.has(selectedKey)) {
+    const usageFamily = grokModelFamilyKey(model);
+    const selectedFamily = grokModelFamilyKey(selectedModel);
+    if (usageFamily && selectedFamily && usageFamily === selectedFamily) {
+      return customEndpoints.get(selectedKey)!;
+    }
+  }
   if (!model) return 'grok-build-subscription';
   const normalized = model.trim().toLowerCase();
   if (customEndpoints?.has(normalized)) {

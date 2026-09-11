@@ -35,6 +35,7 @@ interface ParsedTranscriptRecord {
   dedupeKey: string;
   observation: UsageObservation;
   reportedCostUsd: number | null;
+  grokSelectedModel?: string | null;
 }
 
 interface TranscriptFile {
@@ -64,6 +65,10 @@ interface DshScanState {
   unsupportedVersion: boolean;
 }
 
+interface GrokScanState {
+  selectedModel: string | null;
+}
+
 /**
  * Billing domain for dsh usage whose route the log does not name.
  *
@@ -78,6 +83,8 @@ const DSH_SESSION_FORMAT_VERSION = 0;
 const DSH_COMPRESSED_SUFFIX = '.jsonl.zstd';
 /** Lines worth parsing in a dsh log: the header, a route change, or reported usage. */
 const DSH_LINE_HINTS = ['"usage"', '"request/context"', '"type":"session"'];
+/** Transcript cache v2 stores the Grok session selection used to classify custom endpoints. */
+const TRANSCRIPT_CACHE_VERSION = 2;
 
 export function loadGrokConfigCustomModels(configContent: string): Map<string, string> {
   const customModels = new Map<string, string>();
@@ -204,7 +211,8 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
         const remapped = cached.records.map((r) => {
           const expectedDomain = resolveGrokBillingDomain(
             r.observation.model,
-            this.#grokCustomModels
+            this.#grokCustomModels,
+            r.grokSelectedModel
           );
           if (r.observation.billingDomainId !== expectedDomain) {
             return {
@@ -233,9 +241,10 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
       model: '',
       unsupportedVersion: false
     };
+    const grokState: GrokScanState = { selectedModel: null };
     try {
       for await (const line of readTranscriptLines(file.path)) {
-        records.push(...this.#parseLine(line, codexState, dshState));
+        records.push(...this.#parseLine(line, codexState, dshState, grokState));
         // An unknown format version is never partially trusted, and the file
         // stays uncached so the reported gap does not vanish on the next scan.
         if (dshState.unsupportedVersion) {
@@ -257,7 +266,8 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
   #parseLine(
     line: string,
     codexState: CodexScanState,
-    dshState: DshScanState
+    dshState: DshScanState,
+    grokState: GrokScanState
   ): ParsedTranscriptRecord[] {
     if (this.#provider === 'claude-code') {
       return line.includes('"usage"') ? compact(parseClaudeTranscriptLine(line)) : [];
@@ -268,9 +278,14 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
         ? parseDshTranscriptLine(line, dshState)
         : [];
     }
-    return line.includes('"turn_completed"')
-      ? parseGrokTranscriptLine(line, this.#grokCustomModels)
-      : [];
+    if (
+      line.includes('"turn_completed"') ||
+      line.includes('"modelId"') ||
+      line.includes('"current_mode_update"')
+    ) {
+      return parseGrokTranscriptLine(line, this.#grokCustomModels, grokState);
+    }
+    return [];
   }
 
   async #loadCache(): Promise<void> {
@@ -282,7 +297,7 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
         version?: number;
         files?: unknown[];
       };
-      if (stored.version !== 1 || !Array.isArray(stored.files)) return;
+      if (stored.version !== TRANSCRIPT_CACHE_VERSION || !Array.isArray(stored.files)) return;
       for (const file of stored.files) {
         if (!isCachedTranscriptFile(file)) continue;
         if (file.recordsDigest !== stableId(JSON.stringify(file.records))) continue;
@@ -300,7 +315,10 @@ export class LocalTranscriptUsageClient implements TranscriptUsageClient {
       const temporary = `${this.#cachePath}.${process.pid}.tmp`;
       await writeFile(
         temporary,
-        JSON.stringify({ version: 1, files: [...this.#fileCache.values()] }),
+        JSON.stringify({
+          version: TRANSCRIPT_CACHE_VERSION,
+          files: [...this.#fileCache.values()]
+        }),
         { mode: 0o600 }
       );
       await rename(temporary, this.#cachePath);
@@ -344,6 +362,9 @@ function isParsedTranscriptRecord(value: unknown): value is ParsedTranscriptReco
   const tokenSemantics = asObject(observation.tokenSemantics);
   const structurallyValid =
     typeof record.dedupeKey === 'string' &&
+    (record.grokSelectedModel === undefined ||
+      record.grokSelectedModel === null ||
+      typeof record.grokSelectedModel === 'string') &&
     (record.reportedCostUsd === null || finiteNonNegative(record.reportedCostUsd) !== null) &&
     typeof observation.id === 'string' &&
     typeof observation.billingDomainId === 'string' &&
@@ -396,15 +417,24 @@ function nonNegativeSafeInteger(value: unknown): boolean {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+function grokSelectedModelFromUpdate(update: Record<string, unknown>): string | null {
+  const meta = asObject(update._meta);
+  return string(update.model) ?? string(meta?.modelId);
+}
+
 function parseGrokTranscriptLine(
   line: string,
-  grokCustomModels?: Map<string, string>
+  grokCustomModels: Map<string, string> | undefined,
+  grokState: GrokScanState
 ): ParsedTranscriptRecord[] {
   const record = parseObject(line);
   const params = asObject(record?.params);
   const update = asObject(params?.update);
+  if (!record || !params || !update) return [];
+  const selected = grokSelectedModelFromUpdate(update);
+  if (selected) grokState.selectedModel = selected;
   const usage = asObject(update?.usage);
-  if (!record || !params || !update || !usage || update.sessionUpdate !== 'turn_completed') {
+  if (!usage || update.sessionUpdate !== 'turn_completed') {
     return [];
   }
 
@@ -463,9 +493,14 @@ function parseGrokTranscriptLine(
       (remainingCost !== null && untickedTokens > 0
         ? remainingCost * (grokRecordedTokens(totals) / untickedTokens)
         : null);
-    const billingDomainId = resolveGrokBillingDomain(model, grokCustomModels);
+    const billingDomainId = resolveGrokBillingDomain(
+      model,
+      grokCustomModels,
+      grokState.selectedModel
+    );
     return {
       dedupeKey,
+      grokSelectedModel: grokState.selectedModel,
       observation: {
         id: `grok-transcript:${stableId(dedupeKey)}`,
         billingDomainId,

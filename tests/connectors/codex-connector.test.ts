@@ -135,7 +135,7 @@ describe('CodexConnector', () => {
     expect(structurallyRecovered).toEqual(first);
     expect(restarted.usage[0].model).toBe('gpt-5.6-sol');
     expect(persisted).not.toContain(workspace);
-    expect(JSON.parse(persisted)).toMatchObject({ version: 1, files: [expect.any(Object)] });
+    expect(JSON.parse(persisted)).toMatchObject({ version: 2, files: [expect.any(Object)] });
   });
 
   it('keeps official account totals and adds model usage from local rollouts for reconciliation', async () => {

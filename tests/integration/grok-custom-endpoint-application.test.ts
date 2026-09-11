@@ -221,4 +221,121 @@ describe('grok custom endpoint separation and rate application', () => {
 
     repository.close();
   });
+
+  it('moves official grok-*-build usage onto Custom endpoints when the session selected a custom Grok alias', async () => {
+    const grokHome = await mkdtemp(join(tmpdir(), 'agent-usage-grok-custom-alias-app-'));
+    workspaces.push(grokHome);
+    const sessionsDir = join(grokHome, 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(grokHome, 'config.toml'),
+      `[model."grk-4.6"]
+model = "grk-4.6"
+base_url = "https://example.invalid/v1"
+`
+    );
+    const sessionDir = join(sessionsDir, 'session-custom-grok');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, 'updates.jsonl'),
+      `${JSON.stringify({
+        timestamp: Date.parse('2026-08-28T01:00:00.000Z') / 1000,
+        params: {
+          sessionId: 'session-custom-grok',
+          update: {
+            sessionUpdate: 'user_message_chunk',
+            _meta: { modelId: 'grk-4.6' }
+          }
+        }
+      })}\n${JSON.stringify({
+        timestamp: Date.parse('2026-08-28T01:01:00.000Z') / 1000,
+        params: {
+          sessionId: 'session-custom-grok',
+          _meta: { agentTimestampMs: Date.parse('2026-08-28T01:01:00.000Z') },
+          update: {
+            sessionUpdate: 'turn_completed',
+            prompt_id: 'prompt-custom-grok',
+            usage: {
+              inputTokens: 800,
+              outputTokens: 50,
+              cachedReadTokens: 200,
+              cacheCreationTokens: 0,
+              reasoningTokens: 0,
+              modelUsage: {
+                'grok-4.6-build': {
+                  inputTokens: 800,
+                  outputTokens: 50,
+                  cachedReadTokens: 200,
+                  cacheCreationTokens: 0,
+                  reasoningTokens: 0
+                }
+              }
+            }
+          }
+        }
+      })}\n`
+    );
+
+    const databasePath = join(grokHome, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    repository.saveConnectorStatus({
+      id: 'grok',
+      state: 'connected',
+      installed: true,
+      binaryPath: '/usr/local/bin/grok',
+      officialCredentialPresent: true,
+      errorCode: null,
+      lastDiscoveredAt: NOW.toISOString(),
+      secretReference: null
+    });
+
+    const application = new UsageApplication({
+      repository,
+      connectors: [
+        new GrokBuildConnector({
+          billingClient: {
+            async readBilling() {
+              return {
+                config: {
+                  creditUsagePercent: 10,
+                  monthlyLimit: { val: 10000 },
+                  used: { val: 1000 }
+                },
+                sourceObservedAt: '2026-08-28T03:00:00.000Z'
+              };
+            }
+          },
+          historyClient: new LocalTranscriptUsageClient({
+            provider: 'grok',
+            roots: [sessionsDir],
+            clock: () => NOW
+          }),
+          clock: () => NOW
+        })
+      ],
+      clock: () => NOW
+    });
+
+    await application.refresh({ userInitiated: true });
+    const overview = await application.getOverview({
+      window: '24h',
+      comparisonCurrency: 'USD'
+    });
+    const grokProvider = overview.providers.find((provider) => provider.id === 'grok')!;
+    const customDomain = grokProvider.billingDomains.find((domain) => domain.id === 'custom')!;
+    const subscriptionDomain = grokProvider.billingDomains.find(
+      (domain) => domain.id === 'grok-build-subscription'
+    )!;
+
+    expect(customDomain.tokenTotals.total).toBe(850);
+    expect(customDomain.history.models.map((model) => model.model)).toEqual(['grok-4.6-build']);
+    expect(subscriptionDomain.tokenTotals.total).toBe(0);
+    expect(
+      overview.workbench.modelRanking.entries.find(
+        (entry) => entry.model === 'grok-4.6-build' && entry.billingDomainId === 'custom'
+      )
+    ).toMatchObject({ includedInHeadline: true });
+
+    repository.close();
+  });
 });

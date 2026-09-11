@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   GrokBuildConnector,
+  grokModelFamilyKey,
+  resolveGrokBillingDomain,
   type GrokBuildBillingClient
 } from '../../src/connectors/grok-build/grok-build-connector.js';
 import {
@@ -302,6 +304,163 @@ describe('GrokBuildConnector', () => {
     ]);
   });
 
+  it('counts a custom-endpoint Grok model reported as grok-*-build under Custom endpoints', async () => {
+    const grokHome = await mkdtemp(join(tmpdir(), 'agent-usage-grok-custom-alias-'));
+    transcriptWorkspaces.push(grokHome);
+    const sessionsDir = join(grokHome, 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(grokHome, 'config.toml'),
+      `[model."grk-4.6"]
+name = "Custom Grok 4.6"
+model = "grk-4.6"
+base_url = "https://example.invalid/v1"
+`
+    );
+    const sessionDir = join(sessionsDir, 'session-custom-grok');
+    await mkdir(sessionDir, { recursive: true });
+    const mode = JSON.stringify({
+      timestamp: Date.parse('2026-08-28T01:00:00.000Z') / 1000,
+      params: {
+        sessionId: 'session-custom-grok',
+        update: {
+          sessionUpdate: 'user_message_chunk',
+          _meta: { modelId: 'grk-4.6' }
+        }
+      }
+    });
+    const turn = JSON.stringify({
+      timestamp: Date.parse('2026-08-28T01:01:00.000Z') / 1000,
+      params: {
+        sessionId: 'session-custom-grok',
+        _meta: { agentTimestampMs: Date.parse('2026-08-28T01:01:00.000Z') },
+        update: {
+          sessionUpdate: 'turn_completed',
+          prompt_id: 'prompt-custom-grok',
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 200,
+            cachedReadTokens: 500,
+            cacheCreationTokens: 0,
+            reasoningTokens: 50,
+            modelUsage: {
+              'grok-4.6-build': {
+                inputTokens: 1000,
+                outputTokens: 200,
+                cachedReadTokens: 500,
+                cacheCreationTokens: 0,
+                reasoningTokens: 50
+              }
+            }
+          }
+        }
+      }
+    });
+    await writeFile(join(sessionDir, 'updates.jsonl'), `${mode}\n${turn}\n`);
+
+    const snapshot = await new GrokBuildConnector({
+      billingClient: {
+        async readBilling() {
+          return billingFixture;
+        }
+      },
+      historyClient: new LocalTranscriptUsageClient({
+        provider: 'grok',
+        roots: [sessionsDir],
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      }),
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.billingDomains.map((domain) => domain.id).sort()).toEqual([
+      'custom',
+      'grok-build-subscription'
+    ]);
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        billingDomainId: 'custom',
+        model: 'grok-4.6-build',
+        sessionId: 'session-custom-grok'
+      })
+    ]);
+  });
+
+  it('keeps official Grok usage on the subscription domain when the session selected grok-4.6', async () => {
+    const grokHome = await mkdtemp(join(tmpdir(), 'agent-usage-grok-official-alias-'));
+    transcriptWorkspaces.push(grokHome);
+    const sessionsDir = join(grokHome, 'sessions');
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(grokHome, 'config.toml'),
+      `[model."grk-4.6"]
+model = "grk-4.6"
+base_url = "https://example.invalid/v1"
+`
+    );
+    const sessionDir = join(sessionsDir, 'session-official-grok');
+    await mkdir(sessionDir, { recursive: true });
+    const mode = JSON.stringify({
+      timestamp: Date.parse('2026-08-28T01:00:00.000Z') / 1000,
+      params: {
+        sessionId: 'session-official-grok',
+        update: {
+          sessionUpdate: 'user_message_chunk',
+          _meta: { modelId: 'grok-4.6' }
+        }
+      }
+    });
+    const turn = JSON.stringify({
+      timestamp: Date.parse('2026-08-28T01:01:00.000Z') / 1000,
+      params: {
+        sessionId: 'session-official-grok',
+        _meta: { agentTimestampMs: Date.parse('2026-08-28T01:01:00.000Z') },
+        update: {
+          sessionUpdate: 'turn_completed',
+          prompt_id: 'prompt-official-grok',
+          usage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            cachedReadTokens: 0,
+            cacheCreationTokens: 0,
+            reasoningTokens: 0,
+            modelUsage: {
+              'grok-4.6-build': {
+                inputTokens: 100,
+                outputTokens: 20,
+                cachedReadTokens: 0,
+                cacheCreationTokens: 0,
+                reasoningTokens: 0
+              }
+            }
+          }
+        }
+      }
+    });
+    await writeFile(join(sessionDir, 'updates.jsonl'), `${mode}\n${turn}\n`);
+
+    const snapshot = await new GrokBuildConnector({
+      billingClient: {
+        async readBilling() {
+          return billingFixture;
+        }
+      },
+      historyClient: new LocalTranscriptUsageClient({
+        provider: 'grok',
+        roots: [sessionsDir],
+        clock: () => new Date('2026-08-28T02:00:00.000Z')
+      }),
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    }).collect();
+
+    expect(snapshot.usage).toEqual([
+      expect.objectContaining({
+        billingDomainId: 'grok-build-subscription',
+        model: 'grok-4.6-build',
+        sessionId: 'session-official-grok'
+      })
+    ]);
+  });
+
   it('maps the provider-native shared weekly pool without inventing a five-hour window', async () => {
     const billingClient: GrokBuildBillingClient = {
       async readBilling() {
@@ -380,6 +539,21 @@ describe('GrokBuildConnector', () => {
         recovery: expect.stringContaining('/usage')
       })
     ]);
+  });
+});
+
+describe('resolveGrokBillingDomain', () => {
+  it('maps a custom grk-* selection onto official grok-*-build usage', () => {
+    const custom = new Map([['grk-4.6', 'custom']]);
+    expect(grokModelFamilyKey('grk-4.6')).toBe('grok-4.6');
+    expect(grokModelFamilyKey('grok-4.6-build')).toBe('grok-4.6');
+    expect(resolveGrokBillingDomain('grok-4.6-build', custom, 'grk-4.6')).toBe('custom');
+    expect(resolveGrokBillingDomain('grok-4.6-build', custom, 'grok-4.6')).toBe(
+      'grok-build-subscription'
+    );
+    expect(resolveGrokBillingDomain('grok-4.6-build', custom, 'gemini-3.8-flash-high')).toBe(
+      'grok-build-subscription'
+    );
   });
 });
 
