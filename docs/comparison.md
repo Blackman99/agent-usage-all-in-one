@@ -76,7 +76,7 @@ See [named-competitors.md](named-competitors.md) for sourced rows. One-liners:
 - vs **CodeBurn**: multi-tool/multi-platform packaging vs our stricter cost semantics + default no telemetry
 - vs **Token Monitor**: closest dashboard; they have Cursor/multi-machine/menu bar we don’t claim
 - vs **TokenTracker**: CN distribution benchmark — learn reach, don’t copy claims
-- vs **tokscale** (~5.4k★): token usage / scale peer — re-check positioning before posts
+- vs **tokscale** (~5.4k): token/cost scale peer; same P0 honesty — no Cursor / macOS-only / no menubar claim; “where spent” anatomy hangs on this repo, not a new one
 
 **External P0 boundaries:** no Cursor yet · macOS only · don’t oversell “all-in-one”.
 
