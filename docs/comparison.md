@@ -4,7 +4,7 @@
 > No dunking. Goal: help a reader decide when Agent Usage is (and isn’t) the right tool.  
 > Facts from README.md / README.zh-CN.md.
 >
-> **Fact-check 2026-09-11:** Axes match README (macOS-only, local loopback, providers Codex/Claude Code/OpenCode/Grok/dsh/Antigravity, advice-only, API retail ≠ bill, Grok Build/SuperGrok vs xAI API never summed, Node ≥ 24). Named competitors in companion `named-competitors.md` (ccusage / CodeBurn / Token Monitor / TokenTracker / **tokscale ~5.4k**). P0 honesty: no Cursor yet, macOS only, don’t oversell all-in-one. Runtime and install channel: ADR 017 and `docs/platform-roadmap.md`.
+> **Fact-check 2026-09-11:** Axes match README (macOS-only, local loopback, providers Codex/Claude Code/OpenCode/Grok/dsh/Antigravity, advice-only, API retail ≠ bill, Grok Build/SuperGrok vs xAI API never summed, Node ≥ 24). Named competitors in companion `named-competitors.md` (ccusage / CodeBurn / Token Monitor / TokenTracker / **tokscale ~5.4k** / **codenotch ~1.5k**). P0 honesty: no Cursor yet, macOS only, don’t oversell all-in-one. Runtime and install channel: ADR 017 and `docs/platform-roadmap.md`.
 
 ---
 
@@ -77,6 +77,7 @@ See [named-competitors.md](named-competitors.md) for sourced rows. One-liners:
 - vs **Token Monitor**: closest dashboard; they have Cursor/multi-machine/menu bar we don’t claim
 - vs **TokenTracker**: CN distribution benchmark — learn reach, don’t copy claims
 - vs **tokscale** (~5.4k): token/cost scale peer; same P0 honesty — no Cursor / macOS-only / no menubar claim; “where spent” anatomy hangs on this repo, not a new one
+- vs **codenotch** (`vinzdg/codenotch`, ~1.5k): menubar/edge **glance** quotas; we are the honest dashboard (retail≠bill, multi-agent anatomy) — menubar remains VISION/#19, **not shipped**
 
 **External P0 boundaries:** no Cursor yet · macOS only · don’t oversell “all-in-one”.
 
