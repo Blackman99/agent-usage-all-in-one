@@ -106,10 +106,10 @@ describe('token and money workbench', () => {
       cny.trend.buckets
         .flatMap((bucket) => bucket.segments)
         .filter((segment) => segment.providerId === 'grok')
-        .map((segment) => [segment.billingDomainId, segment.includedInHeadline])
+        .map((segment) => [segment.billingDomainId, segment.model, segment.includedInHeadline])
     ).toEqual([
-      ['grok-build-subscription', true],
-      ['xai-api', false]
+      ['grok-build-subscription', 'grok-build', true],
+      ['xai-api', 'grok-4.6', false]
     ]);
     expect(
       cny.trend.buckets
@@ -132,6 +132,40 @@ describe('token and money workbench', () => {
       tokenShare: null,
       retailShare: null
     });
+
+    repository.close();
+  });
+
+  it('keeps two models on the same Provider billing domain as separate trend segments', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-workbench-models-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(
+      snapshot(
+        'codex',
+        'Codex',
+        'subscription',
+        'Subscription',
+        [
+          usage('codex-gpt-5', 'subscription', '2026-08-28T01:10:00.000Z', 'gpt-5', 'event'),
+          usage('codex-astra', 'subscription', '2026-08-28T01:20:00.000Z', 'gpt-6-astra', 'event')
+        ],
+        []
+      )
+    );
+
+    const workbench = repository.getOverview(NOW, { window: '24h' }).workbench;
+    const models = workbench.trend.buckets
+      .flatMap((bucket) => bucket.segments)
+      .filter((segment) => segment.providerId === 'codex')
+      .map((segment) => segment.model)
+      .sort();
+
+    expect(models).toEqual(['gpt-5', 'gpt-6-astra']);
+    expect(workbench.modelRanking.entries.map((entry) => entry.model).sort()).toEqual([
+      'gpt-5',
+      'gpt-6-astra'
+    ]);
 
     repository.close();
   });
@@ -360,7 +394,8 @@ async function fixture(): Promise<SqliteUsageRepository> {
             'reported-estimate',
             0.0004
           ),
-          authority: 'local-observation'
+          authority: 'local-observation',
+          usageObservationId: 'grok-build-usage'
         },
         {
           ...cost(

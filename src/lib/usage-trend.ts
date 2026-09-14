@@ -24,6 +24,7 @@ export interface TrendSeriesIdentity {
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  model: string | null;
   includedInHeadline: boolean;
   costPurpose: TrendCostPurpose | null;
 }
@@ -51,12 +52,40 @@ const TREND_SEGMENT_COLORS: Record<string, string> = {
   dsh: '#e3c85c'
 };
 
-export function trendSegmentColor(providerId: string, billingDomainId: string): string {
-  return (
-    TREND_SEGMENT_COLORS[`${providerId}:${billingDomainId}`] ??
-    TREND_SEGMENT_COLORS[providerId] ??
-    '#9aa5b8'
-  );
+const MODEL_IDENTITY_COLORS = [
+  '#78a7ff',
+  '#d69b73',
+  '#55c89d',
+  '#b28cff',
+  '#f07f9a',
+  '#e3c85c',
+  '#d480ff',
+  '#73d4b2',
+  '#ff9f6b',
+  '#6ec6ff',
+  '#c9a227',
+  '#8fd3c4'
+];
+
+export function trendSegmentColor(
+  providerId: string,
+  billingDomainId: string,
+  model?: string | null
+): string {
+  const branded =
+    TREND_SEGMENT_COLORS[`${providerId}:${billingDomainId}`] ?? TREND_SEGMENT_COLORS[providerId];
+  if (model == null || model === '') return branded ?? '#9aa5b8';
+  const key = `${providerId}:${billingDomainId}:${model}`;
+  let hash = 2166136261;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const colorIndex = (hash >>> 0) % MODEL_IDENTITY_COLORS.length;
+  const color = MODEL_IDENTITY_COLORS[colorIndex] ?? '#9aa5b8';
+  return color === branded
+    ? (MODEL_IDENTITY_COLORS[(colorIndex + 1) % MODEL_IDENTITY_COLORS.length] ?? '#9aa5b8')
+    : color;
 }
 
 export function trendViewportBounds(
@@ -129,12 +158,13 @@ export function trendLegend(
   return [
     ...new Map(
       identities.map((segment) => [
-        `${segment.providerId}:${segment.billingDomainId}:${segment.costPurpose ?? 'tokens'}`,
+        `${segment.providerId}:${segment.billingDomainId}:${segment.model ?? ''}:${segment.costPurpose ?? 'tokens'}`,
         {
           providerId: segment.providerId,
           providerDisplayName: segment.providerDisplayName,
           billingDomainId: segment.billingDomainId,
           billingDomainDisplayName: segment.billingDomainDisplayName,
+          model: segment.model ?? null,
           includedInHeadline: segment.includedInHeadline,
           costPurpose: segment.costPurpose
         } satisfies TrendSeriesIdentity
@@ -160,13 +190,14 @@ export function buildTrendChartSeries(
 ): TrendChartSeries[] {
   return trendLegend(buckets, metric).map((identity) => ({
     ...identity,
-    key: `${identity.providerId}:${identity.billingDomainId}:${identity.costPurpose ?? 'tokens'}`,
+    key: `${identity.providerId}:${identity.billingDomainId}:${identity.model ?? ''}:${identity.costPurpose ?? 'tokens'}`,
     values: buckets.map((bucket) => {
       if (bucket.gap) return null;
       const segment = bucket.segments.find(
         (candidate) =>
           candidate.providerId === identity.providerId &&
-          candidate.billingDomainId === identity.billingDomainId
+          candidate.billingDomainId === identity.billingDomainId &&
+          (candidate.model ?? null) === identity.model
       );
       return trendSeriesValue(segment, metric, identity.costPurpose);
     })
@@ -282,7 +313,7 @@ export interface TrendChartOptionModel {
 }
 
 export function trendSeriesLineModel(series: TrendChartSeries): TrendChartLineModel {
-  const color = trendSegmentColor(series.providerId, series.billingDomainId);
+  const color = trendSegmentColor(series.providerId, series.billingDomainId, series.model);
   const reported = series.costPurpose === 'reported-estimate';
   return {
     id: series.key,

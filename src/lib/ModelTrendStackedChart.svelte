@@ -15,6 +15,7 @@
   import { CanvasRenderer } from 'echarts/renderers';
 
   import type { WorkbenchModelEntry } from '$core/types.js';
+  import { qualifyChartNames } from '$lib/chart-identity.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
   import { trendSegmentColor } from '$lib/usage-trend.js';
 
@@ -53,10 +54,12 @@
   }
 
   function uniqueModelNames(entries: WorkbenchModelEntry[]): string[] {
-    const counts: Record<string, number> = {};
-    for (const entry of entries) counts[entry.model] = (counts[entry.model] ?? 0) + 1;
-    return entries.map((entry) =>
-      (counts[entry.model] ?? 0) > 1 ? `${entry.model} · ${entry.providerDisplayName}` : entry.model
+    return qualifyChartNames(
+      entries.map((entry) => ({
+        model: entry.model,
+        providerDisplayName: entry.providerDisplayName,
+        billingDomainDisplayName: entry.billingDomainDisplayName
+      }))
     );
   }
 
@@ -78,7 +81,7 @@
       stack: 'total',
       barMaxWidth: 34,
       emphasis: { focus: 'series' },
-      itemStyle: { color: trendSegmentColor(model.providerId, model.billingDomainId) },
+      itemStyle: { color: trendSegmentColor(model.providerId, model.billingDomainId, model.model) },
       data: bucketLabels.map((_, bucketIndex) => valueFor(model, bucketIndex))
     }));
     return {

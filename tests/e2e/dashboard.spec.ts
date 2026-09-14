@@ -1664,16 +1664,18 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(reportedTrend).toHaveCount(1);
   await expect(retailTrend).not.toHaveAttribute('style', /transparent/);
   await expect(reportedTrend).toHaveAttribute('style', /fill: transparent/);
-  // The legend names each Provider billing domain once; the dashed plot line
+  // The legend names each known model once; the dashed plot line
   // keeps the reported-estimate series distinct.
   await expect(workbench.locator('.trend-legend span')).toHaveCount(1);
   await expect(workbench.locator('.trend-legend')).not.toContainText('Provider-reported estimate');
-  const providerShareData = workbench.getByRole('table', { name: 'Provider share' });
-  await expect(providerShareData).toContainText('History Agent');
+  const providerShareData = workbench.getByRole('table', { name: 'Model share' });
+  await expect(providerShareData).toContainText('fable-model');
+  await expect(providerShareData).toContainText('Claude Code');
+  await expect(providerShareData).toContainText('shared-model · Codex');
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await page.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
-  await expect(providerShareData).toContainText('700 Tokens');
+  await expect(providerShareData).toContainText('fable-model');
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await page.getByRole('button', { name: '24h' }).click();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
@@ -1698,7 +1700,7 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   const trendTable = workbench.getByRole('table', { name: 'Trend data' });
   await expect(trendTable).toContainText('Gap');
   // The accessible trend table carries the same names and amounts as the plot.
-  await expect(trendTable).toContainText('History Agent · API: $1.25');
+  await expect(trendTable).toContainText('history-model · History Agent · API: $1.25');
   await expect(trendTable).not.toContainText('Billing period');
   await page.reload();
   await expect.poll(() => requestedWindows.at(-1)).toBe('30d');
@@ -2312,15 +2314,15 @@ test('presents the dashboard as a cohesive hierarchy across its primary views', 
     position: { x: providerChartBox!.width / 2, y: providerChartBox!.height * 0.12 }
   });
   await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
-    'History Agent'
+    /shared-model|fable-model|open-model|model-four|model-five|Codex|Claude Code|Grok|OpenCode/
   );
   await page.mouse.move(0, 0);
   await expect(providerShareChart.locator('.provider-share-tooltip')).toBeHidden();
   await providerShareChart.hover({
     position: { x: providerChartBox!.width / 2, y: providerChartBox!.height - 10 }
   });
-  await expect(providerShareChart.locator('.provider-share-tooltip')).toHaveText(
-    /History Agent.*100%/
+  await expect(providerShareChart.locator('.provider-share-tooltip')).toContainText(
+    /shared-model|fable-model|open-model|model-four|model-five|Codex|Claude Code|Grok|OpenCode/
   );
   await expect(providerShareChart.locator('.provider-share-tooltip')).not.toContainText('Source:');
   await page.mouse.move(0, 0);
@@ -2836,6 +2838,7 @@ function tokenMoneyWorkbenchFixture(window: string, total: number, currency: str
                   providerDisplayName: 'History Agent',
                   billingDomainId: 'api',
                   billingDomainDisplayName: 'API',
+                  model: 'history-model',
                   includedInHeadline: true,
                   recordedTokens: total,
                   observationCount: 1,

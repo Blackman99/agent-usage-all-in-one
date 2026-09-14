@@ -284,9 +284,10 @@ and equivalent cost stay exact. Its primary billing domain is
 25. A converted workbench amount is available only when every contributing
     record has a known native amount and valid conversion. Missing or stale CNY
     evidence cannot hide the original USD or other native amount.
-26. Workbench trend segments retain Provider and billing-domain identity. An
-    interval without observations remains a gap, and day or billing-period
-    precision remains explicit in visual and accessible output.
+26. Workbench trend segments retain Provider, billing-domain, and model
+    identity. Matching model names from different identities stay separate
+    series. An interval without observations remains a gap, and day or
+    billing-period precision remains explicit in visual and accessible output.
 27. Model rankings use Provider, billing domain, and model as their identity.
     Equal values are ordered by that stable identity, never by collection order.
 28. Token, cost, and retail-equivalent ranking orders contain the same complete

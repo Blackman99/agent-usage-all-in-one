@@ -22,8 +22,11 @@ window, time zone, and comparison currency. It contains:
   coverage, pricing coverage, and exchange-rate evidence;
 - 24 hourly intervals for the 24-hour view and 7 or 30 daily intervals for the
   longer views; and
-- per-Provider, per-billing-domain trend segments with explicit gaps and source
-  time precision.
+- per-Provider, per-billing-domain, per-model trend segments with explicit gaps
+  and source time precision. Matching model-name strings never merge across
+  that identity. Unclassified or cost-only evidence that cannot be attributed
+  to a known model stays a separate `model: null` segment for that billing
+  domain.
 
 Each Provider contributes only its declared `summaryBillingDomainId` to scalar
 workbench and global headline totals and percentage denominators. This keeps
@@ -44,5 +47,8 @@ sub-cent values retain sufficient display precision to remain non-zero.
 The Dashboard can switch between CNY and USD and between Token and retail
 equivalent trends without recomputing business rules in the browser. The HTTP
 response and an accessible table expose the same bucket and evidence structure.
-Gaps, coarse time precision, and billing-domain separation remain inspectable
-instead of being smoothed into a misleading chart.
+Gaps, coarse time precision, billing-domain separation, and per-model
+separation remain inspectable instead of being smoothed into a misleading
+chart. Dashboard share, line, stacked, and treemap views consume that same
+identity so a model used through two agents or two billing domains cannot
+collapse into one series.

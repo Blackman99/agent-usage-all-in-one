@@ -2256,8 +2256,9 @@ export class SqliteUsageRepository implements UsageRepository {
             .filter(
               (cost) =>
                 (cost.kind === 'retail-equivalent' || cost.kind === 'reported-estimate') &&
-                cost.usage_observation_id !== null &&
-                observationIds.has(cost.usage_observation_id)
+                ((cost.usage_observation_id !== null &&
+                  observationIds.has(cost.usage_observation_id)) ||
+                  (cost.usage_observation_id === null && cost.model === model))
             )
             .map((cost) => {
               const summarized = summarizeCosts([cost], Number(cost.priced_tokens ?? 0))[0];
@@ -3176,54 +3177,17 @@ function buildTokenMoneyWorkbench(
     };
   });
   const buckets = emptyIntervals.map((emptyInterval, index) => {
-    const segments = allHistories.flatMap(({ provider, domain, history, includedInHeadline }) => {
-      const interval = history.intervals[index];
-      if (!interval) return [];
-      const retailEquivalent = buildWorkbenchMetric(
-        interval.costs,
-        'retail-equivalent',
-        comparisonCurrency,
-        interval.tokenEvidence.recordedTokens,
-        history.exchangeRates
-      );
-      const reportedEstimate = buildWorkbenchMetric(
-        interval.costs,
-        'reported-estimate',
-        comparisonCurrency,
-        interval.tokenEvidence.recordedTokens,
-        history.exchangeRates
-      );
-      if (
-        interval.tokenEvidence.observationCount === 0 &&
-        retailEquivalent.records === 0 &&
-        reportedEstimate.records === 0
+    const segments = allHistories.flatMap(({ provider, domain, history, includedInHeadline }) =>
+      workbenchTrendSegmentsForInterval(
+        provider,
+        domain,
+        history,
+        includedInHeadline,
+        emptyInterval,
+        index,
+        comparisonCurrency
       )
-        return [];
-      return [
-        {
-          providerId: provider.id,
-          providerDisplayName: provider.displayName,
-          billingDomainId: domain.id,
-          billingDomainDisplayName: domain.displayName,
-          includedInHeadline,
-          recordedTokens: interval.tokenEvidence.recordedTokens,
-          observationCount: interval.tokenEvidence.observationCount,
-          timePrecisions: interval.tokenEvidence.timePrecisions,
-          authorities: interval.authorities ?? [],
-          lastObservedAt: interval.lastObservedAt ?? null,
-          retailEquivalent: {
-            status: retailEquivalent.status,
-            amount: retailEquivalent.amount,
-            currency: comparisonCurrency
-          },
-          reportedEstimate: {
-            status: reportedEstimate.status,
-            amount: reportedEstimate.amount,
-            currency: comparisonCurrency
-          }
-        }
-      ];
-    });
+    );
     return {
       start: emptyInterval.start.toISOString(),
       end: emptyInterval.end.toISOString(),
@@ -3260,6 +3224,150 @@ function buildTokenMoneyWorkbench(
       reportedEstimate
     )
   };
+}
+
+function workbenchTrendSegmentsForInterval(
+  provider: ProviderOverview,
+  domain: BillingDomainOverview,
+  history: BillingHistory,
+  includedInHeadline: boolean,
+  emptyInterval: { start: Date; end: Date; label: string },
+  index: number,
+  comparisonCurrency: string
+): UsageOverview['workbench']['trend']['buckets'][number]['segments'] {
+  const interval = history.intervals[index];
+  if (!interval) return [];
+  const start = emptyInterval.start.toISOString();
+  const end = emptyInterval.end.toISOString();
+  const models = history.models.flatMap((model) => {
+    const observations = (model.observations ?? []).filter(
+      (observation) => observation.observedAt >= start && observation.observedAt < end
+    );
+    const priceEvidence = (model.priceEvidence ?? []).filter(
+      (cost) => (cost.observedAt ?? '') >= start && (cost.observedAt ?? '') < end
+    );
+    const tokenEvidence = emptyTokenEvidence();
+    const authorities = new Set<DataAuthority>();
+    let lastObservedAt: string | null = null;
+    for (const observation of observations) {
+      tokenEvidence.recordedTokens += observation.recordedTokens;
+      tokenEvidence.observationCount += 1;
+      tokenEvidence.timePrecisions.add(observation.timePrecision);
+      authorities.add(observation.authority);
+      if (!lastObservedAt || observation.observedAt > lastObservedAt) {
+        lastObservedAt = observation.observedAt;
+      }
+    }
+    const retailEquivalent = buildWorkbenchMetric(
+      priceEvidence,
+      'retail-equivalent',
+      comparisonCurrency,
+      tokenEvidence.recordedTokens,
+      history.exchangeRates
+    );
+    const reportedEstimate = buildWorkbenchMetric(
+      priceEvidence,
+      'reported-estimate',
+      comparisonCurrency,
+      tokenEvidence.recordedTokens,
+      history.exchangeRates
+    );
+    if (
+      tokenEvidence.observationCount === 0 &&
+      retailEquivalent.records === 0 &&
+      reportedEstimate.records === 0
+    ) {
+      return [];
+    }
+    return [
+      {
+        providerId: provider.id,
+        providerDisplayName: provider.displayName,
+        billingDomainId: domain.id,
+        billingDomainDisplayName: domain.displayName,
+        model: model.model,
+        includedInHeadline,
+        recordedTokens: tokenEvidence.recordedTokens,
+        observationCount: tokenEvidence.observationCount,
+        timePrecisions: [...tokenEvidence.timePrecisions].sort(),
+        authorities: [...authorities].sort(),
+        lastObservedAt,
+        retailEquivalent: {
+          status: retailEquivalent.status,
+          amount: retailEquivalent.amount,
+          currency: comparisonCurrency
+        },
+        reportedEstimate: {
+          status: reportedEstimate.status,
+          amount: reportedEstimate.amount,
+          currency: comparisonCurrency
+        }
+      }
+    ];
+  });
+  const unclassifiedObservations = (history.unclassified.observations ?? []).filter(
+    (observation) => observation.observedAt >= start && observation.observedAt < end
+  );
+  const unclassifiedTokenEvidence = emptyTokenEvidence();
+  const unclassifiedAuthorities = new Set<DataAuthority>();
+  let unclassifiedLastObservedAt: string | null = null;
+  for (const observation of unclassifiedObservations) {
+    unclassifiedTokenEvidence.recordedTokens += observation.recordedTokens;
+    unclassifiedTokenEvidence.observationCount += 1;
+    unclassifiedTokenEvidence.timePrecisions.add(observation.timePrecision);
+    unclassifiedAuthorities.add(observation.authority);
+    if (!unclassifiedLastObservedAt || observation.observedAt > unclassifiedLastObservedAt) {
+      unclassifiedLastObservedAt = observation.observedAt;
+    }
+  }
+  const leftoverCosts = models.length === 0 ? interval.costs : [];
+  const leftoverRetailEquivalent = buildWorkbenchMetric(
+    leftoverCosts,
+    'retail-equivalent',
+    comparisonCurrency,
+    unclassifiedTokenEvidence.recordedTokens,
+    history.exchangeRates
+  );
+  const leftoverReportedEstimate = buildWorkbenchMetric(
+    leftoverCosts,
+    'reported-estimate',
+    comparisonCurrency,
+    unclassifiedTokenEvidence.recordedTokens,
+    history.exchangeRates
+  );
+  if (
+    unclassifiedTokenEvidence.observationCount === 0 &&
+    leftoverRetailEquivalent.records === 0 &&
+    leftoverReportedEstimate.records === 0
+  ) {
+    return models;
+  }
+  return [
+    ...models,
+    {
+      providerId: provider.id,
+      providerDisplayName: provider.displayName,
+      billingDomainId: domain.id,
+      billingDomainDisplayName: domain.displayName,
+      model: null,
+      includedInHeadline,
+      recordedTokens: unclassifiedTokenEvidence.recordedTokens,
+      observationCount: unclassifiedTokenEvidence.observationCount,
+      timePrecisions: [...unclassifiedTokenEvidence.timePrecisions].sort(),
+      authorities: [...unclassifiedAuthorities].sort(),
+      lastObservedAt: unclassifiedLastObservedAt,
+      retailEquivalent: {
+        status: leftoverRetailEquivalent.status,
+        amount: leftoverRetailEquivalent.amount,
+        currency: comparisonCurrency
+      },
+      reportedEstimate: {
+        status: leftoverReportedEstimate.status,
+        amount: leftoverReportedEstimate.amount,
+        currency: comparisonCurrency
+      }
+    }
+  ];
 }
 
 function allDomainHistories(providers: ProviderOverview[]): Array<{

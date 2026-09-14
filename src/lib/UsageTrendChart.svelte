@@ -58,14 +58,15 @@
   $: chartBuckets = buckets.slice(chartViewport.start, chartViewport.start + chartViewport.size);
   $: chartSeries = buildTrendChartSeries(chartBuckets, metric);
   $: visibleMaximum = trendMaximum(chartSeries);
-  // One legend entry per Provider billing domain: the cost purpose stays visible
-  // in the plot itself through the solid and dashed lines.
+  // One legend entry per Provider, billing domain, and model. Cost purpose stays
+  // visible in the plot itself through the solid and dashed lines.
   $: legendSeries = chartSeries.filter(
     (series, index) =>
       chartSeries.findIndex(
         (candidate) =>
           candidate.providerId === series.providerId &&
-          candidate.billingDomainId === series.billingDomainId
+          candidate.billingDomainId === series.billingDomainId &&
+          candidate.model === series.model
       ) === index
   );
   $: hoverBucket = trendHoverIndex === null ? null : chartBuckets[trendHoverIndex];
@@ -310,8 +311,8 @@
           <span
             data-cost-purpose={series.costPurpose ?? 'tokens'}
             style={series.costPurpose === 'reported-estimate'
-              ? `fill: transparent; stroke: ${trendSegmentColor(series.providerId, series.billingDomainId)}`
-              : `fill: ${trendSegmentColor(series.providerId, series.billingDomainId)}`}
+              ? `fill: transparent; stroke: ${trendSegmentColor(series.providerId, series.billingDomainId, series.model)}`
+              : `fill: ${trendSegmentColor(series.providerId, series.billingDomainId, series.model)}`}
           ></span>
         {/each}
       </div>
@@ -329,9 +330,9 @@
           {#if hoverBucket.gap || hoverBucket.segments.length === 0}
             <span>{t('gap')}</span>
           {:else}
-            {#each hoverBucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}`)}
+            {#each hoverBucket.segments as segment (`${segment.providerId}:${segment.billingDomainId}:${segment.model ?? ''}`)}
               <span>
-                <b>{segment.providerDisplayName}</b>
+                <b>{segment.model ?? t('unclassified')}</b>
                 <small>{describeSegment(segment, metric)}</small>
               </span>
             {/each}
@@ -343,9 +344,11 @@
   <div class="trend-legend" aria-hidden="true">
     {#each legendSeries as segment (segment.key)}
       <span>
-        <i style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId)}`}
+        <i
+          style={`background: ${trendSegmentColor(segment.providerId, segment.billingDomainId, segment.model)}`}
         ></i>
-        {segment.providerDisplayName} · {segment.billingDomainDisplayName}
+        {segment.model ?? t('unclassified')} · {segment.providerDisplayName} ·
+        {segment.billingDomainDisplayName}
         {#if segment.includedInHeadline === false}
           · {t('separateFromHeadline')}{/if}
       </span>

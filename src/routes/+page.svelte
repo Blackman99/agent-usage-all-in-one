@@ -1478,7 +1478,8 @@
           : formatMoney(cost.amount, cost.currency);
     const headlineScope =
       segment.includedInHeadline === false ? ` · ${t('separateFromHeadline')}` : '';
-    return `${segment.providerDisplayName} · ${segment.billingDomainDisplayName}${headlineScope}: ${value}`;
+    const model = segment.model ?? t('unclassified');
+    return `${model} · ${segment.providerDisplayName} · ${segment.billingDomainDisplayName}${headlineScope}: ${value}`;
   }
 
   function rankedModels(
@@ -2028,7 +2029,7 @@
                   </div>
 
                   <ProviderShareChart
-                    providers={workbench.providerSummary}
+                    models={rankedModels(workbench, selectedTrendMetric)}
                     metric={selectedTrendMetric}
                     currency={workbench.comparisonCurrency}
                     {locale}

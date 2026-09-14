@@ -14,7 +14,7 @@
   import { init, use, type ComposeOption, type ECharts } from 'echarts/core';
   import { CanvasRenderer } from 'echarts/renderers';
 
-  import type { WorkbenchProviderSummary } from '$core/types.js';
+  import type { WorkbenchModelEntry } from '$core/types.js';
   import { detectLocale, translate, type Locale, type MessageKey } from '$lib/i18n.js';
   import { THEME_EVENT } from '$lib/theme.js';
   import {
@@ -35,7 +35,7 @@
     | AriaComponentOption
   >;
 
-  export let providers: WorkbenchProviderSummary[];
+  export let models: WorkbenchModelEntry[];
   export let metric: ProviderShareMetric;
   export let currency: string;
   export let locale: Locale = detectLocale('');
@@ -58,7 +58,22 @@
   };
 
   $: entries = buildProviderShareEntries(
-    providers,
+    models.map((model) => ({
+      id: model.id,
+      providerId: model.providerId,
+      providerDisplayName: model.providerDisplayName,
+      billingDomainId: model.billingDomainId,
+      billingDomainDisplayName: model.billingDomainDisplayName,
+      model: model.model,
+      includedInHeadline: model.includedInHeadline,
+      recordedTokens: model.tokenTotals.total,
+      tokenShare: model.tokenShare,
+      authorities: model.authorities,
+      lastObservedAt: model.lastObservedAt,
+      retailEquivalent: model.retailEquivalent,
+      reportedEstimate: model.reportedEstimate,
+      retailShare: model.retailShare
+    })),
     metric,
     trendSegmentColor,
     (value) => formatUsageMetric(value, currency, metric),
@@ -68,7 +83,8 @@
     entries,
     theme,
     t('notAvailable'),
-    !prefersReducedMotion()
+    !prefersReducedMotion(),
+    t('separateFromHeadline')
   );
   $: if (chart) void renderChart(chartOption);
 
@@ -145,7 +161,7 @@
     <table aria-label={t('providerShare')}>
       <thead>
         <tr>
-          <th>{t('providersLabel')}</th>
+          <th>{t('model')}</th>
           <th>{metric === 'tokens' ? t('tokens') : t('cost')}</th>
           <th>{metric === 'tokens' ? t('tokenShare') : t('costShare')}</th>
         </tr>
@@ -153,7 +169,11 @@
       <tbody>
         {#each entries as entry (entry.key)}
           <tr>
-            <td>{entry.name} · {entry.billingDomainDisplayName}</td>
+            <td
+              >{entry.model} · {entry.providerDisplayName} · {entry.billingDomainDisplayName}{entry.includedInHeadline
+                ? ''
+                : ` · ${t('separateFromHeadline')}`}</td
+            >
             <td>{entry.formattedValue}</td>
             <td>{entry.formattedShare}</td>
           </tr>

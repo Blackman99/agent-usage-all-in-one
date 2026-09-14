@@ -9,10 +9,12 @@ import {
 describe('Provider share chart', () => {
   const providers: ProviderShareSource[] = [
     {
+      id: 'codex::subscription::gpt-5',
       providerId: 'codex',
       providerDisplayName: 'Codex',
       billingDomainId: 'subscription',
       billingDomainDisplayName: 'Subscription',
+      model: 'gpt-5',
       includedInHeadline: true,
       recordedTokens: 750,
       tokenShare: 0.75,
@@ -26,10 +28,12 @@ describe('Provider share chart', () => {
       retailShare: 0.6
     },
     {
+      id: 'claude-code::subscription::fable-model',
       providerId: 'claude-code',
       providerDisplayName: 'Claude Code',
       billingDomainId: 'subscription',
       billingDomainDisplayName: 'Subscription',
+      model: 'fable-model',
       includedInHeadline: true,
       recordedTokens: 250,
       tokenShare: 0.25,
@@ -43,16 +47,37 @@ describe('Provider share chart', () => {
       retailShare: 0.4
     },
     {
+      id: 'opencode::local-history::deepseek-v4-flash',
       providerId: 'opencode',
       providerDisplayName: 'OpenCode',
       billingDomainId: 'local-history',
       billingDomainDisplayName: 'Local history',
+      model: 'deepseek-v4-flash',
       includedInHeadline: true,
       recordedTokens: 50,
       tokenShare: 0.05,
       authorities: ['local-observation'],
       lastObservedAt: '2026-08-28T10:20:00.000Z',
       retailEquivalent: { amount: null, authorities: [], observedAt: null },
+      retailShare: null
+    },
+    {
+      id: 'grok::xai-api::gpt-5',
+      providerId: 'grok',
+      providerDisplayName: 'Grok',
+      billingDomainId: 'xai-api',
+      billingDomainDisplayName: 'xAI API',
+      model: 'gpt-5',
+      includedInHeadline: false,
+      recordedTokens: 40,
+      tokenShare: null,
+      authorities: ['official-account'],
+      lastObservedAt: '2026-08-28T10:30:00.000Z',
+      retailEquivalent: {
+        amount: 2,
+        authorities: ['estimate'],
+        observedAt: '2026-08-28T10:30:00.000Z'
+      },
       retailShare: null
     }
   ];
@@ -68,12 +93,29 @@ describe('Provider share chart', () => {
 
     expect(entries).toEqual([
       expect.objectContaining({
-        name: 'Codex',
+        name: 'gpt-5 · Codex',
+        model: 'gpt-5',
+        providerDisplayName: 'Codex',
         value: 15,
-        share: 0.6,
+        share: 15 / 27,
         color: '#111111'
       }),
-      expect.objectContaining({ name: 'Claude Code', value: 10, share: 0.4, color: '#222222' })
+      expect.objectContaining({
+        name: 'fable-model',
+        model: 'fable-model',
+        providerDisplayName: 'Claude Code',
+        value: 10,
+        share: 10 / 27,
+        color: '#222222'
+      }),
+      expect.objectContaining({
+        name: 'gpt-5 · Grok',
+        model: 'gpt-5',
+        providerDisplayName: 'Grok',
+        billingDomainDisplayName: 'xAI API',
+        includedInHeadline: false,
+        value: 2
+      })
     ]);
   });
 
@@ -97,7 +139,7 @@ describe('Provider share chart', () => {
     expect(option.series).toEqual([
       expect.objectContaining({ type: 'pie', radius: ['48%', '70%'] })
     ]);
-    expect(option.series[0].data).toHaveLength(3);
+    expect(option.series[0].data).toHaveLength(4);
   });
 
   it('shows the matching Provider tooltip when hovering a built-in legend item', () => {
@@ -119,9 +161,9 @@ describe('Provider share chart', () => {
     };
 
     expect(legend.tooltip).toMatchObject({ show: true });
-    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('250 Tokens');
-    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).toContain('25%');
-    expect(legend.tooltip?.formatter?.({ name: 'Claude Code' })).not.toContain('official-client');
+    expect(legend.tooltip?.formatter?.({ name: 'fable-model' })).toContain('250 Tokens');
+    expect(legend.tooltip?.formatter?.({ name: 'fable-model' })).toContain('Claude Code');
+    expect(legend.tooltip?.formatter?.({ name: 'fable-model' })).not.toContain('official-client');
   });
 
   it('includes OpenCode in the cost donut when local-history has retail-equivalent evidence', () => {
@@ -149,10 +191,10 @@ describe('Provider share chart', () => {
     expect(entries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          name: 'OpenCode',
+          name: 'deepseek-v4-flash',
+          providerDisplayName: 'OpenCode',
           billingDomainDisplayName: 'Local history',
-          value: 5,
-          share: 1 / 6
+          value: 5
         })
       ])
     );

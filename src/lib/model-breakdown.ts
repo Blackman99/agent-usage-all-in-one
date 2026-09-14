@@ -1,4 +1,5 @@
 import type { DataAuthority } from '$core/types.js';
+import { qualifyChartNames } from '$lib/chart-identity.js';
 
 export type ModelBreakdownMetric = 'tokens' | 'retail-equivalent';
 
@@ -58,7 +59,7 @@ export function modelBreakdownCost(source: ModelBreakdownSource): number | null 
 export function buildModelBreakdownEntries(
   models: ModelBreakdownSource[],
   metric: ModelBreakdownMetric,
-  colorFor: (providerId: string, billingDomainId: string) => string,
+  colorFor: (providerId: string, billingDomainId: string, model: string) => string,
   formatValue: (value: number) => string,
   formatShare: (share: number) => string
 ): ModelBreakdownEntry[] {
@@ -78,26 +79,16 @@ export function buildModelBreakdownEntries(
   });
 
   const total = chartable.reduce((sum, entry) => sum + entry.value, 0) || 1;
-  const counts = new Map<string, number>();
-  for (const entry of chartable) {
-    counts.set(entry.model.model, (counts.get(entry.model.model) ?? 0) + 1);
-  }
-  const usedNames = new Set<string>();
-  const resolveName = (model: ModelBreakdownSource): string => {
-    if ((counts.get(model.model) ?? 0) === 1) return model.model;
-    const candidate = `${model.model} · ${model.providerDisplayName}`;
-    if (!usedNames.has(candidate)) return candidate;
-    const fallback = `${model.model} · ${model.providerDisplayName} · ${model.billingDomainDisplayName}`;
-    if (!usedNames.has(fallback)) return fallback;
-    let suffix = 2;
-    let next = `${fallback} #${suffix}`;
-    while (usedNames.has(next)) next = `${fallback} #${++suffix}`;
-    return next;
-  };
+  const names = qualifyChartNames(
+    chartable.map((entry) => ({
+      model: entry.model.model,
+      providerDisplayName: entry.providerDisplayName,
+      billingDomainDisplayName: entry.billingDomainDisplayName
+    }))
+  );
 
-  return chartable.map((entry) => {
-    const name = resolveName(entry.model);
-    usedNames.add(name);
+  return chartable.map((entry, index) => {
+    const name = names[index] ?? entry.model.model;
     return {
       modelId: entry.model.id,
       name,
@@ -106,7 +97,7 @@ export function buildModelBreakdownEntries(
       includedInHeadline: entry.includedInHeadline,
       value: entry.value,
       share: entry.value / total,
-      color: colorFor(entry.model.providerId, entry.model.billingDomainId),
+      color: colorFor(entry.model.providerId, entry.model.billingDomainId, entry.model.model),
       formattedValue: formatValue(entry.value),
       formattedShare: formatShare(entry.value / total)
     };

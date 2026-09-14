@@ -1,12 +1,15 @@
 import type { DataAuthority } from '$core/types.js';
+import { qualifyChartNames } from '$lib/chart-identity.js';
 
 export type ProviderShareMetric = 'tokens' | 'retail-equivalent';
 
 export interface ProviderShareSource {
+  id: string;
   providerId: string;
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  model: string;
   includedInHeadline: boolean;
   recordedTokens: number | null;
   tokenShare: number | null;
@@ -17,13 +20,21 @@ export interface ProviderShareSource {
     authorities: DataAuthority[];
     observedAt: string | null;
   };
+  reportedEstimate?: {
+    amount: number | null;
+    authorities: DataAuthority[];
+    observedAt: string | null;
+  };
   retailShare: number | null;
 }
 
 export interface ProviderShareEntry {
   key: string;
   name: string;
+  model: string;
+  providerDisplayName: string;
   billingDomainDisplayName: string;
+  includedInHeadline: boolean;
   value: number;
   share: number;
   color: string;
@@ -39,44 +50,49 @@ export interface ProviderShareTheme {
 }
 
 export function buildProviderShareEntries(
-  providers: ProviderShareSource[],
+  models: ProviderShareSource[],
   metric: ProviderShareMetric,
-  colorFor: (providerId: string, billingDomainId: string) => string,
+  colorFor: (providerId: string, billingDomainId: string, model: string) => string,
   formatValue: (value: number) => string,
   formatShare: (share: number) => string
 ): ProviderShareEntry[] {
-  return providers.flatMap((provider) => {
-    const value = metric === 'tokens' ? provider.recordedTokens : provider.retailEquivalent.amount;
-    const share = metric === 'tokens' ? provider.tokenShare : provider.retailShare;
-    if (
-      provider.includedInHeadline === false ||
-      value === null ||
-      share === null ||
-      value <= 0 ||
-      share <= 0
-    ) {
-      return [];
-    }
-    return [
-      {
-        key: `${provider.providerId}:${provider.billingDomainId}`,
-        name: provider.providerDisplayName,
-        billingDomainDisplayName: provider.billingDomainDisplayName,
-        value,
-        share,
-        color: colorFor(provider.providerId, provider.billingDomainId),
-        formattedValue: formatValue(value),
-        formattedShare: formatShare(share)
-      }
-    ];
+  const chartable = models.flatMap((model) => {
+    const value =
+      metric === 'tokens'
+        ? model.recordedTokens
+        : (model.retailEquivalent.amount ?? model.reportedEstimate?.amount ?? null);
+    if (value === null || value <= 0) return [];
+    return [{ model, value }];
   });
+  const total = chartable.reduce((sum, entry) => sum + entry.value, 0) || 1;
+  const names = qualifyChartNames(
+    chartable.map(({ model }) => ({
+      model: model.model,
+      providerDisplayName: model.providerDisplayName,
+      billingDomainDisplayName: model.billingDomainDisplayName
+    }))
+  );
+  return chartable.map((entry, index) => ({
+    key: entry.model.id,
+    name: names[index] ?? entry.model.model,
+    model: entry.model.model,
+    providerDisplayName: entry.model.providerDisplayName,
+    billingDomainDisplayName: entry.model.billingDomainDisplayName,
+    includedInHeadline: entry.model.includedInHeadline,
+    value: entry.value,
+    share: entry.value / total,
+    color: colorFor(entry.model.providerId, entry.model.billingDomainId, entry.model.model),
+    formattedValue: formatValue(entry.value),
+    formattedShare: formatShare(entry.value / total)
+  }));
 }
 
 export function buildProviderShareChartOption(
   entries: ProviderShareEntry[],
   theme: ProviderShareTheme,
   emptyLabel = 'Unavailable',
-  animate = true
+  animate = true,
+  separateFromHeadline = 'Separate domain · not included in headline'
 ) {
   return {
     animation: animate,
@@ -118,7 +134,12 @@ export function buildProviderShareChartOption(
       tooltip: {
         show: true,
         formatter: (parameters: unknown) =>
-          formatTooltip(legendTooltipEntry(parameters, entries), theme, emptyLabel)
+          formatTooltip(
+            legendTooltipEntry(parameters, entries),
+            theme,
+            emptyLabel,
+            separateFromHeadline
+          )
       }
     },
     tooltip: {
@@ -133,7 +154,8 @@ export function buildProviderShareChartOption(
       padding: [10, 12],
       textStyle: { color: theme.text, fontSize: 11 },
       extraCssText: 'border-radius: 10px; box-shadow: 0 14px 34px rgba(0,0,0,.22);',
-      formatter: (parameters: unknown) => formatTooltip(tooltipEntry(parameters), theme, emptyLabel)
+      formatter: (parameters: unknown) =>
+        formatTooltip(tooltipEntry(parameters), theme, emptyLabel, separateFromHeadline)
     },
     series: [
       {
@@ -186,14 +208,21 @@ function legendTooltipEntry(
 function formatTooltip(
   data: ProviderShareEntry | null,
   theme: ProviderShareTheme,
-  emptyLabel: string
+  emptyLabel: string,
+  separateFromHeadline: string
 ): string {
   if (!data) return emptyLabel;
-  return [
+  const lines = [
     `<strong>${escapeHtml(data.name)}</strong>`,
-    `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.billingDomainDisplayName)}</span>`,
+    `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(data.providerDisplayName)} · ${escapeHtml(data.billingDomainDisplayName)}</span>`,
     `<span>${escapeHtml(data.formattedValue)} · ${escapeHtml(data.formattedShare)}</span>`
-  ].join('<br>');
+  ];
+  if (!data.includedInHeadline) {
+    lines.push(
+      `<span style="color:${escapeHtml(theme.muted)}">${escapeHtml(separateFromHeadline)}</span>`
+    );
+  }
+  return lines.join('<br>');
 }
 
 function escapeHtml(value: string): string {

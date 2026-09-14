@@ -30,6 +30,8 @@ function bucket(
     retail?: number | null;
     reported?: number | null;
     providerId?: string;
+    model?: string | null;
+    extraSegments?: WorkbenchTrendBucket['segments'];
   } = {}
 ): WorkbenchTrendBucket {
   const providerId = options.providerId ?? 'codex';
@@ -46,6 +48,7 @@ function bucket(
             providerDisplayName: 'Codex',
             billingDomainId: 'chatgpt-plus',
             billingDomainDisplayName: 'ChatGPT Plus',
+            model: options.model === undefined ? 'gpt-5' : options.model,
             includedInHeadline: true,
             recordedTokens: options.tokens ?? 100,
             observationCount: 1,
@@ -60,7 +63,8 @@ function bucket(
               amount: options.reported ?? null,
               currency: 'USD'
             }
-          }
+          },
+          ...(options.extraSegments ?? [])
         ]
   };
 }
@@ -110,6 +114,7 @@ describe('usage trend series', () => {
 
     const tokens = buildTrendChartSeries(buckets, 'tokens');
     expect(tokens).toHaveLength(1);
+    expect(tokens[0]?.key).toBe('codex:chatgpt-plus:gpt-5:tokens');
     expect(tokens[0]?.values).toEqual([10, null, 20]);
     expect(isolatedTrendPoint([2, null, 4], 0)).toBe(true);
     expect(isolatedTrendPoint([2, 3, 4], 1)).toBe(false);
@@ -147,11 +152,12 @@ describe('usage trend series', () => {
 
     const retail = option.series.find((item) => item.id.endsWith('retail-equivalent'));
     const reported = option.series.find((item) => item.id.endsWith('reported-estimate'));
+    const modelColor = trendSegmentColor('codex', 'chatgpt-plus', 'gpt-5');
     expect(retail?.data).toEqual([2, null, null]);
     expect(retail?.connectNulls).toBe(false);
     expect(retail?.lineStyle).toMatchObject({
       width: TREND_LINE_WIDTH,
-      color: '#78a7ff',
+      color: modelColor,
       type: 'solid',
       cap: 'round'
     });
@@ -163,12 +169,12 @@ describe('usage trend series', () => {
         x2: 0,
         y2: 1,
         colorStops: [
-          { offset: 0, color: `#78a7ff${TREND_AREA_TOP_ALPHA}` },
-          { offset: 1, color: `#78a7ff${TREND_AREA_BOTTOM_ALPHA}` }
+          { offset: 0, color: `${modelColor}${TREND_AREA_TOP_ALPHA}` },
+          { offset: 1, color: `${modelColor}${TREND_AREA_BOTTOM_ALPHA}` }
         ]
       }
     });
-    expect(retail?.itemStyle.color).toBe('#78a7ff');
+    expect(retail?.itemStyle.color).toBe(modelColor);
     expect(retail?.symbolSize(2, { dataIndex: 0 })).toBe(TREND_ISOLATED_SYMBOL_SIZE);
 
     expect(reported?.data).toEqual([3, null, 4]);
@@ -176,12 +182,45 @@ describe('usage trend series', () => {
     expect(reported?.areaStyle).toBeUndefined();
     expect(reported?.itemStyle).toMatchObject({
       color: 'transparent',
-      borderColor: '#78a7ff',
+      borderColor: modelColor,
       borderWidth: 2
     });
     expect(reported?.showSymbol).toBe(true);
     expect(reported?.symbolSize(3, { dataIndex: 0 })).toBe(TREND_ISOLATED_SYMBOL_SIZE);
     expect(reported?.symbolSize(4, { dataIndex: 2 })).toBe(TREND_ISOLATED_SYMBOL_SIZE);
+  });
+
+  it('keeps matching model names on different identities as separate series', () => {
+    const buckets = [
+      bucket('1', {
+        tokens: 10,
+        extraSegments: [
+          {
+            providerId: 'claude-code',
+            providerDisplayName: 'Claude Code',
+            billingDomainId: 'subscription',
+            billingDomainDisplayName: 'Subscription',
+            model: 'gpt-5',
+            includedInHeadline: true,
+            recordedTokens: 7,
+            observationCount: 1,
+            timePrecisions: ['event'],
+            retailEquivalent: { status: 'unavailable', amount: null, currency: 'USD' },
+            reportedEstimate: { status: 'unavailable', amount: null, currency: 'USD' }
+          }
+        ]
+      })
+    ];
+    const series = buildTrendChartSeries(buckets, 'tokens');
+    expect(series.map((item) => item.key).sort()).toEqual([
+      'claude-code:subscription:gpt-5:tokens',
+      'codex:chatgpt-plus:gpt-5:tokens'
+    ]);
+    expect(series.find((item) => item.providerId === 'codex')?.values).toEqual([10]);
+    expect(series.find((item) => item.providerId === 'claude-code')?.values).toEqual([7]);
+    expect(trendSegmentColor('codex', 'chatgpt-plus', 'gpt-5')).not.toBe(
+      trendSegmentColor('claude-code', 'subscription', 'gpt-5')
+    );
   });
 
   it('clamps tooltip anchors so hover cards stay inside the plot', () => {

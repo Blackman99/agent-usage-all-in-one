@@ -567,6 +567,11 @@ export interface WorkbenchTrendSegment {
   providerDisplayName: string;
   billingDomainId: string;
   billingDomainDisplayName: string;
+  /**
+   * Known-model identity for this segment. `null` is unclassified or
+   * unattributed billing-domain evidence, never a merged model name.
+   */
+  model: string | null;
   includedInHeadline: boolean;
   recordedTokens: number;
   observationCount: number;

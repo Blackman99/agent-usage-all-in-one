@@ -33,7 +33,8 @@ The dashboard has two primary tabs:
   selected window, metric, and currency sit in the same sticky header as the
   primary tabs. The summary board leads with the headline amount beside a
   GitHub-style last-year usage wall of headline-included recorded Tokens, then
-  charts Provider share and the interactive daily trend, and shows model
+  charts each known model separately by agent and billing domain on the share
+  pie and the interactive daily trend, and shows model
   rankings with visual share bars and the public API retail equivalent of
   eligible token usage. The year wall is independent of the selected 24-hour,
   7-day, or 30-day window.

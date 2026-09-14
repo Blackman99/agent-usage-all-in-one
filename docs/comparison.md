@@ -16,17 +16,17 @@
 
 ## Comparison matrix (categories)
 
-| Axis                       | Checking each provider’s own UI    | Token / transcript exporters     | Generic cost / FinOps dashboards                              | **Agent Usage**                                                                       |
-| -------------------------- | ---------------------------------- | -------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Scope**                  | One provider at a time             | Often one tool’s logs or one API | Usually cloud APIs / invoices you wire in                     | Codex, Claude Code, OpenCode, Grok, dsh, Antigravity, Cursor in one local view        |
-| **Where data lives**       | Vendor account pages               | Export files you move around     | Often SaaS or shared warehouse                                | Fully local; loopback `127.0.0.1`; Application Support                                |
-| **Native quotas**          | Authoritative for that vendor      | Usually absent or reconstructed  | Rarely matches “5h / weekly / All models / Fable-only” labels | Preserves each provider’s native quota windows & reset times                          |
-| **Tokens & rankings**      | Per-product, fragmented            | Good for raw history             | Depends on ingestion                                          | 24h / 7d / 30d windows + model rankings + year usage wall                             |
-| **Cost meaning**           | Mix of subscription UI + estimates | You compute offline              | Often “spend” from cards/invoices                             | **API retail equivalent** as separate evidence — not presented as the bill            |
-| **Billing-domain honesty** | Per site                           | Easy to accidentally merge       | Easy to double-count                                          | Grok Build/SuperGrok vs xAI API **never summed**; unknown prices stay unpriced        |
-| **Agent control**          | N/A                                | N/A                              | Sometimes “optimize / route” features                         | **Advice only** — never auto-switches agents                                          |
-| **Credentials**            | Vendor login                       | Your export pipeline             | Often needs API keys in the cloud                             | Official-client creds stay in owning clients; optional xAI Management key in Keychain |
-| **Platform**               | Web                                | Any                              | Any                                                           | **macOS + Node ≥ 24**                                                                 |
+| Axis                       | Checking each provider’s own UI    | Token / transcript exporters     | Generic cost / FinOps dashboards                              | **Agent Usage**                                                                         |
+| -------------------------- | ---------------------------------- | -------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Scope**                  | One provider at a time             | Often one tool’s logs or one API | Usually cloud APIs / invoices you wire in                     | Codex, Claude Code, OpenCode, Grok, dsh, Antigravity, Cursor in one local view          |
+| **Where data lives**       | Vendor account pages               | Export files you move around     | Often SaaS or shared warehouse                                | Fully local; loopback `127.0.0.1`; Application Support                                  |
+| **Native quotas**          | Authoritative for that vendor      | Usually absent or reconstructed  | Rarely matches “5h / weekly / All models / Fable-only” labels | Preserves each provider’s native quota windows & reset times                            |
+| **Tokens & rankings**      | Per-product, fragmented            | Good for raw history             | Depends on ingestion                                          | 24h / 7d / 30d windows + per-model charts by agent and billing domain + year usage wall |
+| **Cost meaning**           | Mix of subscription UI + estimates | You compute offline              | Often “spend” from cards/invoices                             | **API retail equivalent** as separate evidence — not presented as the bill              |
+| **Billing-domain honesty** | Per site                           | Easy to accidentally merge       | Easy to double-count                                          | Grok Build/SuperGrok vs xAI API **never summed**; unknown prices stay unpriced          |
+| **Agent control**          | N/A                                | N/A                              | Sometimes “optimize / route” features                         | **Advice only** — never auto-switches agents                                            |
+| **Credentials**            | Vendor login                       | Your export pipeline             | Often needs API keys in the cloud                             | Official-client creds stay in owning clients; optional xAI Management key in Keychain   |
+| **Platform**               | Web                                | Any                              | Any                                                           | **macOS + Node ≥ 24**                                                                   |
 
 ---
 
