@@ -1,5 +1,18 @@
 # agent-usage-all-in-one
 
+## 0.9.0
+
+### Minor Changes
+
+- 3b82eb5: Add an experimental Cursor connector that reads the official Agent CLI `/usage` screen (Included and On-Demand quota only), show used amounts, disabled on-demand, and calendar-day reset labels on shared quota rows, and display the official Cursor 2D cube mark on Provider cards.
+
+### Patch Changes
+
+- 8f40c92: Document the supported runtime as macOS, Node.js 24, and npm/npx (ADR 017), with Linux and Homebrew/DMG remaining roadmap-only.
+- 6926ddf: Count Grok CLI custom-endpoint sessions that report official `grok-*-build` usage keys under Custom endpoints instead of the SuperGrok pool.
+- aada1b6: Refresh the README dashboard showcase so Tokens & model costs matches the merged header and usage-wall summary board.
+- 4e636e4: Count every headline-included custom route in the last-year usage wall, not only each Provider's summary billing domain.
+
 ## 0.8.1
 
 ### Patch Changes
