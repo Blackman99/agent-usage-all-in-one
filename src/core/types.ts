@@ -21,8 +21,10 @@ export interface QuotaBucket {
   billingDomainId: string;
   label: string;
   usedPercent: number | null;
+  usedAmount?: number | null;
   windowDurationMinutes?: number | null;
   resetsAt: string | null;
+  resetLabel?: string | null;
   authority: DataAuthority;
   observedAt?: string;
   scope?: 'account-wide' | 'local-only';
@@ -229,6 +231,11 @@ export interface ConnectorSnapshot {
   provider: ProviderIdentity;
   billingDomains: BillingDomain[];
   quotaBuckets: QuotaBucket[];
+  /**
+   * Billing domains whose quota windows in this snapshot are complete, including
+   * the zero-window case. Omitted domains keep stored windows (quota-read failure).
+   */
+  completeQuotaBillingDomainIds?: string[];
   usage: UsageObservation[];
   usageReconciliation?: UsageReconciliationPolicy;
   costs: CostRecord[];

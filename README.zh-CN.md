@@ -11,7 +11,7 @@
 > **macOS 上的本地多 Agent 用量中心——一个仪表盘，无云端，不自动切换。**
 
 Agent Usage 是一个 macOS 优先、完全在本地运行的用量中心。一次启动即可统一查看
-Codex、Claude Code、OpenCode、Grok、dsh 与 Antigravity 的原生额度窗口、刷新时间、Token、模型排行、
+Codex、Claude Code、OpenCode、Grok、dsh、Antigravity 与 Cursor 的原生额度窗口、刷新时间、Token、模型排行、
 API 对等费用、历史与诊断。它只提供建议，不会自动切换 Agent。
 
 ## 对比说明
@@ -22,7 +22,7 @@ API 对等费用、历史与诊断。它只提供建议，不会自动切换 Age
 
 具名竞品对照（ccusage、CodeBurn、Token Monitor、TokenTracker）：[docs/named-competitors.md](docs/named-competitors.md)。
 
-**边界：** 暂不支持 Cursor · 仅 macOS · 对已列出的 Provider 做多 Agent 用量中心（不夸大 “all-in-one”）。
+**边界：** Cursor 额度为实验性（尚无 Token/历史）· 仅 macOS · 对已列出的 Provider 做多 Agent 用量中心（不夸大 “all-in-one”）。
 
 ## 核心页面
 
@@ -113,6 +113,7 @@ agent-usage clear --yes
 | Grok · xAI API                   | 没有订阅额度                                                                                  | 官方 Management API 聚合                                                     | 可用时展示实际美元金额、余额、上限与账单                       |
 | dsh · DeepSeek API               | 没有订阅额度                                                                                  | 本机 dsh 全部 profile 的会话日志，含基于 dsh 的终端前端                      | 按 DeepSeek 公布的峰谷价计算 API 对等零售价                    |
 | Antigravity · Gemini Code Assist | 通过官方 Language Server 本地 RPC 获取 5 小时冲刺窗口与周度基准额度，支持本地会话分析平滑降级 | 本地会话 SQLite 数据库（~/.gemini/antigravity-cli 与 ~/.gemini/antigravity） | 按公布的 Google Gemini 及第三方模型公开价格计算 API 对等零售价 |
+| Cursor                           | 实验性官方 Agent CLI `/usage` 屏幕：Included 百分比与 On-Demand 花费上限；账户全局            | 本版不采集                                                                   | On-Demand 美元是额度窗口，不是账单                             |
 
 每个数字都会保留来源权威等级和观测时间；账户全局与仅此 Mac 的证据始终明确区分。
 
@@ -124,7 +125,7 @@ Agent Usage 管理的凭据，存储在 macOS 钥匙串。本地页面使用一�
 
 所有用量数据都留在本机。JSON/CSV 导出默认排除账户标识、会话 ID、Cookie、OAuth Token
 和密钥值。原始观测保留 90 天，之后在事务中压缩为 UTC 日汇总。清理本地用量永远不会删除
-Codex、Claude Code、OpenCode、Grok、dsh 或 Antigravity 官方客户端拥有的凭据。
+Codex、Claude Code、OpenCode、Grok、dsh、Antigravity 或 Cursor 官方客户端拥有的凭据。
 
 ## 验证
 

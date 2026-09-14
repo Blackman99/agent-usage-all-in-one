@@ -19,6 +19,9 @@ import { OpenCodeAuthFileReader } from '../connectors/opencode-go/opencode-auth-
 import { OpenCodeGoConnector } from '../connectors/opencode-go/opencode-go-connector.js';
 import { DshConnector } from '../connectors/dsh/dsh-connector.js';
 import { AntigravityConnector } from '../connectors/antigravity/antigravity-connector.js';
+import { CursorAboutAccountClient } from '../connectors/cursor/cursor-about-client.js';
+import { CursorConnector } from '../connectors/cursor/cursor-connector.js';
+import { ScreenReaderCursorQuotaClient } from '../connectors/cursor/cursor-usage-screen-client.js';
 import { AntigravitySqliteUsageClient } from './antigravity-sqlite-usage-client.js';
 import { GrokBuildConnector } from '../connectors/grok-build/grok-build-connector.js';
 
@@ -89,6 +92,10 @@ export async function runDaemon(home: string): Promise<void> {
           ],
           cachePath: join(home, 'antigravity-usage-cache.json')
         })
+      }),
+      new CursorConnector({
+        quotaClient: new ScreenReaderCursorQuotaClient(),
+        accountClient: new CursorAboutAccountClient()
       })
     ],
     connectorDefinitions: defaultConnectorDefinitions,
@@ -120,10 +127,14 @@ export async function runDaemon(home: string): Promise<void> {
         'grok',
         'xai-api',
         'dsh',
-        'antigravity'
+        'antigravity',
+        'cursor'
       ].map((id) => [
         id,
-        { minimumIntervalMs: 5 * 60 * 1000, timeoutMs: id === 'claude-code' ? 25_000 : 20_000 }
+        {
+          minimumIntervalMs: 5 * 60 * 1000,
+          timeoutMs: id === 'claude-code' || id === 'cursor' ? 25_000 : 20_000
+        }
       ])
     ),
 

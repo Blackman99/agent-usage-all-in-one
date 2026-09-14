@@ -18,7 +18,7 @@
     UsageOverview,
     UsageWall
   } from '$core/types.js';
-  import { clampPercent } from '$core/quota-normalization.js';
+  import { quotaBucketDisplay } from '$lib/quota-bucket-display.js';
   import type {
     ConfigureConnectorInput,
     ConnectorSetupState,
@@ -1198,6 +1198,11 @@
       antigravity: {
         dark: '/brands/antigravity.svg',
         light: '/brands/antigravity.svg'
+      },
+      // Official 2D cube: dark ink on light surfaces, light ink on dark surfaces.
+      cursor: {
+        dark: '/brands/cursor-dark.svg',
+        light: '/brands/cursor-light.svg'
       }
     };
     return paths[providerId] ?? null;
@@ -1857,37 +1862,53 @@
                   {#if !quotaMetered(connector)}
                     <p class="quota-absent">{t('noQuotaWindowDetail')}</p>
                   {:else if domain.quotaBuckets.length === 0}
-                    <p class="quota-absent">{t('noQuotaReported')}</p>
+                    <p class="quota-absent">
+                      {provider.health.status === 'healthy' &&
+                      provider.freshness.status !== 'unavailable'
+                        ? t('noQuotaOnPlan')
+                        : t('noQuotaReported')}
+                    </p>
                   {/if}
                   <div class="quotas">
                     {#each displayQuotaBuckets(domain.quotaBuckets) as bucket (bucket.id)}
-                      {@const normalizedUsed = clampPercent(bucket.usedPercent)}
+                      {@const display = quotaBucketDisplay(bucket, locale, {
+                        used: t('used'),
+                        unavailable: t('notAvailable'),
+                        noMonthlyLimit: t('noMonthlyLimit'),
+                        onDemandOff: t('onDemandOff')
+                      })}
                       <div class="quota-row">
                         <div class="quota-copy">
                           <strong>{bucket.label}</strong>
-                          <span
-                            >{normalizedUsed !== null ? formatNumber(normalizedUsed) : '—'}% {t(
-                              'used'
-                            )}</span
+                          <span>{display.primary}</span>
+                        </div>
+                        {#if display.progressPercent !== null}
+                          <div
+                            class="progress"
+                            class:progress-warning={display.progressPercent >= 70 &&
+                              display.progressPercent < 90}
+                            class:progress-critical={display.progressPercent >= 90}
+                            role="progressbar"
+                            aria-label={bucket.label}
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow={display.progressPercent}
+                            aria-valuetext={display.primary}
+                            aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
                           >
-                        </div>
-                        <div
-                          class="progress"
-                          class:progress-warning={(normalizedUsed ?? 0) >= 70 &&
-                            (normalizedUsed ?? 0) < 90}
-                          class:progress-critical={(normalizedUsed ?? 0) >= 90}
-                          role="progressbar"
-                          aria-label={bucket.label}
-                          aria-valuemin="0"
-                          aria-valuemax="100"
-                          aria-valuenow={normalizedUsed ?? undefined}
-                          aria-valuetext={normalizedUsed === null
-                            ? t('notAvailable')
-                            : `${formatNumber(normalizedUsed)}% ${t('used')}`}
-                          aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
-                        >
-                          <span style={`width: ${normalizedUsed ?? 0}%`}></span>
-                        </div>
+                            <span style={`width: ${display.progressPercent}%`}></span>
+                          </div>
+                        {:else}
+                          <div
+                            class="progress progress-absent"
+                            role="progressbar"
+                            aria-label={bucket.label}
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuetext={display.primary}
+                            aria-describedby={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}
+                          ></div>
+                        {/if}
                         <span hidden id={`quota-evidence-${provider.id}-${domain.id}-${bucket.id}`}>
                           {t('source')}: {authorityLabel(bucket.authority)} ·
                           {formatReset(
@@ -1899,7 +1920,8 @@
                         <div class="quota-meta">
                           <span>
                             {t('resets')}
-                            {formatReset(bucket.resetsAt)} · {formatRelativeReset(bucket.resetsAt)}
+                            {display.resetText ??
+                              `${formatReset(bucket.resetsAt)} · ${formatRelativeReset(bucket.resetsAt)}`}
                           </span>
                         </div>
                       </div>
@@ -4434,6 +4456,10 @@
 
   .progress.progress-critical span {
     background: #c2413b;
+  }
+
+  .progress.progress-absent {
+    background: color-mix(in srgb, var(--progress-track) 70%, transparent);
   }
 
   .state {

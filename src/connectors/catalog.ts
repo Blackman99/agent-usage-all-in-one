@@ -103,5 +103,20 @@ export const defaultConnectorDefinitions: ConnectorDefinition[] = [
     },
 
     officialCredentialPaths: ['.gemini/antigravity-cli', '.gemini/antigravity']
+  },
+  {
+    id: 'cursor',
+    displayName: 'Cursor',
+    command: 'agent',
+    permissionDescription:
+      'Read the official Agent CLI /usage screen and account email. Connecting starts agent on refresh and may leave Cursor session files under ~/.cursor; credentials stay in Cursor.',
+    credentialOwner: 'official-client',
+    experimental: true,
+    expectedCoverage: ['quota'],
+    target: {
+      provider: { id: 'cursor', displayName: 'Cursor' },
+      billingDomain: { id: 'cursor-subscription', displayName: 'Cursor subscription' }
+    },
+    officialCredentialPaths: ['.cursor']
   }
 ];

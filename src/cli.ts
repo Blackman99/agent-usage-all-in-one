@@ -8,7 +8,8 @@ import { join, resolve } from 'node:path';
 import { Command } from 'commander';
 import open from 'open';
 
-import type { CustomModelRate, DoctorReport, UsageOverview } from './core/types.js';
+import type { CustomModelRate, DoctorReport, QuotaBucket, UsageOverview } from './core/types.js';
+import { quotaBucketDisplay } from './lib/quota-bucket-display.js';
 import { publicErrorMessage } from './core/redaction.js';
 import { readDaemonState, type DaemonState } from './server/daemon-state.js';
 
@@ -503,7 +504,7 @@ function formatOverview(overview: UsageOverview): string {
       const quota = provider.quotaBuckets
         .map(
           (bucket) =>
-            `${bucket.label}: ${bucket.usedPercent ?? '?'}% used (${formatEvidence(
+            `${bucket.label}: ${formatQuotaBucket(bucket)} (${formatEvidence(
               bucket.authority,
               bucket.observedAt ?? provider.freshness.lastSuccessAt
             )})`
@@ -598,6 +599,16 @@ function formatTokenEvidence(
 
 function formatEvidence(authority: string, observedAt: string | null | undefined): string {
   return `source ${authority} at ${observedAt ?? 'unknown time'}`;
+}
+
+function formatQuotaBucket(bucket: QuotaBucket): string {
+  const display = quotaBucketDisplay(bucket, 'en', {
+    used: 'used',
+    unavailable: 'unavailable',
+    noMonthlyLimit: 'No monthly limit',
+    onDemandOff: 'On-demand usage is off'
+  });
+  return display.resetText ? `${display.primary}; ${display.resetText}` : display.primary;
 }
 
 function formatDoctor(report: DoctorReport): string {

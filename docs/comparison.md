@@ -4,7 +4,7 @@
 > No dunking. Goal: help a reader decide when Agent Usage is (and isn’t) the right tool.  
 > Facts from README.md / README.zh-CN.md.
 >
-> **Fact-check 2026-09-11:** Axes match README (macOS-only, local loopback, providers Codex/Claude Code/OpenCode/Grok/dsh/Antigravity, advice-only, API retail ≠ bill, Grok Build/SuperGrok vs xAI API never summed, Node ≥ 24). Named competitors in companion `named-competitors.md` (ccusage / CodeBurn / Token Monitor / TokenTracker / **tokscale ~5.4k** / **codenotch ~1.5k**). P0 honesty: no Cursor yet, macOS only, don’t oversell all-in-one. Runtime and install channel: ADR 017 and `docs/platform-roadmap.md`.
+> **Fact-check 2026-09-14:** Axes match README (macOS-only, local loopback, providers Codex/Claude Code/OpenCode/Grok/dsh/Antigravity/Cursor, advice-only, API retail ≠ bill, Grok Build/SuperGrok vs xAI API never summed, Node ≥ 24). Named competitors in companion `named-competitors.md` (ccusage / CodeBurn / Token Monitor / TokenTracker / **tokscale ~5.4k** / **codenotch ~1.5k**). P0 honesty: Cursor quota is experimental (no Tokens/history), macOS only, don’t oversell all-in-one. Runtime and install channel: ADR 017 and `docs/platform-roadmap.md`.
 
 ---
 
@@ -18,7 +18,7 @@
 
 | Axis                       | Checking each provider’s own UI    | Token / transcript exporters     | Generic cost / FinOps dashboards                              | **Agent Usage**                                                                       |
 | -------------------------- | ---------------------------------- | -------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Scope**                  | One provider at a time             | Often one tool’s logs or one API | Usually cloud APIs / invoices you wire in                     | Codex, Claude Code, OpenCode, Grok, dsh, Antigravity in one local view                |
+| **Scope**                  | One provider at a time             | Often one tool’s logs or one API | Usually cloud APIs / invoices you wire in                     | Codex, Claude Code, OpenCode, Grok, dsh, Antigravity, Cursor in one local view        |
 | **Where data lives**       | Vendor account pages               | Export files you move around     | Often SaaS or shared warehouse                                | Fully local; loopback `127.0.0.1`; Application Support                                |
 | **Native quotas**          | Authoritative for that vendor      | Usually absent or reconstructed  | Rarely matches “5h / weekly / All models / Fable-only” labels | Preserves each provider’s native quota windows & reset times                          |
 | **Tokens & rankings**      | Per-product, fragmented            | Good for raw history             | Depends on ingestion                                          | 24h / 7d / 30d windows + model rankings + year usage wall                             |
@@ -74,11 +74,11 @@ See [named-competitors.md](named-competitors.md) for sourced rows. One-liners:
 
 - vs **ccusage**: CLI reports vs our Dashboard + native quotas
 - vs **CodeBurn**: multi-tool/multi-platform packaging vs our stricter cost semantics + default no telemetry
-- vs **Token Monitor**: closest dashboard; they have Cursor/multi-machine/menu bar we don’t claim
+- vs **Token Monitor**: closest dashboard; they still lean multi-machine / menu bar we don’t claim
 - vs **TokenTracker**: CN distribution benchmark — learn reach, don’t copy claims
-- vs **tokscale** (~5.4k): token/cost scale peer; same P0 honesty — no Cursor / macOS-only / no menubar claim; “where spent” anatomy hangs on this repo, not a new one
+- vs **tokscale** (~5.4k): token/cost scale peer; Cursor quota is experimental here (no Tokens/history), macOS-only, no menubar claim; “where spent” anatomy hangs on this repo, not a new one
 - vs **codenotch** (`vinzdg/codenotch`, ~1.5k): menubar/edge **glance** quotas; we are the honest dashboard (retail≠bill, multi-agent anatomy) — menubar remains VISION/#19, **not shipped**
 
-**External P0 boundaries:** no Cursor yet · macOS only · don’t oversell “all-in-one”.
+**External P0 boundaries:** Cursor quota experimental (no Tokens/history) · macOS only · don’t oversell “all-in-one”.
 
 _Update when provider coverage or competitor facts change._

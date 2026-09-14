@@ -11,3 +11,22 @@ export function clampPercent(value: number | null | undefined): number | null {
   }
   return Math.min(100, Math.max(0, value));
 }
+
+/** Percent from used/limit amounts. Never invents a limit from a percent. */
+export function percentFromUsedAndLimit(
+  usedAmount: number | null | undefined,
+  limitAmount: number | null | undefined
+): number | null {
+  if (
+    usedAmount === null ||
+    usedAmount === undefined ||
+    limitAmount === null ||
+    limitAmount === undefined ||
+    !Number.isFinite(usedAmount) ||
+    !Number.isFinite(limitAmount) ||
+    limitAmount <= 0
+  ) {
+    return null;
+  }
+  return clampPercent((usedAmount / limitAmount) * 100);
+}

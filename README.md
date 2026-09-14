@@ -11,7 +11,7 @@
 > **Local multi-agent usage center on macOS — one dashboard, no cloud, no auto-switch.**
 
 Agent Usage is a macOS-first, fully local usage center for Codex, Claude Code,
-OpenCode, Grok, dsh, and Antigravity. One command opens a dashboard for native quota windows,
+OpenCode, Grok, dsh, Antigravity, and Cursor. One command opens a dashboard for native quota windows,
 reset times, tokens, model rankings, equivalent API cost, history, and diagnostics.
 It offers advice but never switches agents automatically.
 
@@ -23,7 +23,7 @@ Honest category axes and when to prefer Agent Usage vs provider UIs, exporters, 
 
 Sourced named competitors (ccusage, CodeBurn, Token Monitor, TokenTracker): [docs/named-competitors.md](docs/named-competitors.md).
 
-**Boundaries:** no Cursor yet · macOS only · multi-agent usage center for listed providers (don’t oversell “all-in-one”).
+**Boundaries:** Cursor quota is experimental (no Tokens/history yet) · macOS only · multi-agent usage center for listed providers (don’t oversell “all-in-one”).
 
 ## Dashboard
 
@@ -141,6 +141,7 @@ agent-usage clear --yes
 | Grok · xAI API                   | No subscription quota                                                                                                                 | Official Management API aggregation                                                       | Actual USD amounts, balance, limit, and invoice when available                         |
 | dsh · DeepSeek API               | No subscription quota                                                                                                                 | Local dsh session logs across every profile, including front ends composed on dsh         | API retail equivalent at DeepSeek published peak/off-peak rates                        |
 | Antigravity · Gemini Code Assist | Official-client 5-hour sprint window and weekly baseline limit from live language server RPC, with local session observation fallback | Local conversation SQLite databases (~/.gemini/antigravity-cli and ~/.gemini/antigravity) | API retail equivalent at published Google Gemini and third-party model rates           |
+| Cursor                           | Experimental official Agent CLI `/usage` screen: Included percent and On-Demand spend-limit window; account-wide                      | Not collected in this version                                                             | On-Demand dollars are a quota window, not a bill                                       |
 
 Every value retains its authority and observation time. Account-wide and this-Mac
 evidence remain visibly distinct.
@@ -162,7 +163,7 @@ All usage data remains local. JSON and CSV exports omit account identifiers,
 session IDs, cookies, OAuth tokens, and secret values by default. Raw observations
 are retained for 90 days, then transactionally compacted into UTC daily aggregates.
 Clearing local usage never deletes credentials owned by Codex, Claude Code,
-OpenCode, Grok, dsh, or Antigravity.
+OpenCode, Grok, dsh, Antigravity, or Cursor.
 
 ## Verification
 

@@ -36,7 +36,7 @@ and a Linux runtime ships.
 - Homebrew formula / cask
 - DMG, `.app`, or any updater
 - Menu bar glance (tracked as [issue #19](https://github.com/Blackman99/agent-usage-all-in-one/issues/19); vision mock is not a feature)
-- Cursor (tracked as [issue #18](https://github.com/Blackman99/agent-usage-all-in-one/issues/18); blocked on local evidence, not a coverage claim)
+- Cursor Tokens/history (quota-only experimental connector shipped; [issue #18](https://github.com/Blackman99/agent-usage-all-in-one/issues/18) remaining coverage)
 
 ## Revisit when
 

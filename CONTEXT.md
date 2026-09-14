@@ -8,10 +8,68 @@ launches a local loopback dashboard and exposes the same core summary through a
 CLI. Canonical install is npm / `npx`; Linux, Homebrew, and DMG are not shipped
 (ADR 017, `docs/platform-roadmap.md`). It never switches an agent automatically
 and does not upload private usage data or telemetry to a product-owned service.
-Cursor is not a Provider until a connector can read provider-stated local
-evidence without copying credentials.
+Cursor is one Provider covering both the Cursor IDE and the Cursor Agent CLI
+(`agent`). Those surfaces share Cursor's account-wide monthly plan and
+must never appear as two Providers. Cursor is not a Provider until a connector
+can read provider-stated local evidence without copying credentials. Installing
+the CLI or IDE, or reading `subscriptionTier` from `agent about`, is not that
+evidence. The first admitted official-client surface is an experimental parse
+of the interactive Agent CLI `/usage` screen, analogous to Claude Code: quota
+may ship while Tokens and history stay unavailable. There is no documented
+JSON usage CLI. The parser reads only printed TUI labels and values (Included, On-Demand,
+percent used, en-US dollar amounts, and the official unavailable / logged-out
+/ spend-chart sentences). Progress bars, sparklines, and dashboard links are
+discarded. Fixtures are those transcripts, including compact layout; a paid
+account's live ANSI dump is not a prerequisite. Copying OAuth, calling
+undocumented `api2.cursor.sh` endpoints, intercepting the official client's
+private dashboard RPCs, or mixing those RPCs with the screen is never a
+fallback. Headless `agent -p` is not a collector: it would consume the user's
+quota to manufacture Token rows. Collection spawns `agent --trust --mode ask`
+in a throwaway working directory with an English locale (`LC_ALL` /
+`LANG` = `en_US.UTF-8`), sends only `/usage`, and may also run
+`agent about --format json` for `accountIdentifier` (email). It does not
+treat `subscriptionTier` as quota, does not use a user repository as cwd,
+and does not delete session metadata the official client writes under
+`~/.cursor`. Connecting the Connector is consent to those official-client
+spawns; there is no second prompt on refresh. The Connector is discovered
+from the `agent` executable, is experimental, and expects only quota
+coverage until a later source-reported Token total exists. Presence of Cursor.app or `~/.cursor` without `agent` is
+not a connectable Cursor installation for this surface. Cursor is not listed
+as a supported Provider until that connector and the shared quota-row display
+of used amount, disabled on-demand, and calendar-day reset labels ship
+together. The billing domain display name is `Cursor subscription`; the
+plan name on `/usage` is not a billing-domain identity.
 
-The initial products are Codex, Claude Code, OpenCode, Grok, dsh, and Antigravity.
+When that gate is passed, the first billing domain is `cursor-subscription`:
+the monthly plan the official `/usage` screen actually meters (Included percent
+and On-Demand dollar limit). It is `summaryBillingDomainId`. Cursor Models and
+Other Models remain Cursor's published pricing pools, but they are not billing
+domains until an official-client surface states them as separate windows. The
+`/usage` Auto and API rows are routing breakdowns of Included usage: they are
+never billing domains, never quota buckets, and never `summaryBillingDomainId`.
+On-demand spend is a state of that same plan after included usage is exhausted,
+not a third billing domain: persist it as a quota bucket, never as a cost
+record. Included may be a quota bucket whose only stated quantity is percent
+used; do not invent an allowance to go with that percent. On-Demand `fixed`
+and `unlimited` windows carry a quota used amount in the screen's currency;
+`disabled` is the same bucket with on-demand fallback disabled; `unavailable`
+omits the bucket. A quota used amount is not billed cost. A `/usage` layout
+that is a spend chart or an explicit "not available for this plan" page is a
+complete quota snapshot with zero windows: it retires Included and On-Demand
+and leaves quota coverage unavailable. A timeout, unparsed screen, or
+"Not logged in" page is a quota-read failure: last windows stay, and the
+human action (sign in, retry) remains in Settings.
+A Grok Bot weekly window is out of this Provider unless the same official-client
+surface explicitly states it; it is never merged into `cursor-subscription`
+and never searched from a Grok Bot app. Cursor Grok and Composer selected
+inside Cursor are Cursor's first-party models, not the Grok Provider. Cursor
+quota windows collected from an official-client surface are account-wide: the
+same monthly plan covers the IDE, the Agent CLI, and Cloud Agents. Local Token
+observations, if they later exist, keep this-Mac or unknown scope and are
+never presented as interchangeable with those pools.
+
+The initial products are Codex, Claude Code, OpenCode, Grok, dsh, Antigravity,
+and Cursor.
 OpenCode Go quota and OpenCode local history use separate internal Provider
 identities: Go represents subscription allowance only, while local history
 represents every completed request made through OpenCode regardless of its
@@ -48,7 +106,24 @@ and equivalent cost stay exact. Its primary billing domain is
   identifier in stored records.
 - **Quota bucket**: A provider-defined usage window with its original label,
   scope, usage, remaining amount, and reset time. Quota buckets are dynamic and
-  are never hard-coded as fixed columns.
+  are never hard-coded as fixed columns. Usage may be a provider-stated
+  percent, a used amount, a limit amount, or a combination; a used amount is
+  quota evidence, never a cost record. Display follows those quantities: a
+  used and limit amount in the same currency is shown as such; a missing
+  percent is not drawn as an empty bar that reads as zero; disabled on-demand
+  keeps the Provider's off wording rather than 0%.
+- **Quota used amount**: The quantity already consumed in a quota bucket, in
+  the bucket's native unit (percent is separate). Missing used amount stays
+  null and is never filled from a cost record or a guessed allowance.
+- **Quota reset label**: The Provider's own reset wording when it is not an
+  instant (for example `Resets Sep 15`). It is kept as a label. It does not
+  become `resetsAt` and does not upgrade time precision. A monthly billing
+  period does not receive a fabricated `windowDurationMinutes`.
+- **Complete quota snapshot**: A successful read of the official-client quota
+  surface for a billing domain, including the case of zero windows. It replaces
+  the stored windows for that domain.
+- **Quota-read failure**: A collection that could not read that surface
+  (timeout, unparsed screen, or not signed in). It does not retire windows.
 - **Usage observation**: A time-stamped token or activity measurement collected
   from an official account, official client, or local telemetry source.
 - **Source-reported Token total**: A total stated by the source itself. It is
@@ -148,10 +223,18 @@ and equivalent cost stay exact. Its primary billing domain is
 4. Unknown cost is never represented as zero.
 5. Provider-native quota labels and windows are preserved. A quota percentage
    requires an allowance the Provider itself states; it is never derived against
-   a capacity Agent Usage assumed. An unavailable allowance leaves the window
-   unavailable rather than showing a percentage of a guess. A window a Provider
+   a capacity Agent Usage assumed. A Provider-stated percent with no allowance
+   is stored as percent used and leaves limit amount null. An unavailable
+   allowance does not, by itself, delete a stated percent. A window a Provider
    has stopped reporting is retired instead of remaining beside the windows that
-   replaced it.
+   replaced it. A complete quota snapshot with zero windows is that retirement.
+   A quota-read failure is not. Quota used amount and limit amount never become
+   cost records. A calendar-day reset label stays a label; it is never stored
+   as `resetsAt`.
+   Display of a quota bucket uses the quantities the bucket actually has: used
+   and limit amounts when present, percent when present, and the Provider's
+   disabled wording when on-demand is off. A missing percent is not rendered as
+   zero.
 6. One connector failure cannot make other providers unavailable.
 7. Credentials stay in the system keychain or their owning official client and
    never appear in logs, exports, or the usage database.

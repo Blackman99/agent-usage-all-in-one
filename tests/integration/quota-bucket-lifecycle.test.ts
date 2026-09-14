@@ -120,6 +120,67 @@ describe('quota bucket lifecycle', () => {
 
     repository.close();
   });
+
+  it('retires windows from a complete zero-window snapshot and keeps them after a quota-read failure', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-quota-complete-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+
+    repository.saveSnapshot(
+      snapshot('2026-09-13T11:00:00.000Z', [bucket('included', 'Included', 47, 'official-client')])
+    );
+    repository.saveSnapshot({
+      ...snapshot('2026-09-13T11:30:00.000Z', []),
+      completeQuotaBillingDomainIds: ['code-assist-subscription']
+    });
+    expect(
+      repository.getOverview(NOW).providers.find((provider) => provider.id === 'antigravity')!
+        .billingDomains[0].quotaBuckets
+    ).toEqual([]);
+
+    repository.saveSnapshot(
+      snapshot('2026-09-13T12:00:00.000Z', [bucket('included', 'Included', 47, 'official-client')])
+    );
+    repository.saveSnapshot(snapshot('2026-09-13T12:15:00.000Z', []));
+    expect(
+      repository
+        .getOverview(NOW)
+        .providers.find((provider) => provider.id === 'antigravity')!
+        .billingDomains[0].quotaBuckets.map((entry) => entry.id)
+    ).toEqual(['included']);
+
+    repository.close();
+  });
+
+  it('round-trips quota used amount and reset label', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-quota-amount-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    repository.saveSnapshot(
+      snapshot('2026-09-13T11:00:00.000Z', [
+        {
+          ...bucket('on-demand', 'On-Demand', 62, 'official-client'),
+          usedAmount: 12.4,
+          limitAmount: 20,
+          limitCurrency: 'USD',
+          resetLabel: 'Resets Sep 15',
+          fallbackStatus: 'enabled'
+        }
+      ])
+    );
+    const stored = repository
+      .getOverview(NOW)
+      .providers.find((provider) => provider.id === 'antigravity')!.billingDomains[0]
+      .quotaBuckets[0];
+    expect(stored).toMatchObject({
+      usedAmount: 12.4,
+      limitAmount: 20,
+      limitCurrency: 'USD',
+      resetLabel: 'Resets Sep 15',
+      fallbackStatus: 'enabled'
+    });
+    repository.close();
+  });
 });
 
 function bucket(

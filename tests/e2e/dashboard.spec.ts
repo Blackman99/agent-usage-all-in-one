@@ -52,7 +52,8 @@ test('keeps the Agent dashboard shell visible while cached usage loads', async (
     { id: 'claude-code', name: 'Claude Code' },
     { id: 'opencode-go', name: 'OpenCode Go' },
     { id: 'grok', name: 'Grok' },
-    { id: 'antigravity', name: 'Antigravity' }
+    { id: 'antigravity', name: 'Antigravity' },
+    { id: 'cursor', name: 'Cursor' }
   ]) {
     await expect(
       agentPanel.getByRole('heading', { name: provider.name, exact: true })
@@ -443,11 +444,11 @@ test('puts usage first, keeps connection actions inside provider cards, and refr
 
   await expect(page.getByRole('heading', { name: 'Connections' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Diagnostics' })).toHaveCount(0);
-  for (const name of ['Codex', 'Claude Code', 'OpenCode Go', 'Grok']) {
+  for (const name of ['Codex', 'Claude Code', 'OpenCode Go', 'Grok', 'Cursor']) {
     await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
   }
   await expect(page.locator('.monitoring-section')).toHaveCount(0);
-  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
+  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok', 'cursor']) {
     await expect(page.locator(`[data-provider-logo="${providerId}"]`)).toBeVisible();
   }
   await expect(page.locator('.provider-mark')).toHaveCount(0);
@@ -2091,7 +2092,7 @@ test('follows system theme and keeps the usage dashboard responsive with local o
         .evaluate((element) => getComputedStyle(element).backgroundImage)
     )
     .toBe('none');
-  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok']) {
+  for (const providerId of ['codex', 'claude-code', 'opencode-go', 'grok', 'cursor']) {
     const logo = page.locator(`img[data-provider-logo="${providerId}"]`).first();
     await expect(logo).toBeVisible();
     await expect(logo).toHaveAttribute('src', /^\/brands\//);
@@ -2103,6 +2104,10 @@ test('follows system theme and keeps the usage dashboard responsive with local o
   await expect(page.locator('img[data-provider-logo="grok"]').first()).toHaveAttribute(
     'src',
     '/brands/grok-dark.svg'
+  );
+  await expect(page.locator('img[data-provider-logo="cursor"]').first()).toHaveAttribute(
+    'src',
+    '/brands/cursor-light.svg'
   );
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   await page.getByRole('button', { name: 'Tokens', exact: true }).click();
@@ -2181,6 +2186,17 @@ test('follows system theme and keeps the usage dashboard responsive with local o
         })
     )
     .toBe('/brands/grok-light.svg');
+  await expect
+    .poll(() =>
+      page
+        .locator('img[data-provider-logo="cursor"]')
+        .first()
+        .evaluate((image) => {
+          const source = (image as HTMLImageElement).src;
+          return source ? new URL(source).pathname : '';
+        })
+    )
+    .toBe('/brands/cursor-dark.svg');
   expect(externalRequests).toEqual([]);
   // A malformed Provider payload used to throw and freeze every later update.
   expect(pageErrors).toEqual([]);

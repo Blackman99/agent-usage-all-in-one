@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampPercent } from '$core/quota-normalization.js';
+import { clampPercent, percentFromUsedAndLimit } from '$core/quota-normalization.js';
 
 describe('quota percentage normalization', () => {
   it('clamps values above 100 to 100', () => {
@@ -27,5 +27,18 @@ describe('quota percentage normalization', () => {
     expect(clampPercent(Number.NaN)).toBeNull();
     expect(clampPercent(Number.POSITIVE_INFINITY)).toBeNull();
     expect(clampPercent(Number.NEGATIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe('percent from used and limit amounts', () => {
+  it('derives a clamped percent when both amounts are present and the limit is positive', () => {
+    expect(percentFromUsedAndLimit(12.4, 20)).toBe(62);
+    expect(percentFromUsedAndLimit(25, 20)).toBe(100);
+  });
+
+  it('does not invent a percent without a positive limit', () => {
+    expect(percentFromUsedAndLimit(12.4, null)).toBeNull();
+    expect(percentFromUsedAndLimit(12.4, 0)).toBeNull();
+    expect(percentFromUsedAndLimit(null, 20)).toBeNull();
   });
 });

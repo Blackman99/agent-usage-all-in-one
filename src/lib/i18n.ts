@@ -42,6 +42,7 @@ const messages = {
       'This Provider meters each request instead of an allowance. Its Tokens and API retail equivalent are in Tokens & model costs.',
     noQuotaReported:
       'No quota window reported yet. Only the official client states this allowance; Tokens and cost stay complete without it.',
+    noQuotaOnPlan: 'The official client reported no quota window for this plan.',
     quotaTimelineTitle: 'Quota timeline',
     quotaTimelineCurrentRange: 'current',
     quotaTimelineWeekly: 'Weekly',
@@ -76,6 +77,8 @@ const messages = {
     temporalityCumulative: 'Cumulative',
     temporalityUnknown: 'Unknown',
     used: 'used',
+    noMonthlyLimit: 'No monthly limit',
+    onDemandOff: 'On-demand usage is off',
     resets: 'Resets',
     source: 'Source',
     scope: 'Scope',
@@ -364,6 +367,7 @@ const messages = {
       '该 Provider 按请求计量，没有额度。Token 与 API 对等零售价见「Token 与模型费用」。',
     noQuotaReported:
       '暂未获取到额度窗口。只有官方客户端会给出该额度；即使拿不到，Token 与费用依然完整。',
+    noQuotaOnPlan: '官方客户端显示当前套餐没有额度窗口。',
     quotaTimelineTitle: '额度时序',
     quotaTimelineCurrentRange: '当前',
     quotaTimelineWeekly: '按周',
@@ -398,6 +402,8 @@ const messages = {
     temporalityCumulative: '累计',
     temporalityUnknown: '未知',
     used: '已使用',
+    noMonthlyLimit: '无月度上限',
+    onDemandOff: '按需用量已关闭',
     resets: '刷新于',
     source: '来源',
     scope: '范围',

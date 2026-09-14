@@ -11,6 +11,7 @@ logo requests. A Provider without a reviewed product-specific mark uses plain te
 | Grok / xAI API   | `grok-dark.svg` — `a127a7cd42b0450f7d3827a331b0730aab49fd99c3fe920d172475b9ffc83992`; `grok-light.svg` — `b20648e2f111d7fbc91f58b22d1e76e9885b68a163cb5a1010f7f11bf5840491`         | `Grok_Logomark_Dark.svg` and `Grok_Logomark_Light.svg` from the official [SpaceXAI brand package](https://data.x.ai/logos/xAI_Grok_Assets.zip), linked by the [SpaceXAI Brand Guidelines](https://x.ai/legal/brand-guidelines) | The official black mark is used on light surfaces and the white mark on dark surfaces |
 
 | dsh (DeepSeek) | `deepseek.svg` — `a6a972765f694fe01a3cd9a563bce1bfcdb67d57e31d69ee0affd703a1c4f247` | `img/logo.svg` served by the official [DeepSeek API documentation](https://api-docs.deepseek.com/) | One official monochrome asset in both themes, shown on a light plate the way the OpenAI mark is; no runtime recoloring |
+| Cursor | `cursor-light.svg` — `c483c02f78eb2619778fdd959e72a9adfac4844854472cd2653d4cbfd60e4d71`; `cursor-dark.svg` — `cd0e3e5d8991a4cdd4577f8896cd063105207665165c73e25a1ff918dd367eb7` | `CUBE_2D_LIGHT.svg` and `CUBE_2D_DARK.svg` from the official [Cursor brand assets](https://cursor.com/brand) zip | The official dark-ink cube is used on light surfaces and the light-ink cube on dark surfaces |
 
 DeepSeek publishes no brand or press-kit page, so the audited asset is the mark
 its own documentation site serves, byte-for-byte. It is a single dark path with
@@ -37,3 +38,9 @@ to [Simple Icons issue #13853](https://github.com/simple-icons/simple-icons/issu
 whose report links the same official package. The audited ZIP SHA-256 is
 `f41a93923a85047b4b5a9571b7ec73339f562c3e58acd096e25584ab0ae2a1fb`;
 the two bundled SVGs preserve the supplied path geometry and fills unchanged.
+
+The Cursor brand zip was downloaded from the official [Brand Guidelines](https://cursor.com/brand)
+asset link. The audited ZIP SHA-256 is
+`97488a7751914e60f9ff532bc33810cdeaebdddc017548abe6ca2bc29bbc3928`.
+The two bundled cube SVGs are the zip members `CUBE_2D_LIGHT.svg` and
+`CUBE_2D_DARK.svg` unchanged.

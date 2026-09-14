@@ -17,6 +17,7 @@
     "claude-code",
     "opencode",
     "grok",
+    "cursor",
     "token-usage",
     "developer-tools"
   ],

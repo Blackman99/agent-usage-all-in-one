@@ -246,8 +246,10 @@ interface QuotaRow {
   billing_domain_id: string;
   label: string;
   used_percent: number | null;
+  used_amount: number | null;
   window_duration_minutes: number | null;
   resets_at: string | null;
+  reset_label: string | null;
   authority: DataAuthority;
   observed_at: string;
   scope: QuotaBucket['scope'] | null;
@@ -549,16 +551,18 @@ export class SqliteUsageRepository implements UsageRepository {
 
       const quotaStatement = this.#database.prepare(
         `INSERT INTO quota_buckets (
-           provider_id, id, billing_domain_id, label, used_percent, window_duration_minutes,
-           resets_at, authority, observed_at,
+           provider_id, id, billing_domain_id, label, used_percent, used_amount,
+           window_duration_minutes, resets_at, reset_label, authority, observed_at,
            scope, status, limit_amount, limit_currency, fallback_status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(provider_id, id) DO UPDATE SET
            billing_domain_id = excluded.billing_domain_id,
            label = excluded.label,
            used_percent = excluded.used_percent,
+           used_amount = excluded.used_amount,
            window_duration_minutes = excluded.window_duration_minutes,
            resets_at = excluded.resets_at,
+           reset_label = excluded.reset_label,
            authority = excluded.authority,
            observed_at = excluded.observed_at,
            scope = excluded.scope,
@@ -567,27 +571,34 @@ export class SqliteUsageRepository implements UsageRepository {
            limit_currency = excluded.limit_currency,
            fallback_status = excluded.fallback_status`
       );
-      // A collection that reports quota states the complete set of windows for the
-      // billing domains it reports them for. Merging by bucket id instead left a
-      // window the source had stopped reporting on the card forever, beside the
-      // windows that replaced it. A collection reporting no quota at all changes
-      // nothing, so a source that is briefly unreadable keeps its last windows.
+      // Complete quota snapshots replace the stored windows for those domains,
+      // including the zero-window case. A quota-read failure omits completeness
+      // and leaves last windows in place.
       const reportedQuotaDomains = [
-        ...new Set(snapshot.quotaBuckets.map((bucket) => bucket.billingDomainId))
+        ...new Set([
+          ...(snapshot.completeQuotaBillingDomainIds ?? []),
+          ...snapshot.quotaBuckets.map((bucket) => bucket.billingDomainId)
+        ])
       ];
       if (reportedQuotaDomains.length > 0) {
-        const retiredQuotaStatement = this.#database.prepare(
-          `DELETE FROM quota_buckets
-           WHERE provider_id = ? AND billing_domain_id = ? AND id NOT IN (${snapshot.quotaBuckets
-             .map(() => '?')
-             .join(', ')})`
-        );
         for (const billingDomainId of reportedQuotaDomains) {
-          retiredQuotaStatement.run(
-            snapshot.provider.id,
-            billingDomainId,
-            ...snapshot.quotaBuckets.map((bucket) => bucket.id)
-          );
+          const ids = snapshot.quotaBuckets
+            .filter((bucket) => bucket.billingDomainId === billingDomainId)
+            .map((bucket) => bucket.id);
+          if (ids.length === 0) {
+            this.#database
+              .prepare(`DELETE FROM quota_buckets WHERE provider_id = ? AND billing_domain_id = ?`)
+              .run(snapshot.provider.id, billingDomainId);
+            continue;
+          }
+          this.#database
+            .prepare(
+              `DELETE FROM quota_buckets
+               WHERE provider_id = ? AND billing_domain_id = ? AND id NOT IN (${ids
+                 .map(() => '?')
+                 .join(', ')})`
+            )
+            .run(snapshot.provider.id, billingDomainId, ...ids);
         }
       }
       for (const bucket of snapshot.quotaBuckets) {
@@ -598,8 +609,10 @@ export class SqliteUsageRepository implements UsageRepository {
           bucket.billingDomainId,
           bucket.label,
           clampedUsedPercent,
+          bucket.usedAmount ?? null,
           bucket.windowDurationMinutes ?? null,
           bucket.resetsAt,
+          bucket.resetLabel ?? null,
           bucket.authority,
           snapshot.observedAt,
           bucket.scope ?? null,
@@ -1811,8 +1824,8 @@ export class SqliteUsageRepository implements UsageRepository {
   ): BillingDomainOverview {
     const quotaRows = this.#database
       .prepare(
-        `SELECT id, billing_domain_id, label, used_percent, window_duration_minutes, resets_at,
-                authority, observed_at,
+        `SELECT id, billing_domain_id, label, used_percent, used_amount, window_duration_minutes,
+                resets_at, reset_label, authority, observed_at,
                 scope, status, limit_amount, limit_currency, fallback_status
          FROM quota_buckets WHERE provider_id = ? AND billing_domain_id = ? ORDER BY id`
       )
@@ -2338,9 +2351,11 @@ export class SqliteUsageRepository implements UsageRepository {
         observed_at TEXT NOT NULL,
         scope TEXT,
         status TEXT,
+        used_amount REAL,
         limit_amount REAL,
         limit_currency TEXT,
         fallback_status TEXT,
+        reset_label TEXT,
         total_tokens INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (provider_id, id),
         FOREIGN KEY (provider_id, billing_domain_id)
@@ -2699,9 +2714,11 @@ export class SqliteUsageRepository implements UsageRepository {
       ['window_duration_minutes', 'INTEGER'],
       ['scope', 'TEXT'],
       ['status', 'TEXT'],
+      ['used_amount', 'REAL'],
       ['limit_amount', 'REAL'],
       ['limit_currency', 'TEXT'],
-      ['fallback_status', 'TEXT']
+      ['fallback_status', 'TEXT'],
+      ['reset_label', 'TEXT']
     ] as const) {
       if (!quotaColumns.some((column) => column.name === name)) {
         this.#database.exec(`ALTER TABLE quota_buckets ADD COLUMN ${name} ${type}`);
@@ -2742,8 +2759,10 @@ function mapQuotaRow(row: QuotaRow): QuotaBucket {
     billingDomainId: row.billing_domain_id,
     label: row.label,
     usedPercent: clampPercent(row.used_percent),
+    usedAmount: row.used_amount,
     windowDurationMinutes: row.window_duration_minutes,
     resetsAt: row.resets_at,
+    resetLabel: row.reset_label,
     authority: row.authority,
     observedAt: row.observed_at,
     scope: row.scope ?? undefined,

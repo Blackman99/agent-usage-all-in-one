@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,5 +27,16 @@ describe('brand assets', () => {
     expect(englishReadme).not.toContain('agent-usage-banner.svg');
     expect(chineseReadme).not.toContain('agent-usage-banner.svg');
     expect(existsSync(`${repositoryRoot}/static/brand/agent-usage-banner.svg`)).toBe(false);
+  });
+
+  it('keeps the official Cursor 2D cube marks byte-for-byte', () => {
+    const light = readFileSync(`${repositoryRoot}/static/brands/cursor-light.svg`);
+    const dark = readFileSync(`${repositoryRoot}/static/brands/cursor-dark.svg`);
+    expect(createHash('sha256').update(light).digest('hex')).toBe(
+      'c483c02f78eb2619778fdd959e72a9adfac4844854472cd2653d4cbfd60e4d71'
+    );
+    expect(createHash('sha256').update(dark).digest('hex')).toBe(
+      'cd0e3e5d8991a4cdd4577f8896cd063105207665165c73e25a1ff918dd367eb7'
+    );
   });
 });
