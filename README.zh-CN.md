@@ -16,8 +16,6 @@ API 对等费用、历史与诊断。它只提供建议，不会自动切换 Age
 
 ## 对比说明
 
-![类别对比：各平台官网、Token 导出工具、FinOps 看板与 Agent Usage](docs/design/compare-sheet.png)
-
 按类别对比何时更适合用 Agent Usage，而非各平台官网、导出工具或通用 FinOps 看板：[docs/comparison.md](docs/comparison.md)。
 
 具名竞品对照（ccusage、CodeBurn、Token Monitor、TokenTracker）：[docs/named-competitors.md](docs/named-competitors.md)。

@@ -17,8 +17,6 @@ It offers advice but never switches agents automatically.
 
 ## Compared
 
-![Category comparison: provider UIs, token exporters, FinOps dashboards, and Agent Usage](docs/design/compare-sheet.png)
-
 Honest category axes and when to prefer Agent Usage vs provider UIs, exporters, or FinOps dashboards: [docs/comparison.md](docs/comparison.md).
 
 Sourced named competitors (ccusage, CodeBurn, Token Monitor, TokenTracker): [docs/named-competitors.md](docs/named-competitors.md).
@@ -50,8 +48,6 @@ unclassified or unpriced instead of being guessed or displayed as zero.
 
 Grok Build/SuperGrok and xAI API are independent billing domains. Their quotas,
 tokens, and costs are never added together.
-
-![Cost honesty: actual charges, estimates, subscriptions, and API retail equivalent stay separate](docs/design/cost-semantics-4.png)
 
 ## Fast, progressive startup
 
@@ -88,8 +84,6 @@ runtime (built-in `node:sqlite`, Keychain, LaunchAgent), not a documentation
 oversight — see [ADR 017](docs/adr/017-macos-node24-npm-runtime.md) and the
 [platform roadmap](docs/platform-roadmap.md). Linux and Homebrew / DMG are not
 shipped.
-
-![Quick start: install and open the local dashboard in three steps](docs/design/install-3-steps.png)
 
 ```bash
 npx agent-usage-all-in-one
@@ -148,9 +142,7 @@ evidence remain visibly distinct.
 
 ## First launch / empty state
 
-Until connectors find local client data, the dashboard shows an honest empty state — connect or use an installed agent first:
-
-![Empty state when no agent data is connected yet](docs/design/empty-state-unconnected.png)
+Until connectors find local client data, the dashboard shows an honest empty state — connect or use an installed agent first.
 
 ## Credentials and privacy
 
@@ -187,8 +179,6 @@ Linux, Homebrew, and DMG stay off the product until the conditions in
 [docs/platform-roadmap.md](docs/platform-roadmap.md) are met.
 
 > **VISION only — not shipped.** Menu bar / always-available glance is tracked in [issue #19](https://github.com/Blackman99/agent-usage-all-in-one/issues/19). Do not treat the mock as a current feature.
-
-![VISION (not shipped): menu bar glance concept — see issue #19](docs/design/menubar-vision.png)
 
 ## License and community
 

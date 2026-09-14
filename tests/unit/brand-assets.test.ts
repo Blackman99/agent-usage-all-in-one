@@ -24,6 +24,10 @@ describe('brand assets', () => {
     ).toBe(true);
     expect(englishReadme.match(/agent-usage-showcase\.jpg/g)).toHaveLength(1);
     expect(chineseReadme.match(/agent-usage-showcase\.jpg/g)).toHaveLength(1);
+    expect(englishReadme.match(/^!\[/gm)).toHaveLength(1);
+    expect(chineseReadme.match(/^!\[/gm)).toHaveLength(1);
+    expect(englishReadme).not.toContain('docs/design/');
+    expect(chineseReadme).not.toContain('docs/design/');
     expect(englishReadme).not.toContain('agent-usage-banner.svg');
     expect(chineseReadme).not.toContain('agent-usage-banner.svg');
     expect(existsSync(`${repositoryRoot}/static/brand/agent-usage-banner.svg`)).toBe(false);
