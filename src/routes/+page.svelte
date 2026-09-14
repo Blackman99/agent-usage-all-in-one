@@ -61,7 +61,8 @@
     { id: 'claude-code', displayName: 'Claude Code' },
     { id: 'opencode-go', displayName: 'OpenCode Go' },
     { id: 'grok', displayName: 'Grok' },
-    { id: 'antigravity', displayName: 'Antigravity' }
+    { id: 'antigravity', displayName: 'Antigravity' },
+    { id: 'cursor', displayName: 'Cursor' }
   ];
 
   const DEFAULT_AGENT_PROVIDER_IDS = new Set(
@@ -1263,7 +1264,9 @@
       codex: 0,
       'claude-code': 1,
       'opencode-go': 2,
-      grok: 3
+      grok: 3,
+      antigravity: 4,
+      cursor: 5
     };
     return providers.sort(
       (left, right) =>

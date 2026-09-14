@@ -3536,8 +3536,9 @@ test('keeps provider cards and their final quota rows aligned without forecasts'
 
   await page.setViewportSize({ width: 1680, height: 1000 });
   await page.goto(freshLaunch.stdout.trim());
-  // Every quota-bearing card is compared; dsh has no quota card, while antigravity stays in the default set.
-  await expect(page.locator('.provider-card')).toHaveCount(5);
+  // Every quota-bearing card is compared; dsh has no quota card, while antigravity
+  // and cursor stay in the default set.
+  await expect(page.locator('.provider-card')).toHaveCount(6);
   const cards = page.locator('.provider-card:has(.quota-row)');
   await expect(cards).toHaveCount(4);
   await expect(page.locator('.forecast-list')).toHaveCount(0);
