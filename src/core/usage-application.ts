@@ -1005,13 +1005,14 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-const PENDING_HTTP_YIELD_MS = 20;
+const PENDING_HTTP_YIELD_MS = 75;
 
 function yieldForPendingHttp(): Promise<void> {
   // Localhost image fetches still take a few milliseconds to reach poll.
-  // A 0/1ms timer fires first and lets persist occupy the event loop.
+  // A 0/1ms timer fires first and lets persist occupy the event loop; CI
+  // runners need a longer window before the busy persist starts.
   return new Promise((resolve) => {
-    setTimeout(resolve, PENDING_HTTP_YIELD_MS);
+    setTimeout(() => setImmediate(resolve), PENDING_HTTP_YIELD_MS);
   });
 }
 
