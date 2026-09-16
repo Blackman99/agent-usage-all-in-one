@@ -1067,7 +1067,9 @@ test('says an Antigravity quota window is unreported rather than showing a deriv
   await page.goto(freshLaunch.stdout.trim());
   const provider = page.locator('.provider-card').filter({ hasText: 'Antigravity' });
   await expect(provider.locator('.quota-row')).toHaveCount(0);
-  await expect(provider.locator('.quota-absent')).toContainText('No quota window reported yet');
+  await expect(provider.locator('.quota-absent')).toContainText(
+    'The official client reported no quota window for this plan.'
+  );
   // Spending 60,696,074 Tokens against an unknown allowance is not a percentage.
   await expect(provider.locator('.quota-absent')).not.toContainText('%');
 });
@@ -1669,13 +1671,17 @@ test('switches 24-hour, 7-day, and 30-day token and cost history without mixing 
   await expect(workbench.locator('.trend-legend span')).toHaveCount(1);
   await expect(workbench.locator('.trend-legend')).not.toContainText('Provider-reported estimate');
   const providerShareData = workbench.getByRole('table', { name: 'Model share' });
-  await expect(providerShareData).toContainText('fable-model');
-  await expect(providerShareData).toContainText('Claude Code');
-  await expect(providerShareData).toContainText('shared-model · Codex');
+  await expect(providerShareData).toContainText('fable-model · Claude Code · Subscription');
+  await expect(providerShareData).toContainText('open-model · OpenCode Go · Subscription');
+  await expect(providerShareData).toContainText(
+    'shared-model · Grok · xAI API · Separate domain · not included in headline'
+  );
+  await expect(providerShareData).not.toContainText('shared-model · Codex');
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await page.getByRole('button', { name: 'Tokens', exact: true }).click();
   await expect(workbench.getByTestId('usage-headline')).toContainText('700');
-  await expect(providerShareData).toContainText('fable-model');
+  await expect(providerShareData).toContainText('fable-model · Claude Code · Subscription');
+  await expect(providerShareData).toContainText('shared-model · Codex · Subscription');
   await expect(providerShareData).not.toContainText('Unknown Agent');
   await page.getByRole('button', { name: '24h' }).click();
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
