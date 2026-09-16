@@ -55,11 +55,13 @@ and removes the earlier model/day import in one transaction. Existing request
 rows retain their immutable retail price snapshots, while a failed read never
 erases cached history.
 
-On startup, retained raw observations pass through the same derivation path.
-Derived inserts use immutable stable identities and ignore a conflict with an
-already recorded retail snapshot. A reviewed price change must use a new catalog
-entry and effective interval; changing an in-memory rate under an existing entry
-cannot rewrite prior amounts.
+On startup, retained raw observations that still lack a retail snapshot pass
+through the same derivation path. Connector refresh derives retail equivalents
+only for new observations or ones whose pricing inputs changed. Derived inserts
+use immutable stable identities and ignore a conflict with an already recorded
+retail snapshot. A reviewed price change must use a new catalog entry and
+effective interval; changing an in-memory rate under an existing entry cannot
+rewrite prior amounts.
 
 ## Consequences
 

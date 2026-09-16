@@ -207,6 +207,36 @@ describe('privacy, export, and retention', () => {
     restartedRepository.close();
   });
 
+  it('skips worker compaction when no retained observation is older than 90 days', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retention-skip-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    repository.saveSnapshot({
+      ...snapshot(),
+      usage: snapshot().usage.filter((observation) => observation.id !== 'old-observation')
+    });
+    const application = new UsageApplication({
+      repository,
+      connectors: [],
+      clock: () => new Date('2026-08-28T02:00:00.000Z')
+    });
+
+    expect(await application.compactRetention()).toMatchObject({
+      rawObservations: 1,
+      dailyAggregates: 0,
+      lastCompactedAt: null
+    });
+
+    await application.startBackgroundProcessing();
+    expect(await application.getRetentionStatus()).toMatchObject({
+      rawObservations: 1,
+      dailyAggregates: 0,
+      lastCompactedAt: null
+    });
+    repository.close();
+  });
+
   it('deletes only the requested provider and its connector state', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-provider-cleanup-'));
     workspaces.push(workspace);

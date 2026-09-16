@@ -889,6 +889,31 @@ describe('API retail-equivalent pricing', () => {
     });
     expect(claudeResult.costs[0]?.amount).toBeCloseTo(0.3 + 0.3 + 0.003, 4);
   });
+
+  it('indexes catalog entries once per derivation instead of scanning every observation', () => {
+    let entryReads = 0;
+    const catalog = {
+      version: OFFICIAL_PRICING_CATALOG.version,
+      get entries() {
+        entryReads += 1;
+        return OFFICIAL_PRICING_CATALOG.entries;
+      }
+    };
+    const usage = Array.from({ length: 50 }, (_, index) =>
+      observation({ id: `fable-event-${index}` })
+    );
+
+    const result = deriveRetailEquivalentCosts(
+      {
+        ...snapshot(observation()),
+        usage
+      },
+      catalog
+    );
+
+    expect(result.costs).toHaveLength(50);
+    expect(entryReads).toBe(1);
+  });
 });
 
 function observation(overrides: Partial<UsageObservation> = {}): UsageObservation {

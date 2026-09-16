@@ -896,6 +896,10 @@ export interface UsageRepository {
     cursor: RetailPricingBackfillCursor | null,
     limit: number
   ): RetailPricingBackfillPage;
+  observationsNeedingRetailDerivation?(
+    providerId: string,
+    observations: UsageObservation[]
+  ): UsageObservation[];
   saveDerivedCosts?(providerId: string, costs: CostRecord[]): void;
   deleteDerivedRetailCosts?(): void;
   deleteDerivedRetailCostsAsync?(): Promise<void>;

@@ -129,6 +129,50 @@ describe('retained retail-equivalent backfill', () => {
     repository.close();
   });
 
+  it('incremental catalog backfill prices remaining unpriced observations without rewriting priced snapshots', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-unpriced-backfill-'));
+    workspaces.push(workspace);
+    const databasePath = join(workspace, 'usage.sqlite');
+    const repository = new SqliteUsageRepository(databasePath);
+    repository.saveSnapshot(
+      snapshot([
+        usage('already-priced', '2026-08-28T01:00:00.000Z'),
+        usage('unrecognized-model', '2026-08-28T01:01:00.000Z', { model: 'unknown-custom-model' })
+      ])
+    );
+
+    await application(repository).startBackgroundProcessing();
+    const firstRows = pricedRetailRows(databasePath);
+    expect(firstRows).toEqual([expect.objectContaining({ id: 'already-priced', amount: 0.325 })]);
+    const calculatedAt = firstRows[0]?.calculatedAt;
+    expect(repository.getApplicationState('retail-pricing-catalog-version')).toBe(
+      OFFICIAL_PRICING_CATALOG.version
+    );
+
+    repository.saveSnapshot(snapshot([usage('late-priceable', '2026-08-28T01:02:00.000Z')]));
+    repository.saveApplicationState(
+      'retail-pricing-catalog-version',
+      `stale:${OFFICIAL_PRICING_CATALOG.version}`
+    );
+    const derivedObservationIds: string[] = [];
+    const saveDerivedCosts = repository.saveDerivedCosts.bind(repository);
+    repository.saveDerivedCosts = (providerId, costs) => {
+      derivedObservationIds.push(
+        ...costs.map((cost) => cost.usageObservationId ?? cost.sourceId ?? cost.id)
+      );
+      saveDerivedCosts(providerId, costs);
+    };
+
+    await application(repository).startBackgroundProcessing();
+    expect(derivedObservationIds).toEqual(['late-priceable']);
+    const rows = pricedRetailRows(databasePath);
+    expect(rows.map((row) => row.id)).toEqual(['already-priced', 'late-priceable']);
+    expect(rows[0]?.amount).toBe(0.325);
+    expect(rows[0]?.calculatedAt).toBe(calculatedAt);
+    expect(rows[1]?.amount).toBe(0.325);
+    repository.close();
+  });
+
   it('leaves an incomplete catalog marker so startup retries a failed hard backfill', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retry-price-backfill-'));
     workspaces.push(workspace);
@@ -205,6 +249,20 @@ function application(
   return new UsageApplication({ repository, connectors: [], clock: () => NOW, priceCatalog });
 }
 
+function pricedRetailRows(databasePath: string) {
+  const database = new DatabaseSync(databasePath);
+  const rows = database
+    .prepare(
+      `SELECT usage_observation_id AS id, amount, calculated_at AS calculatedAt
+       FROM cost_records
+       WHERE kind = 'retail-equivalent'
+       ORDER BY usage_observation_id`
+    )
+    .all() as Array<{ id: string; amount: number; calculatedAt: string }>;
+  database.close();
+  return rows;
+}
+
 async function retailHistory(application: UsageApplication) {
   await application.startBackgroundProcessing();
   const domain = (await application.getOverview({ window: '30d', timeZone: 'UTC' })).providers[0]
@@ -212,7 +270,11 @@ async function retailHistory(application: UsageApplication) {
   return domain.history.costs.find((cost) => cost.kind === 'retail-equivalent');
 }
 
-function usage(id: string, observedAt: string): UsageObservation {
+function usage(
+  id: string,
+  observedAt: string,
+  overrides: Partial<UsageObservation> = {}
+): UsageObservation {
   return {
     id,
     billingDomainId: 'xai-api',
@@ -232,7 +294,8 @@ function usage(id: string, observedAt: string): UsageObservation {
     timePrecision: 'event',
     usageScope: 'account-wide',
     aggregationTemporality: 'delta',
-    authority: 'official-account'
+    authority: 'official-account',
+    ...overrides
   };
 }
 

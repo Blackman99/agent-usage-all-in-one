@@ -7,11 +7,6 @@ import protobuf from 'protobufjs';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 
 import { normalizeTokenObservation } from '../core/token-normalization.js';
-import {
-  OFFICIAL_PRICING_CATALOG,
-  deriveRetailEquivalentCosts,
-  type RetailPriceCatalog
-} from '../core/retail-pricing.js';
 import type { CollectionRequest, CostRecord, UsageObservation } from '../core/types.js';
 
 const { DatabaseSync } = createRequire(import.meta.url)(
@@ -23,7 +18,6 @@ export interface AntigravitySqliteUsageClientOptions {
   clock?: () => Date;
   lookbackDays?: number;
   cachePath?: string;
-  priceCatalog?: RetailPriceCatalog;
 }
 
 export interface AntigravitySqliteUsageResult {
@@ -51,7 +45,6 @@ export class AntigravitySqliteUsageClient {
   readonly #clock: () => Date;
   readonly #lookbackDays: number;
   readonly #cachePath?: string;
-  readonly #priceCatalog: RetailPriceCatalog;
   readonly #fileCache = new Map<string, CachedDatabaseFile>();
   #cacheLoaded = false;
 
@@ -60,7 +53,6 @@ export class AntigravitySqliteUsageClient {
     this.#clock = options.clock ?? (() => new Date());
     this.#lookbackDays = options.lookbackDays ?? 90;
     this.#cachePath = options.cachePath;
-    this.#priceCatalog = options.priceCatalog ?? OFFICIAL_PRICING_CATALOG;
   }
 
   async readUsage(
@@ -96,24 +88,11 @@ export class AntigravitySqliteUsageClient {
     // Sort observations deterministically by timestamp and dedupeKey
     usage.sort((a, b) => a.observedAt.localeCompare(b.observedAt) || a.id.localeCompare(b.id));
 
-    // Calculate retail equivalent costs for all observations
-    const { costs } = deriveRetailEquivalentCosts(
-      {
-        provider: { id: 'antigravity', displayName: 'Antigravity' },
-        billingDomains: [{ id: 'code-assist-subscription', displayName: 'Gemini Code Assist' }],
-        quotaBuckets: [],
-        usage,
-        costs: [],
-        observedAt: this.#clock().toISOString()
-      },
-      this.#priceCatalog
-    );
-
     await this.#persistCache();
 
     return {
       usage,
-      costs,
+      costs: [],
       complete: allComplete
     };
   }

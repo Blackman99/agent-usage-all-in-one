@@ -76,7 +76,7 @@ describe('AntigravitySqliteUsageClient', () => {
     expect(decoded.cacheReadTokens).toBe(5000);
   });
 
-  it('scans synthetic SQLite conversation databases and calculates retail equivalent costs', async () => {
+  it('scans synthetic SQLite conversation databases without deriving retail costs', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'antigravity-test-'));
     try {
       const convDir = join(tempDir, 'conversations');
@@ -154,8 +154,7 @@ describe('AntigravitySqliteUsageClient', () => {
         authority: 'local-observation'
       });
 
-      expect(result.costs.length).toBe(1);
-      expect(result.costs[0]?.amount).toBeCloseTo(0.01, 4);
+      expect(result.costs).toEqual([]);
 
       // Verify incremental cache hit on second read
       const cachedResult = await client.readUsage();

@@ -152,6 +152,59 @@ describe('retail-equivalent application tracer', () => {
     repository.close();
   });
 
+  it('does not re-emit retail costs for unchanged retained observations on refresh', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retail-skip-'));
+    workspaces.push(workspace);
+    const repository = new SqliteUsageRepository(join(workspace, 'usage.sqlite'));
+    const history = Array.from({ length: 40 }, (_, index) =>
+      fableObservation(`fable-event-${String(index).padStart(2, '0')}`)
+    );
+    let extra: ReturnType<typeof fableObservation> | null = null;
+    const connector: Connector = {
+      id: 'claude-pricing-fixture',
+      async collect() {
+        return {
+          provider: { id: 'claude-code', displayName: 'Claude Code' },
+          billingDomains: [{ id: 'subscription', displayName: 'Claude subscription' }],
+          quotaBuckets: [],
+          usage: extra ? [...history, extra] : history,
+          costs: [],
+          observedAt: NOW.toISOString()
+        };
+      }
+    };
+    let lastRetailCostCount = 0;
+    const saveSnapshot = repository.saveSnapshot.bind(repository);
+    repository.saveSnapshot = (snapshot, options) => {
+      lastRetailCostCount = snapshot.costs.filter(
+        (cost) => cost.kind === 'retail-equivalent'
+      ).length;
+      return saveSnapshot(snapshot, options);
+    };
+    const usage = new UsageApplication({ repository, connectors: [connector], clock: () => NOW });
+
+    await usage.refresh({ userInitiated: true });
+    expect(lastRetailCostCount).toBe(40);
+
+    await usage.refresh({ userInitiated: true });
+    expect(lastRetailCostCount).toBe(0);
+    expect(
+      (
+        await usage.getOverview({ window: '24h', auditEvidence: true })
+      ).providers[0].billingDomains[0].costs!.filter((cost) => cost.kind === 'retail-equivalent')
+    ).toHaveLength(40);
+
+    extra = fableObservation('fable-event-new');
+    await usage.refresh({ userInitiated: true });
+    expect(lastRetailCostCount).toBe(1);
+    expect(
+      (
+        await usage.getOverview({ window: '24h', auditEvidence: true })
+      ).providers[0].billingDomains[0].costs!.filter((cost) => cost.kind === 'retail-equivalent')
+    ).toHaveLength(41);
+    repository.close();
+  });
+
   it('derives, persists, windows, and restarts one auditable model-level amount', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'agent-usage-retail-tracer-'));
     workspaces.push(workspace);
@@ -382,6 +435,40 @@ describe('retail-equivalent application tracer', () => {
   });
 });
 
+function fableObservation(
+  id: string,
+  overrides: Partial<ReturnType<typeof fableObservationDefaults>> = {}
+) {
+  return {
+    ...fableObservationDefaults(id),
+    ...overrides
+  };
+}
+
+function fableObservationDefaults(id: string) {
+  return {
+    id,
+    billingDomainId: 'subscription',
+    model: 'Claude Fable 5',
+    observedAt: '2026-08-28T01:00:00.000Z',
+    inputTokens: 100_000,
+    outputTokens: 20_000,
+    reasoningTokens: 5_000,
+    cacheReadTokens: 10_000,
+    cacheWriteTokens: 0,
+    tokenSemantics: {
+      reasoning: 'included-in-output' as const,
+      cacheRead: 'separate' as const,
+      cacheWrite: 'separate' as const
+    },
+    modelAttribution: 'known' as const,
+    timePrecision: 'event' as const,
+    usageScope: 'this-mac' as const,
+    aggregationTemporality: 'delta' as const,
+    authority: 'local-observation' as const
+  };
+}
+
 function application(repository: SqliteUsageRepository): UsageApplication {
   const connector: Connector = {
     id: 'claude-pricing-fixture',
@@ -391,48 +478,16 @@ function application(repository: SqliteUsageRepository): UsageApplication {
         billingDomains: [{ id: 'subscription', displayName: 'Claude subscription' }],
         quotaBuckets: [],
         usage: [
-          {
-            id: 'fable-event',
-            billingDomainId: 'subscription',
-            model: 'Claude Fable 5',
-            observedAt: '2026-08-28T01:00:00.000Z',
-            inputTokens: 100_000,
-            outputTokens: 20_000,
-            reasoningTokens: 5_000,
-            cacheReadTokens: 10_000,
-            cacheWriteTokens: 0,
-            tokenSemantics: {
-              reasoning: 'included-in-output' as const,
-              cacheRead: 'separate' as const,
-              cacheWrite: 'separate' as const
-            },
-            modelAttribution: 'known' as const,
-            timePrecision: 'event' as const,
-            usageScope: 'this-mac' as const,
-            aggregationTemporality: 'delta' as const,
-            authority: 'local-observation' as const
-          },
-          {
-            id: 'unknown-event',
-            billingDomainId: 'subscription',
+          fableObservation('fable-event'),
+          fableObservation('unknown-event', {
             model: 'claude-unknown',
             observedAt: '2026-08-28T01:30:00.000Z',
             inputTokens: 50_000,
             outputTokens: 20_000,
             reasoningTokens: 0,
             cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            tokenSemantics: {
-              reasoning: 'included-in-output' as const,
-              cacheRead: 'separate' as const,
-              cacheWrite: 'separate' as const
-            },
-            modelAttribution: 'known' as const,
-            timePrecision: 'event' as const,
-            usageScope: 'this-mac' as const,
-            aggregationTemporality: 'delta' as const,
-            authority: 'local-observation' as const
-          }
+            cacheWriteTokens: 0
+          })
         ],
         costs: [
           {

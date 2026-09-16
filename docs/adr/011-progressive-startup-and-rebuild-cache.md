@@ -27,13 +27,19 @@ Explicit time/provider/model indexes are created by a background module only
 after the loopback listener is ready. Write-heavy maintenance is serialized
 behind provider collection: pricing backfill reads and writes bounded pages with
 an event-loop yield between pages, while index creation and retention compaction
-run together in a SQLite worker thread. This keeps cached HTTP reads responsive
-and prevents maintenance from racing connector snapshot writes.
+run together in a SQLite worker thread only when those jobs have work. Existing
+query indexes are reused, and compaction is skipped when no retained observation
+is older than 90 days. Dashboard Token and cost refresh bars follow price
+derivation, not connector collection or retention. Collection leaves pricing
+pending until every Provider finishes; that queued state is not a workbench
+refresh. This keeps cached HTTP reads responsive and prevents maintenance from
+racing connector snapshot writes.
 
-A hard rebuild is an asynchronous, explicitly confirmed operation. It ignores the
-transcript index, removes only derived retail-equivalent costs, recalculates them,
-and preserves actual, subscription, and provider-reported cost evidence. The web
-service remains available throughout.
+Incremental catalog backfill pages only observations that still lack a retail
+snapshot. A hard rebuild is an asynchronous, explicitly confirmed operation. It
+ignores the transcript index, removes only derived retail-equivalent costs,
+recalculates them, and preserves actual, subscription, and provider-reported cost
+evidence. The web service remains available throughout.
 
 ## Consequences
 

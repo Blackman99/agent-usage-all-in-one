@@ -928,6 +928,47 @@ export function mergeCatalogWithCustomRates(
   };
 }
 
+interface RetailPriceCatalogIndex {
+  byProviderAndModel: Map<string, RetailPriceCatalogEntry[]>;
+}
+
+const catalogIndexes = new WeakMap<object, RetailPriceCatalogIndex>();
+
+function catalogModelKey(providerId: string, model: string): string {
+  return `${providerId}\0${model.trim().toLowerCase()}`;
+}
+
+function indexRetailPriceCatalog(catalog: RetailPriceCatalog): RetailPriceCatalogIndex {
+  const cached = catalogIndexes.get(catalog);
+  if (cached) return cached;
+  const byProviderAndModel = new Map<string, RetailPriceCatalogEntry[]>();
+  for (const entry of catalog.entries) {
+    const models = new Set([entry.canonicalModel, ...entry.aliases]);
+    for (const model of models) {
+      const key = catalogModelKey(entry.providerId, model);
+      const list = byProviderAndModel.get(key);
+      if (list) list.push(entry);
+      else byProviderAndModel.set(key, [entry]);
+    }
+  }
+  const index = { byProviderAndModel };
+  catalogIndexes.set(catalog, index);
+  return index;
+}
+
+function matchingCatalogEntries(
+  index: RetailPriceCatalogIndex,
+  providerId: string,
+  observation: UsageObservation,
+  normalizedModel: string
+): RetailPriceCatalogEntry[] {
+  const entries = index.byProviderAndModel.get(catalogModelKey(providerId, normalizedModel)) ?? [];
+  return entries.filter(
+    (entry) =>
+      entry.billingDomainId === observation.billingDomainId || entry.billingDomainId === '*'
+  );
+}
+
 export function deriveRetailEquivalentCosts(
   snapshot: ConnectorSnapshot,
   catalog: RetailPriceCatalog = ANTHROPIC_PRICING_CATALOG,
@@ -935,8 +976,9 @@ export function deriveRetailEquivalentCosts(
 ): RetailPricingResult {
   const costs: CostRecord[] = [];
   const decisions: RetailPricingDecision[] = [];
+  const index = indexRetailPriceCatalog(catalog);
   for (const observation of snapshot.usage) {
-    const result = priceObservation(snapshot.provider.id, observation, catalog, calculatedAt);
+    const result = priceObservation(snapshot.provider.id, observation, index, calculatedAt);
     decisions.push(result.decision);
     if (result.cost) costs.push(result.cost);
   }
@@ -946,7 +988,7 @@ export function deriveRetailEquivalentCosts(
 function priceObservation(
   providerId: string,
   observation: UsageObservation,
-  catalog: RetailPriceCatalog,
+  index: RetailPriceCatalogIndex,
   calculatedAt: string
 ): { cost: CostRecord | null; decision: RetailPricingDecision } {
   const unavailable = (reason: RetailPricingUnavailableReason) => ({
@@ -963,13 +1005,11 @@ function priceObservation(
     return unavailable('model-unclassified');
   }
   const normalizedModel = normalized.model.trim().toLowerCase();
-  const matchingCandidates = catalog.entries.filter(
-    (entry) =>
-      entry.providerId === providerId &&
-      (entry.billingDomainId === observation.billingDomainId || entry.billingDomainId === '*') &&
-      [entry.canonicalModel, ...entry.aliases].some(
-        (model) => model.trim().toLowerCase() === normalizedModel
-      )
+  const matchingCandidates = matchingCatalogEntries(
+    index,
+    providerId,
+    observation,
+    normalizedModel
   );
 
   let selectedEntries: RetailPriceCatalogEntry[];

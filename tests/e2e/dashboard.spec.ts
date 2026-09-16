@@ -163,6 +163,27 @@ test('shows each Agent card as soon as that provider finishes loading', async ({
       body: JSON.stringify({ accepted: true })
     });
   });
+  await page.route('**/api/processing', async (route) => {
+    const module = (state: 'ready') => ({
+      state,
+      startedAt: '2026-08-28T02:00:00.000Z',
+      completedAt: '2026-08-28T02:00:01.000Z',
+      message: null
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        startedAt: '2026-08-28T02:00:00.000Z',
+        hardRebuild: false,
+        modules: {
+          discovery: module('ready'),
+          usage: module('ready'),
+          pricing: module('ready'),
+          retention: module('ready')
+        }
+      })
+    });
+  });
 
   await page.goto(freshLaunch.stdout.trim());
 
@@ -1328,9 +1349,116 @@ test('does not expose manual telemetry setup when Claude and Grok have no Token 
   await expect(page.getByText(/agent-usage telemetry-env/)).toHaveCount(0);
 });
 
-test('marks the workbench busy while background usage processing runs', async ({ page }) => {
+test('marks the workbench busy while background pricing runs', async ({ page }) => {
   const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
-  let usageState: 'running' | 'ready' = 'running';
+  let pricingState: 'running' | 'ready' = 'running';
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-30T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [],
+        providers: []
+      })
+    });
+  });
+  await page.route('**/api/processing', async (route) => {
+    const module = (state: 'pending' | 'running' | 'ready') => ({
+      state,
+      startedAt: state === 'pending' ? null : '2026-08-30T02:00:00.000Z',
+      completedAt: state === 'ready' ? '2026-08-30T02:00:01.000Z' : null,
+      message: null
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        startedAt: '2026-08-30T02:00:00.000Z',
+        hardRebuild: false,
+        modules: {
+          discovery: module('ready'),
+          usage: module('ready'),
+          pricing: module(pricingState),
+          retention: module('pending')
+        }
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 700))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  await expect(workbench.getByTestId('usage-headline')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
+  await expect(workbench.getByTestId('usage-headline')).toContainText('9.00');
+
+  pricingState = 'ready';
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toHaveCount(0);
+});
+
+test('does not keep workbench refresh bars up while connectors collect', async ({ page }) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  await page.route('**/api/doctor', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        generatedAt: '2026-08-30T02:00:00.000Z',
+        daemon: { status: 'healthy' },
+        database: { status: 'healthy' },
+        connectors: [],
+        providers: []
+      })
+    });
+  });
+  await page.route('**/api/processing', async (route) => {
+    const module = (state: 'pending' | 'running' | 'ready') => ({
+      state,
+      startedAt: state === 'pending' ? null : '2026-08-30T02:00:00.000Z',
+      completedAt: state === 'ready' ? '2026-08-30T02:00:01.000Z' : null,
+      message: null
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        startedAt: '2026-08-30T02:00:00.000Z',
+        hardRebuild: false,
+        modules: {
+          discovery: module('ready'),
+          usage: module('running'),
+          pricing: module('pending'),
+          retention: module('pending')
+        }
+      })
+    });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 700))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  await expect(workbench.getByTestId('usage-headline')).toBeVisible();
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toHaveCount(0);
+});
+
+test('hides workbench refresh bars once usage and pricing finish, even while retention still runs', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
   await page.route('**/api/doctor', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -1357,9 +1485,9 @@ test('marks the workbench busy while background usage processing runs', async ({
         hardRebuild: false,
         modules: {
           discovery: module('ready'),
-          usage: module(usageState),
+          usage: module('ready'),
           pricing: module('ready'),
-          retention: module('ready')
+          retention: module('running')
         }
       })
     });
@@ -1375,13 +1503,88 @@ test('marks the workbench busy while background usage processing runs', async ({
   await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
   const workbench = page.getByTestId('token-money-workbench');
   await expect(workbench.getByTestId('usage-headline')).toBeVisible();
-  // Cached numbers stay readable while the daemon keeps collecting.
-  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toBeVisible();
-  await expect(workbench.getByTestId('usage-headline')).toContainText('9.00');
-
-  usageState = 'ready';
   await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
   await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toHaveCount(0);
+});
+
+test('clears workbench refresh bars without waiting for agent-card reloads after a queued refresh', async ({
+  page
+}) => {
+  const freshLaunch = await runPackagedCli(['--home', home, '--no-open']);
+  const fixture = historyOverviewFixture('7d', 700) as {
+    providers: Array<Record<string, unknown>>;
+  };
+  const provider = fixture.providers[0];
+  let delayProviderReloads = false;
+  let releaseProvider = () => {};
+  const delayedProvider = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  await page.route('**/api/refresh**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true })
+    });
+  });
+  await page.route('**/api/processing', async (route) => {
+    const module = (state: 'ready') => ({
+      state,
+      startedAt: '2026-08-30T02:00:00.000Z',
+      completedAt: '2026-08-30T02:00:01.000Z',
+      message: null
+    });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        startedAt: '2026-08-30T02:00:00.000Z',
+        hardRebuild: false,
+        modules: {
+          discovery: module('ready'),
+          usage: module('ready'),
+          pricing: module('ready'),
+          retention: module('ready')
+        }
+      })
+    });
+  });
+  await page.route('**/api/overview/providers**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/overview/providers') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: '2026-08-28T02:00:00.000Z',
+          providers: [{ id: 'history-agent', displayName: 'History Agent' }]
+        })
+      });
+      return;
+    }
+    if (pathname.endsWith('/history-agent')) {
+      if (delayProviderReloads) await delayedProvider;
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(provider) });
+      return;
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.route('**/api/overview**', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(historyOverviewFixture('7d', 700))
+    });
+  });
+
+  await page.goto(freshLaunch.stdout.trim());
+  await page.getByRole('tab', { name: 'Tokens & model costs' }).click();
+  const workbench = page.getByTestId('token-money-workbench');
+  await expect(workbench.getByTestId('usage-headline')).toBeVisible();
+  delayProviderReloads = true;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+  await expect(workbench.getByTestId('workbench-summary-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-analysis-refresh-status')).toHaveCount(0);
+  await expect(workbench.getByTestId('workbench-breakdown-refresh-status')).toHaveCount(0);
+  releaseProvider();
 });
 
 test('keeps the workbench steady during manual and window refreshes', async ({ page }) => {

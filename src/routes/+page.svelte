@@ -169,14 +169,11 @@
           providers: Object.values(agentProviders)
         } as UsageOverview);
   $: effectiveOverview = activeDashboardView === 'agents' ? agentViewOverview : overview;
-  $: processingBusy = processing
-    ? Object.values(processing.modules).some(
-        (module) => module.state === 'pending' || module.state === 'running'
-      )
-    : false;
-  // A manual refresh only queues background collection, so the workbench stays
-  // busy until that work lands rather than for the request alone.
-  $: workbenchBusy = workbenchLoading || refreshing || processingBusy;
+  // Token and cost bars follow price derivation, not connector collection or
+  // retention. Collection leaves pricing pending until every Provider finishes,
+  // and that wait must not keep these panels busy.
+  $: workbenchBusy =
+    workbenchLoading || refreshing || processing?.modules.pricing.state === 'running';
 
   onMount(async () => {
     initTheme();
@@ -356,7 +353,6 @@
           : '/api/refresh?background=true';
       const response = await fetch(endpoint, { method: 'POST' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await Promise.all([loadOverview(), loadUsageWall(), loadAgentProviders(), loadDiagnostics()]);
       await loadProcessing();
       startProcessingPolling();
       refreshError = false;
@@ -367,6 +363,15 @@
         refreshing = false;
         scheduleAutomaticRecovery();
       }
+    }
+    if (destroyed || refreshError) return;
+    void loadDiagnostics();
+    // Connector collection can take a long time. Cached Agent cards, the
+    // workbench, and the usage wall stay put until that module finishes.
+    if (!processingModuleBusy(processing, 'usage')) {
+      void loadAgentProviders();
+      void loadOverview();
+      void loadUsageWall();
     }
   }
 
@@ -587,7 +592,6 @@
       }
       if (processingModuleBecameReady(previous, next, 'retention')) {
         void loadRetention();
-        void loadUsageWall();
       }
       hardRebuilding =
         next.hardRebuild &&
@@ -617,6 +621,19 @@
       previous !== null &&
       previous.modules[moduleId].state !== 'ready' &&
       next.modules[moduleId].state === 'ready'
+    );
+  }
+
+  function processingModuleBusy(
+    status: ProcessingStatus | null,
+    ...moduleIds: Array<keyof ProcessingStatus['modules']>
+  ): boolean {
+    return (
+      status !== null &&
+      moduleIds.some((moduleId) => {
+        const state = status.modules[moduleId].state;
+        return state === 'pending' || state === 'running';
+      })
     );
   }
 

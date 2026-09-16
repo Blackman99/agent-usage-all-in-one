@@ -38,6 +38,7 @@ import type {
   TokenTotalDerivation,
   TokenTotals,
   TokenUsageScope,
+  UsageObservation,
   UsageOverview,
   UsageQuery,
   UsageRepository,
@@ -50,6 +51,11 @@ import { clampPercent } from '../core/quota-normalization.js';
 import type { ConnectorStatusRecord, ConnectorSetupState } from '../core/onboarding-types.js';
 
 const FRESHNESS_WINDOW_MS = 15 * 60 * 1000;
+const SQLITE_VARIABLE_CHUNK = 400;
+const USAGE_PRICING_INPUT_COLUMNS = `id, billing_domain_id, model, observed_at, total_tokens, input_tokens,
+  output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens, cache_write_5m_tokens,
+  cache_write_1h_tokens, unclassified_tokens, reasoning_semantics, cache_read_semantics,
+  cache_write_semantics, model_attribution, time_precision, aggregation_temporality`;
 const QUERY_INDEXES_SQL = `
   CREATE INDEX IF NOT EXISTS usage_observed_at_idx
     ON usage_observations(observed_at);
@@ -411,6 +417,25 @@ function pricingBackfillSnapshots(rows: PricingBackfillRow[]): ConnectorSnapshot
   return [...snapshots.values()];
 }
 
+function unpricedRetailPredicate(alias: string): string {
+  return `NOT EXISTS (
+    SELECT 1 FROM cost_records priced
+    WHERE priced.provider_id = ${alias}.provider_id
+      AND priced.usage_observation_id = ${alias}.id
+      AND priced.kind = 'retail-equivalent'
+  )`;
+}
+
+function chunked<T>(items: readonly T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  if (items.length <= size) return [items as T[]];
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 interface MutableTokenEvidence {
   recordedTokens: number;
   sourceReportedTokens: number;
@@ -734,14 +759,9 @@ export class SqliteUsageRepository implements UsageRepository {
            usage_scope = excluded.usage_scope,
            aggregation_temporality = excluded.aggregation_temporality`
       );
-      const existingPricedUsageStatement = this.#database.prepare(
-        `SELECT billing_domain_id, model, observed_at, total_tokens, input_tokens, output_tokens,
-                reasoning_tokens, cache_read_tokens, cache_write_tokens, cache_write_5m_tokens,
-                cache_write_1h_tokens, unclassified_tokens,
-                reasoning_semantics, cache_read_semantics, cache_write_semantics, model_attribution,
-                time_precision, aggregation_temporality
-         FROM usage_observations
-         WHERE provider_id = ? AND id = ?`
+      const existingById = this.#usagePricingInputs(
+        snapshot.provider.id,
+        snapshot.usage.map((observation) => observation.id)
       );
       const deleteDerivedCostsStatement = this.#database.prepare(
         `DELETE FROM cost_records
@@ -749,8 +769,7 @@ export class SqliteUsageRepository implements UsageRepository {
       );
       for (const observation of snapshot.usage) {
         const normalized = normalizeTokenObservation(observation);
-        const existing = existingPricedUsageStatement.get(snapshot.provider.id, normalized.id) as
-          Record<string, unknown> | undefined;
+        const existing = existingById.get(normalized.id);
         if (existing && pricingInputsChanged(existing, normalized)) {
           deleteDerivedCostsStatement.run(snapshot.provider.id, normalized.id);
         }
@@ -926,6 +945,7 @@ export class SqliteUsageRepository implements UsageRepository {
          JOIN billing_domains b
            ON b.provider_id = u.provider_id AND b.id = u.billing_domain_id
          WHERE ${additiveUsagePredicate('u')}
+           AND ${unpricedRetailPredicate('u')}
          ORDER BY u.provider_id, u.observed_at, u.id`
       )
       .all() as unknown as PricingBackfillRow[];
@@ -954,6 +974,7 @@ export class SqliteUsageRepository implements UsageRepository {
          JOIN billing_domains b
            ON b.provider_id = u.provider_id AND b.id = u.billing_domain_id
          WHERE ${additiveUsagePredicate('u')}
+           AND ${unpricedRetailPredicate('u')}
            ${cursorPredicate}
          ORDER BY u.provider_id, u.observed_at, u.id
          LIMIT ?`
@@ -974,6 +995,40 @@ export class SqliteUsageRepository implements UsageRepository {
             }
           : null
     };
+  }
+
+  observationsNeedingRetailDerivation(
+    providerId: string,
+    observations: UsageObservation[]
+  ): UsageObservation[] {
+    if (observations.length === 0) return [];
+    const existing = this.#usagePricingInputs(
+      providerId,
+      observations.map((observation) => observation.id)
+    );
+    return observations.filter((observation) => {
+      const normalized = normalizeTokenObservation(observation);
+      const prior = existing.get(normalized.id);
+      return !prior || pricingInputsChanged(prior, normalized);
+    });
+  }
+
+  #usagePricingInputs(
+    providerId: string,
+    observationIds: string[]
+  ): Map<string, Record<string, unknown>> {
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const ids of chunked(observationIds, SQLITE_VARIABLE_CHUNK)) {
+      const rows = this.#database
+        .prepare(
+          `SELECT ${USAGE_PRICING_INPUT_COLUMNS}
+           FROM usage_observations
+           WHERE provider_id = ? AND id IN (${ids.map(() => '?').join(', ')})`
+        )
+        .all(providerId, ...ids) as Array<Record<string, unknown>>;
+      for (const row of rows) byId.set(String(row.id), row);
+    }
+    return byId;
   }
 
   saveDerivedCosts(providerId: string, costs: CostRecord[]): void {
@@ -1610,6 +1665,7 @@ export class SqliteUsageRepository implements UsageRepository {
 
   compactUsageHistory(now: Date): RetentionStatus {
     const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    if (!this.#hasObservationsOlderThan(cutoff)) return this.getRetentionStatus();
     this.#database.exec('BEGIN IMMEDIATE');
     try {
       this.#database.prepare(RETENTION_AGGREGATE_SQL).run(cutoff);
@@ -1702,6 +1758,7 @@ export class SqliteUsageRepository implements UsageRepository {
   }
 
   async ensureQueryIndexes(): Promise<void> {
+    if (this.#queryIndexesReady()) return;
     await runDatabaseWorker<void>({
       databasePath: this.#databasePath,
       operation: 'indexes',
@@ -1711,6 +1768,7 @@ export class SqliteUsageRepository implements UsageRepository {
 
   async maintainUsageHistory(now: Date): Promise<RetentionStatus> {
     const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    if (!this.#hasObservationsOlderThan(cutoff)) return this.getRetentionStatus();
     return runDatabaseWorker<RetentionStatus>({
       databasePath: this.#databasePath,
       operation: 'retention',
@@ -1719,6 +1777,20 @@ export class SqliteUsageRepository implements UsageRepository {
       cutoff,
       now: now.toISOString()
     });
+  }
+
+  #queryIndexesReady(): boolean {
+    const indexes = this.#database
+      .prepare("PRAGMA index_list('usage_observations')")
+      .all() as Array<{ name: string }>;
+    return indexes.some((index) => index.name === 'usage_provider_model_time_idx');
+  }
+
+  #hasObservationsOlderThan(cutoff: string): boolean {
+    const row = this.#database
+      .prepare('SELECT 1 AS present FROM usage_observations WHERE observed_at < ? LIMIT 1')
+      .get(cutoff) as { present: number } | undefined;
+    return row !== undefined;
   }
 
   close(): void {

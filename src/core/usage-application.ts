@@ -146,23 +146,16 @@ export class UsageApplication {
       let cursor = null;
       do {
         const page = this.#repository.getRetailPricingBackfillPage(cursor, 250);
-        for (const snapshot of page.snapshots) {
-          const costs = deriveRetailEquivalentCosts(
-            snapshot,
-            this.#priceCatalog,
-            calculatedAt
-          ).costs;
-          if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
-        }
+        this.#saveDerivedRetailCosts(page.snapshots, calculatedAt);
         cursor = page.nextCursor;
         if (cursor) await yieldToEventLoop();
       } while (cursor);
     } else {
-      for (const snapshot of this.#repository.getRetailPricingBackfillSnapshots?.() ?? []) {
-        const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
-        if (costs.length > 0) this.#repository.saveDerivedCosts(snapshot.provider.id, costs);
-        await yieldToEventLoop();
-      }
+      this.#saveDerivedRetailCosts(
+        this.#repository.getRetailPricingBackfillSnapshots?.() ?? [],
+        calculatedAt
+      );
+      await yieldToEventLoop();
     }
     this.#repository.saveApplicationState?.(catalogVersionKey, this.#priceCatalog.version);
   }
@@ -818,11 +811,28 @@ export class UsageApplication {
     return result;
   }
 
+  #saveDerivedRetailCosts(snapshots: ConnectorSnapshot[], calculatedAt: string): void {
+    if (!this.#priceCatalog) return;
+    for (const snapshot of snapshots) {
+      const costs = deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, calculatedAt).costs;
+      if (costs.length > 0) this.#repository.saveDerivedCosts?.(snapshot.provider.id, costs);
+    }
+  }
+
   #withRetailCosts(snapshot: ConnectorSnapshot): ConnectorSnapshot {
-    const retailCosts = this.#priceCatalog
-      ? deriveRetailEquivalentCosts(snapshot, this.#priceCatalog, this.#clock().toISOString()).costs
-      : [];
-    return { ...snapshot, costs: [...snapshot.costs, ...retailCosts] };
+    if (!this.#priceCatalog) return snapshot;
+    const usage = this.#repository.observationsNeedingRetailDerivation
+      ? this.#repository.observationsNeedingRetailDerivation(snapshot.provider.id, snapshot.usage)
+      : snapshot.usage;
+    if (usage.length === 0) return snapshot;
+    const retailCosts = deriveRetailEquivalentCosts(
+      { ...snapshot, usage },
+      this.#priceCatalog,
+      this.#clock().toISOString()
+    ).costs;
+    return retailCosts.length === 0
+      ? snapshot
+      : { ...snapshot, costs: [...snapshot.costs, ...retailCosts] };
   }
 
   async discoverConnectors(): Promise<ConnectorStatus[]> {

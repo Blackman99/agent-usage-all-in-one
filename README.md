@@ -57,11 +57,13 @@ Cached results are available immediately while discovery, provider usage, model
 pricing, and retention run as independent background modules. Each dashboard tab
 shows only its own update indicator and completed sections remain usable.
 
-Transcript scans use a persistent, path-redacted file index. Historical retail
-pricing is recalculated only when the pricing catalog version changes. SQLite
-time/provider/model indexes and retention compaction run in a worker after
-provider collection, while price backfill processes bounded pages. Settings
-includes an explicitly confirmed
+Transcript scans use a persistent, path-redacted file index. Refresh derives API
+retail equivalent only for new or changed Token observations. Historical retail
+pricing backfills remaining unpriced observations when the pricing catalog
+version changes. SQLite time/provider/model indexes and retention compaction run
+in a worker after provider collection only when those jobs have work. Price
+backfill processes bounded pages. Token and cost refresh bars follow price
+derivation, not connector collection or retention. Settings includes an explicitly confirmed
 **Hard rebuild all data** action for troubleshooting. It ignores these caches, can
 use substantial resources, and may take a long time without blocking the web UI.
 
