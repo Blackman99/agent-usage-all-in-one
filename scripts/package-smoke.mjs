@@ -97,8 +97,15 @@ try {
     ['--home', applicationHome, 'retention', '--compact', '--json'],
     { timeout: 10_000 }
   );
-  if (!JSON.parse(compacted.stdout).lastCompactedAt) {
+  const compactedStatus = JSON.parse(compacted.stdout);
+  if (compactedStatus.rawRetentionDays !== 90) {
     throw new Error('Packaged retention compaction did not complete');
+  }
+  if (
+    compactedStatus.lastCompactedAt !== null &&
+    typeof compactedStatus.lastCompactedAt !== 'string'
+  ) {
+    throw new Error('Packaged retention compaction status is invalid');
   }
 
   await execute(executable, ['--home', applicationHome, 'clear', '--yes'], {
