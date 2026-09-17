@@ -1,5 +1,15 @@
 # agent-usage-all-in-one
 
+## 0.10.0
+
+### Minor Changes
+
+- fb08575: Keep every known model separate by agent and billing domain in Tokens & model costs charts. The share pie, line trend, stacked trend, and treemap no longer merge matching model names across identities.
+
+### Patch Changes
+
+- 50ad83c: Speed up refresh token cost calculation by pricing only new or changed observations, indexing the retail catalog, and backfilling unpriced history instead of rewriting priced snapshots. Token and cost refresh bars follow price derivation instead of waiting for connector collection or retention, and retention compaction is skipped when no observation is older than 90 days. Brand-image requests keep a longer event-loop yield before refresh persist occupies the thread.
+
 ## 0.9.0
 
 ### Minor Changes
