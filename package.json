@@ -92,7 +92,7 @@
     "tslib": "latest",
     "tsup": "latest",
     "tsx": "latest",
-    "typescript": "~6.0.0",
+    "typescript": "~7.0.2",
     "typescript-eslint": "latest",
     "vite": "latest",
     "vitest": "latest"
